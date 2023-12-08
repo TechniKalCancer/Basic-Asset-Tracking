@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asset Check-in/Check-out</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Asset Check-in/Check-out</h1>
+    <input type="text" id="barcode" placeholder="Scan Barcode">
+    <button id="toggle-btn">Toggle Action</button>
+    <table>
+        <thead>
+            <tr>
+                <th>Asset</th>
+                <th>Check-in</th>
+                <th>Check-out</th>
+            </tr>
+        </thead>
+        <tbody id="history-table"></tbody>
+    </table>
+    <script src="/static/script.js"></script>
+</body>
+</html>

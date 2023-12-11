@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from csv import DictReader, DictWriter
+from ast import literal_eval  # Import literal_eval to safely evaluate the string as a Python expression
 from datetime import datetime
 
 app = Flask(__name__)
@@ -25,12 +26,23 @@ def get_asset_by_id(data, asset_id):
     return None
 
 def add_event(asset, action):
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %f')[:-6]
     event = {'timestamp': timestamp, 'action': action}
-    asset['history'].append(event)
+
+    # Check if the asset already has a 'history' field and it's a string
+    if 'history' in asset and isinstance(asset['history'], str):
+        # Convert the string representation to a list of dictionaries
+        asset['history'] = literal_eval(asset['history'])
+
+    # Check if the asset already has a 'history' field
+    if 'history' in asset and isinstance(asset['history'], list):
+        asset['history'].append(event)
+    else:
+        asset['history'] = [event]
+
 
 def add_new_asset(data, asset_id):
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %f')[:-6]
     new_asset = {'asset': asset_id, 'history': [{'timestamp': timestamp, 'action': 'checkin'}]}
     data.append(new_asset)
     update_csv(data)
@@ -41,6 +53,11 @@ def get_assets():
     with open(data_file, 'r') as f:
         reader = DictReader(f)
         data = list(reader)
+
+        # Convert the string representation to a list of dictionaries
+        for item in data:
+            item['history'] = literal_eval(item['history'])
+
     return jsonify(data)
 
 @app.route('/api/assets/<string:asset_id>', methods=['POST'])
@@ -81,3 +98,4 @@ def serve_static(filename):
 if __name__ == '__main__':
     # Use waitress to serve the app
     app.run(debug=True)
+    

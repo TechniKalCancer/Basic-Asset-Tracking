@@ -48,6 +48,36 @@ def add_new_asset(data, asset_id):
     update_csv(data)
     return new_asset
 
+def is_checked_in(item):
+    return item['check_in'] and not item['check_out']
+
+def update_asset(asset_id):
+    try:
+        with open(data_file, 'r') as f:
+            reader = DictReader(f)
+            data = list(reader)
+
+        action = request.get_json()['action']
+
+        existing_asset = get_asset_by_id(data, asset_id)
+
+        if existing_asset:
+            timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            event = {'timestamp': timestamp, 'action': action}
+            existing_asset['history'].append(event)
+        else:
+            timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            new_asset = {'asset': asset_id, 'check_in': timestamp, 'check_out': None, 'history': [{'timestamp': timestamp, 'action': action}]}
+            data.append(new_asset)
+
+        update_csv(data)
+
+        return jsonify({'message': 'Asset updated successfully', 'asset': existing_asset or new_asset}), 200
+
+    except Exception as e:
+        print(f"Error updating asset: {e}")
+        return jsonify({'error': 'Internal Server Error'}), 500
+
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
     with open(data_file, 'r') as f:
@@ -69,21 +99,43 @@ def update_asset(asset_id):
 
         action = request.get_json()['action']
 
-        existing_asset = get_asset_by_id(data, asset_id)
+        existing_asset = None
+        for item in data:
+            if item['asset'] == asset_id:
+                existing_asset = item
+                break
 
         if existing_asset:
-            add_event(existing_asset, action)
-        else:
-            new_asset = add_new_asset(data, asset_id)
-            existing_asset = new_asset
+            if action == 'checkin':
+                if is_checked_in(existing_asset):
+                    # Asset is already checked in, create a new row
+                    new_row = existing_asset.copy()
+                    new_row['check_out'] = None
+                    new_row['check_in'] = datetime.now().isoformat()
+                    data.append(new_row)
+                else:
+                    # Asset is checked out, update the existing row
+                    existing_asset['check_in'] = datetime.now().isoformat()
+            elif action == 'checkout':
+                # Asset is checked in, update the existing row
+                existing_asset['check_out'] = datetime.now().isoformat()
 
+            update_csv(data)
+
+            return jsonify({'message': 'Asset updated successfully', 'asset': existing_asset}), 200
+
+        # If the asset does not exist, create a new row
+        timestamp = datetime.now().isoformat()
+        new_asset = {'asset': asset_id, 'check_in': timestamp if action == 'checkin' else None, 'check_out': timestamp if action == 'checkout' else None}
+        data.append(new_asset)
         update_csv(data)
 
-        return jsonify({'message': 'Asset updated successfully', 'asset': existing_asset}), 200
+        return jsonify({'message': 'Asset added successfully', 'asset': new_asset}), 200
 
     except Exception as e:
         print(f"Error updating asset: {e}")
         return jsonify({'error': 'Internal Server Error'}), 500
+
 
 # Add route for the root path
 @app.route('/')

@@ -1,102 +1,94 @@
-const assetInput = document.getElementById('barcode'); // Asset input field for check-in/check-out
-const searchInput = document.getElementById('searchInput'); // Search input field for asset history
-const toggleBtn = document.getElementById('toggle-btn'); // Button to toggle between check-in and check-out
-const historyTable = document.getElementById('history-table'); // Table to display asset history
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('JavaScript file loaded'); // Initial log statement
 
-let currentAction = 'checkin'; // Default action
+    const toggleBtn = document.getElementById('toggle-btn');
+    const barcodeInput = document.getElementById('barcode');
+    const notification = document.getElementById('notification');
+    const historyTableBody = document.querySelector('#history-table tbody');
+    const searchBtn = document.getElementById('searchBtn');
+    const searchInput = document.getElementById('searchInput');
 
-// Function to update the asset history table
-function updateHistoryTable(data) {
-    // Get the tbody element of the table
-    const tbody = document.querySelector('#history-table tbody');
-    
-    // Clear existing content in tbody
-    tbody.innerHTML = '';
+    const showNotification = (message) => {
+        notification.textContent = message;
+        notification.style.display = 'block';
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 5000);
+    };
 
-    // Add new rows to tbody based on the fetched data
-    data.forEach(item => {
-        const row = document.createElement('tr');
-        Object.values(item).forEach(value => {
-            const cell = document.createElement('td');
-            cell.textContent = value;
-            row.appendChild(cell);
-        });
-        tbody.appendChild(row);
-    });
-}
+    const handleCheckInOut = (changeButtonText) => {
+        const assetId = barcodeInput.value;
+        const action = toggleBtn.textContent.includes('Check In') ? 'checkin' : 'checkout';
 
-
-// Function to fetch all assets and update the table
-function fetchAllAssets() {
-    fetch('/api/assets')
-        .then(response => response.json())
-        .then(data => updateHistoryTable(data))
-        .catch(error => console.error('Error fetching assets:', error));
-}
-
-// Function to update asset status (add/check-in/check-out)
-function updateAssetStatus(assetId, action) {
-    fetch(`/api/assets/${assetId}`, {
-        method: 'POST',
-        body: JSON.stringify({ action }),
-        headers: {'Content-Type': 'application/json'},
-    })
-    .then(response => {
-        if (!response.ok) throw new Error('Failed to update asset status');
-        return response.json();
-    })
-    .then(() => fetchAllAssets()) // Fetch and update all assets after successful operation
-    .catch(error => console.error('Error:', error));
-}
-
-// Function to fetch history for a specific asset
-function fetchAssetHistory(assetId) {
-    fetch(`/asset_history?asset_id=${assetId}`)
+        fetch(`/api/assets/${assetId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ action })
+        })
         .then(response => response.json())
         .then(data => {
-            if (data && data.history) {
-                updateHistoryTable(data.history);
+            console.log('API Response:', data); // Debugging line
+            if (data.error) {
+                showNotification(`Error: ${data.error}`);
             } else {
-                console.error('No history found or invalid response:', data);
+                showNotification(`Asset ${action} successfully: ${assetId}`);
+                if (changeButtonText) {
+                    toggleBtn.textContent = action === 'checkin' ? 'Check Out' : 'Check In';
+                }
+                fetchAssets();  // Refresh the asset list
             }
         })
-        .catch(error => console.error('Error fetching asset history:', error));
-}
+        .catch(error => {
+            showNotification(`Error: ${error}`);
+        });
+    };
 
+    const fetchAssets = () => {
+        fetch('/api/assets')
+        .then(response => response.json())
+        .then(data => {
+            console.log('Fetched Assets:', data); // Debugging line
+            historyTableBody.innerHTML = '';
+            data.forEach(asset => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${asset.asset_id}</td>
+                    <td>${asset.check_in ? new Date(asset.check_in).toLocaleString() : ''}</td>
+                    <td>${asset.check_out ? new Date(asset.check_out).toLocaleString() : ''}</td>
+                `;
+                historyTableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            showNotification(`Error fetching assets: ${error}`);
+        });
+    };
 
-
-
-
-// Event listener for asset input (check-in/check-out)
-assetInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        const assetId = assetInput.value.trim();
-        if (assetId) {
-            updateAssetStatus(assetId, currentAction);
-            assetInput.value = '';
-        } else {
-            console.error('Asset ID cannot be empty');
+    const searchAssetHistory = () => {
+        const assetId = searchInput.value;
+        if (!assetId) {
+            showNotification('Please enter an Asset ID to search.');
+            return;
         }
-    }
+    
+        window.location.href = `/asset_history?asset_id=${assetId}`;
+    };
+    
+    searchBtn.addEventListener('click', searchAssetHistory);
+
+    toggleBtn.addEventListener('click', () => handleCheckInOut(true));
+
+    barcodeInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();  // Prevent form submission
+            handleCheckInOut(false);
+        }
+    });
+
+    searchBtn.addEventListener('click', searchAssetHistory);
+
+    // Fetch assets on page load
+    fetchAssets();
 });
-
-// Event listener for search input (asset history)
-searchBtn.addEventListener('click', () => {
-    const assetId = searchInput.value.trim();
-    if (assetId) {
-        fetchAssetHistory(assetId); // Function to fetch the history of a specific asset
-    } else {
-        console.error('Asset ID cannot be empty');
-    }
-});
-
-// Event listener for toggle button
-toggleBtn.addEventListener('click', () => {
-    currentAction = currentAction === 'checkin' ? 'checkout' : 'checkin';
-    toggleBtn.textContent = currentAction === 'checkin' ? 'Check In' : 'Check Out';
-});
-
-// Initial fetch to populate table
-fetchAllAssets();
-

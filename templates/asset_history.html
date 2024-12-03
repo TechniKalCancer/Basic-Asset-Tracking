@@ -4,24 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asset History</title>
+    <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
-    <h1>Asset History for Asset {{ asset_id }}</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>Timestamp</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for event in asset_history %}
+    <div class="container">
+        <div class="logo">
+            <img src="static/logo.png" alt="Work Logo">
+        </div>
+
+        <h1>Asset History for Asset {{ asset_id }}</h1>
+        <table>
+            <thead>
                 <tr>
-                    <td>{{ event.timestamp }}</td>
-                    <td>{{ event.action }}</td>
+                    <th>Asset</th>
+                    <th>Action</th>
+                    <th>Time</th>
                 </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                {% for event in asset_history %}
+                    <tr>
+                        <td>{{ asset_id }}</td>
+                        <td>{{ event.action }}</td>
+                        <td>{{ event.timestamp }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <a href="{{ url_for('index') }}">Back to Asset List</a>
+    </div>
 </body>
 </html>

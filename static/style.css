@@ -9,6 +9,16 @@ body {
     width: 80%;
     margin: auto;
     overflow: hidden;
+    text-align: center;
+}
+
+.logo img {
+    max-width: 200px;
+    margin: 20px auto;
+}
+
+.input-section {
+    margin: 20px 0;
 }
 
 table {
@@ -18,7 +28,7 @@ table {
 }
 
 table, th, td {
-    border: 1px solid #ddd;
+    border: 1px solid #CBB24C;
 }
 
 th, td {
@@ -27,10 +37,28 @@ th, td {
 }
 
 th {
-    background-color: #4CAF50;
-    color: white;
+    background-color: #2e4258;
+    color: #ffffff;
 }
 
 tr:nth-child(even) {
-    background-color: #f2f2f2;
+    background-color: #CBB24C;
+}
+
+tr:nth-child(odd) {
+    background-color: #f4f4f4;
+}
+
+/* Notification styles */
+.notification {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: #4CAF50;
+    color: white;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
 }

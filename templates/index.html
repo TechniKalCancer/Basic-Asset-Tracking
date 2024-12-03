@@ -5,39 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asset Tracking System</title>
     <link rel="stylesheet" href="static/style.css">
-    <!-- Add any additional CSS or head content here -->
+    <link rel="icon" href="static/favicon.ico" type="image/x-icon">
 </head>
 <body>
+    <div class="container">
+        <div class="logo">
+            <img src="static/logo.png" alt="Work Logo">
+        </div>
 
-    <!-- Asset Input for Check-in/Check-out -->
-    <div>
-        <label for="barcode">Asset ID:</label>
-        <input type="text" id="barcode" placeholder="Scan or enter asset ID">
-        <button id="toggle-btn">Check In</button>
+        <!-- Asset Input for Check-in/Check-out -->
+        <div class="input-section">
+            <label for="barcode">Asset ID:</label>
+            <input type="text" id="barcode" placeholder="Scan or enter asset ID">
+            <button id="toggle-btn">Check In</button>
+        </div>
+
+        <!-- Search Input for Asset History -->
+        <div class="input-section">
+          <label for="searchInput">Search Asset History:</label>
+          <input type="text" id="searchInput" placeholder="Enter Asset ID to search">
+          <button id="searchBtn">Search</button>
+        </div>
+
+        <table id="history-table">
+            <thead>
+                <tr>
+                    <th>Asset ID</th>
+                    <th>Check-In Time</th>
+                    <th>Check-Out Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Asset history will be populated here -->
+            </tbody>
+        </table>
     </div>
 
-    <!-- Search Input for Asset History -->
-    <div>
-        <label for="searchInput">Search Asset History:</label>
-        <input type="text" id="searchInput" placeholder="Enter Asset ID to search">
-        <button id="searchBtn">Search</button>
-    </div>
+    <!-- Notification for check-in/check-out -->
+    <div id="notification" class="notification"></div>
 
-    <table id="history-table">
-        <thead>
-            <tr>
-                <th>Asset ID</th>
-                <th>Check-In Time</th>
-                <th>Check-Out Time</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- Asset history will be populated here -->
-        </tbody>
-    </table>
-
-    <!-- Add your JavaScript file reference -->
     <script src="static/script.js"></script>
-
 </body>
 </html>

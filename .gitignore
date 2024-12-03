@@ -1,0 +1,28 @@
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore environment variables file
+.env
+
+# Ignore virtual environment directory
+venv/
+
+# Ignore any local development files
+*.log
+*.sqlite3
+
+# Ignore node_modules directory
+node_modules/
+
+# Ignore static files
+static/*
+!static/logo.png
+!static/style.css
+!static/script.js
+
+# Ignore templates
+templates/*
+!templates/index.html
+!templates/asset.html
+!templates/asset_history.html

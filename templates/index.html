@@ -6,6 +6,23 @@
     <title>Asset Tracking System</title>
     <link rel="stylesheet" href="static/style.css">
     <link rel="icon" href="static/favicon.ico" type="image/x-icon">
+    <style>
+        .tab {
+            display: none;
+        }
+        .tab.active {
+            display: block;
+        }
+        .tab-buttons {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .tab-buttons button {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -13,37 +30,87 @@
             <img src="static/logo.png" alt="Work Logo">
         </div>
 
-        <!-- Asset Input for Check-in/Check-out -->
-        <div class="input-section">
-            <label for="barcode">Asset ID:</label>
-            <input type="text" id="barcode" placeholder="Scan or enter asset ID">
-            <button id="toggle-btn">Check In</button>
+        <!-- Tab Buttons -->
+        <div class="tab-buttons">
+            <button onclick="openTab('checkin')">Check In</button>
+            <button onclick="openTab('checkout')">Check Out</button>
+            <button onclick="openTab('search')">Search Asset History</button>
         </div>
 
-        <!-- Search Input for Asset History -->
-        <div class="input-section">
-          <label for="searchInput">Search Asset History:</label>
-          <input type="text" id="searchInput" placeholder="Enter Asset ID to search">
-          <button id="searchBtn">Search</button>
+        <!-- Check-In Tab -->
+        <div id="checkin" class="tab active">
+            <div class="input-section">
+                <label for="barcode-checkin">Asset ID:</label>
+                <input type="text" id="barcode-checkin" placeholder="Scan or enter asset ID">
+                <button id="checkin-btn">Check In</button>
+            </div>
+            <table id="checkin-table">
+                <thead>
+                    <tr>
+                        <th>Asset ID</th>
+                        <th>Check-In Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Check-in history will be populated here -->
+                </tbody>
+            </table>
         </div>
 
-        <table id="history-table">
-            <thead>
-                <tr>
-                    <th>Asset ID</th>
-                    <th>Check-In Time</th>
-                    <th>Check-Out Time</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- Asset history will be populated here -->
-            </tbody>
-        </table>
+        <!-- Check-Out Tab -->
+        <div id="checkout" class="tab">
+            <div class="input-section">
+                <label for="barcode-checkout">Asset ID:</label>
+                <input type="text" id="barcode-checkout" placeholder="Scan or enter asset ID">
+                <button id="checkout-btn">Check Out</button>
+            </div>
+            <table id="checkout-table">
+                <thead>
+                    <tr>
+                        <th>Asset ID</th>
+                        <th>Check-Out Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Check-out history will be populated here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Search Asset History Tab -->
+        <div id="search" class="tab">
+            <div class="input-section">
+                <label for="searchInput">Search Asset History:</label>
+                <input type="text" id="searchInput" placeholder="Enter Asset ID to search">
+                <button id="searchBtn">Search</button>
+            </div>
+            <table id="history-table">
+                <thead>
+                    <tr>
+                        <th>Asset ID</th>
+                        <th>Check-In Time</th>
+                        <th>Check-Out Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Asset history will be populated here -->
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Notification for check-in/check-out -->
     <div id="notification" class="notification"></div>
 
     <script src="static/script.js"></script>
+    <script>
+        function openTab(tabId) {
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.getElementById(tabId).classList.add('active');
+        }
+    </script>
 </body>
 </html>

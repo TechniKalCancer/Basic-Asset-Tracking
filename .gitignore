@@ -16,13 +16,14 @@ venv/
 node_modules/
 
 # Ignore static files
-static/*
-!static/logo.png
-!static/style.css
-!static/script.js
+#static/*
+#!static/logo.png
+#!static/favicon.ico
+#!static/style.css
+#!static/script.js
 
 # Ignore templates
-templates/*
-!templates/index.html
-!templates/asset.html
-!templates/asset_history.html
+#templates/*
+#!templates/index.html
+#!templates/asset.html
+#!templates/asset_history.html

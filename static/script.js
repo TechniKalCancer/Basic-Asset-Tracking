@@ -1,10 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('JavaScript file loaded'); // Initial log statement
-
-    const toggleBtn = document.getElementById('toggle-btn');
-    const barcodeInput = document.getElementById('barcode');
+    const checkinBtn = document.getElementById('checkin-btn');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    const barcodeCheckinInput = document.getElementById('barcode-checkin');
+    const barcodeCheckoutInput = document.getElementById('barcode-checkout');
     const notification = document.getElementById('notification');
-    const historyTableBody = document.querySelector('#history-table tbody');
+    const checkinTableBody = document.querySelector('#checkin-table tbody');
+    const checkoutTableBody = document.querySelector('#checkout-table tbody');
     const searchBtn = document.getElementById('searchBtn');
     const searchInput = document.getElementById('searchInput');
 
@@ -16,10 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000);
     };
 
-    const handleCheckInOut = (changeButtonText) => {
-        const assetId = barcodeInput.value;
-        const action = toggleBtn.textContent.includes('Check In') ? 'checkin' : 'checkout';
-
+    const handleAction = (action, assetId) => {
         fetch(`/api/assets/${assetId}`, {
             method: 'POST',
             headers: {
@@ -29,14 +27,10 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(response => response.json())
         .then(data => {
-            console.log('API Response:', data); // Debugging line
             if (data.error) {
                 showNotification(`Error: ${data.error}`);
             } else {
                 showNotification(`Asset ${action} successfully: ${assetId}`);
-                if (changeButtonText) {
-                    toggleBtn.textContent = action === 'checkin' ? 'Check Out' : 'Check In';
-                }
                 fetchAssets();  // Refresh the asset list
             }
         })
@@ -50,15 +44,29 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(response => response.json())
         .then(data => {
             console.log('Fetched Assets:', data); // Debugging line
-            historyTableBody.innerHTML = '';
-            data.forEach(asset => {
+            checkinTableBody.innerHTML = '';
+            checkoutTableBody.innerHTML = '';
+
+            // Sort assets by most recent check-in
+            const checkinAssets = data.filter(asset => asset.check_in).sort((a, b) => new Date(b.check_in) - new Date(a.check_in));
+            checkinAssets.forEach(asset => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${asset.asset_id}</td>
-                    <td>${asset.check_in ? new Date(asset.check_in).toLocaleString() : ''}</td>
-                    <td>${asset.check_out ? new Date(asset.check_out).toLocaleString() : ''}</td>
+                    <td>${new Date(asset.check_in).toLocaleString()}</td>
                 `;
-                historyTableBody.appendChild(row);
+                checkinTableBody.appendChild(row);
+            });
+
+            // Sort assets by most recent check-out
+            const checkoutAssets = data.filter(asset => asset.check_out).sort((a, b) => new Date(b.check_out) - new Date(a.check_out));
+            checkoutAssets.forEach(asset => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${asset.asset_id}</td>
+                    <td>${new Date(asset.check_out).toLocaleString()}</td>
+                `;
+                checkoutTableBody.appendChild(row);
             });
         })
         .catch(error => {
@@ -75,19 +83,32 @@ document.addEventListener('DOMContentLoaded', () => {
     
         window.location.href = `/asset_history?asset_id=${assetId}`;
     };
-    
+
     searchBtn.addEventListener('click', searchAssetHistory);
 
-    toggleBtn.addEventListener('click', () => handleCheckInOut(true));
+    if (checkinBtn) {
+        checkinBtn.addEventListener('click', () => handleAction('checkin', barcodeCheckinInput.value));
+    }
 
-    barcodeInput.addEventListener('keypress', (event) => {
+    if (checkoutBtn) {
+        checkoutBtn.addEventListener('click', () => handleAction('checkout', barcodeCheckoutInput.value));
+    }
+
+    barcodeCheckinInput.addEventListener('keypress', (event) => {
         if (event.key === 'Enter') {
             event.preventDefault();  // Prevent form submission
-            handleCheckInOut(false);
+            handleAction('checkin', barcodeCheckinInput.value);
+            barcodeCheckinInput.value = '';  // Clear the input field
         }
     });
 
-    searchBtn.addEventListener('click', searchAssetHistory);
+    barcodeCheckoutInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();  // Prevent form submission
+            handleAction('checkout', barcodeCheckoutInput.value);
+            barcodeCheckoutInput.value = '';  // Clear the input field
+        }
+    });
 
     // Fetch assets on page load
     fetchAssets();

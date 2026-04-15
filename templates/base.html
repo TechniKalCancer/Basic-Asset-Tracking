@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Asset Tracker{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3352;
+      --accent: #4f7ef8;
+      --accent-dim: #2a4aaa;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #e8eaf6;
+      --muted: #6b7280;
+      --radius: 10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      height: 56px;
+    }
+    nav .brand { font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: .5px; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
+    nav a:hover { color: var(--text); }
+    nav .spacer { flex: 1; pointer-events: none; }
+    nav .logout { color: var(--danger) !important; border: 1px solid var(--danger); border-radius: 6px; padding: .25rem .7rem; font-size: .82rem; }
+    nav .logout:hover { background: var(--danger); color: #fff !important; }
+    #session-warning {
+      display: none;
+      position: fixed;
+      top: 56px; left: 0; right: 0;
+      background: #78350f;
+      border-bottom: 2px solid var(--warning);
+      color: var(--warning);
+      text-align: center;
+      padding: .6rem 1rem;
+      font-size: .9rem;
+      font-weight: 600;
+      z-index: 1000;
+    }
+    #session-warning a { color: #fff; margin-left: .5rem; text-decoration: underline; cursor: pointer; }
+
+    .container { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    h1 { font-size: 1.6rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.2rem; margin-bottom: 1rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: .55rem 1.2rem;
+      border-radius: 7px;
+      border: none;
+      cursor: pointer;
+      font-size: .9rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: opacity .15s, transform .1s;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary  { background: var(--accent);   color: #fff; }
+    .btn-success  { background: var(--success);  color: #fff; }
+    .btn-danger   { background: var(--danger);   color: #fff; }
+    .btn-ghost    { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn:hover    { opacity: .88; }
+
+    input, select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      padding: .55rem .9rem;
+      font-size: 1rem;
+      width: 100%;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+
+    .flash-messages { margin-bottom: 1.2rem; }
+    .flash {
+      padding: .75rem 1rem;
+      border-radius: 7px;
+      margin-bottom: .5rem;
+      font-size: .9rem;
+    }
+    .flash.success { background: #14532d55; border: 1px solid var(--success); color: var(--success); }
+    .flash.error   { background: #7f1d1d55; border: 1px solid var(--danger);  color: var(--danger); }
+    .flash.info    { background: #1e3a8a55; border: 1px solid var(--accent);  color: var(--accent); }
+
+    .badge {
+      display: inline-block;
+      padding: .2rem .6rem;
+      border-radius: 99px;
+      font-size: .75rem;
+      font-weight: 600;
+    }
+    .badge-green   { background: #14532d55; color: var(--success); }
+    .badge-yellow  { background: #78350f55; color: var(--warning); }
+    .badge-red     { background: #7f1d1d55; color: var(--danger);  }
+    .badge-blue    { background: #1e3a8a55; color: var(--accent);  }
+
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th { text-align: left; padding: .6rem .8rem; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600; }
+    td { padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--surface2); }
+
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.2rem; text-align: center; }
+    .stat-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
+    .stat-card .lbl { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">📦 AssetTracker</span>
+    <a href="/">Home</a>
+    <a href="/checkin">Check In</a>
+    <a href="/checkout">Check Out</a>
+    <a href="/asset_history">History</a>
+    <span class="spacer"></span>
+    {% if session.get('admin_logged_in') %}
+      <a href="/admin">Admin</a>
+      <a href="/admin/logout" class="logout">Logout</a>
+    {% else %}
+      <a href="/admin/login">Admin</a>
+    {% endif %}
+  </nav>
+
+  <!-- Session timeout warning banner (only shown on admin pages) -->
+  <div id="session-warning">
+    ⚠️ Your session will expire in <span id="session-countdown"></span>.
+    <a onclick="extendSession()">Stay logged in</a>
+    &nbsp;·&nbsp;
+    <a href="/admin/logout">Logout now</a>
+  </div>
+
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-messages">
+          {% for cat, msg in messages %}
+            <div class="flash {{ cat }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+<script>
+// Only run session polling on admin pages
+const isAdmin = window.location.pathname.startsWith('/admin');
+if (isAdmin) {
+  let warningShown = false;
+
+  async function checkSession() {
+    try {
+      const res  = await fetch('/api/admin/session_status');
+      const data = await res.json();
+
+      if (!data.authenticated) {
+        if (window.location.pathname !== '/admin/login') {
+          window.location.href = '/admin/login';
+        }
+        return;
+      }
+
+      const secs = data.seconds_remaining;
+      const warn = document.getElementById('session-warning');
+      const cd   = document.getElementById('session-countdown');
+
+      if (secs <= 120) {
+        warn.style.display = 'block';
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        cd.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+        if (!warningShown) {
+          warningShown = true;
+          // Play a soft warning tone
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const vol = ctx.createGain();
+            osc.connect(vol); vol.connect(ctx.destination);
+            osc.frequency.value = 440;
+            vol.gain.setValueAtTime(0.2, ctx.currentTime);
+            vol.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+            osc.start(); osc.stop(ctx.currentTime + 0.4);
+          } catch(e) {}
+        }
+      } else {
+        warn.style.display = 'none';
+        warningShown = false;
+      }
+
+      if (secs <= 0) {
+        window.location.href = '/admin/login';
+      }
+    } catch(e) {}
+  }
+
+  async function extendSession() {
+    // Hit any admin endpoint to reset the last_active timestamp
+    await fetch('/api/admin/session_status');
+    document.getElementById('session-warning').style.display = 'none';
+    warningShown = false;
+  }
+
+  // Poll every 15 seconds
+  checkSession();
+  setInterval(checkSession, 15000);
+}
+</script>
+</body>
+</html>

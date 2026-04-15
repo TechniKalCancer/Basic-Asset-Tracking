@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Orphaned Records{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">⚠️ Orphaned Records</h1>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="background:#78350f22;border-color:var(--warning);">
+  <p style="color:var(--warning);font-size:.9rem;">
+    These assets were scanned before they existed in the registry.
+    They will be automatically healed (marked valid) the next time you upload a CSV that includes their asset tag.
+  </p>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Asset Tag</th>
+        <th>Last Check-In</th>
+        <th>Last Check-Out</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for asset in orphans %}
+      <tr>
+        <td><code style="color:var(--warning);">{{ asset.asset_tag }}</code></td>
+        <td>{{ asset.check_in.strftime('%Y-%m-%d %H:%M') if asset.check_in else '—' }}</td>
+        <td>{{ asset.check_out.strftime('%Y-%m-%d %H:%M') if asset.check_out else '—' }}</td>
+        <td><span class="badge badge-yellow">Unknown</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No orphaned records 🎉</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

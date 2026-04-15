@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Admin Panel{% endblock %}
+{% block content %}
+<h1>⚙️ Admin Panel</h1>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="num">{{ registry_count }}</div>
+    <div class="lbl">Assets in Registry</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:{{ 'var(--warning)' if orphan_count else 'var(--success)' }}">{{ orphan_count }}</div>
+    <div class="lbl">Orphaned Records</div>
+  </div>
+</div>
+
+<!-- CSV Upload -->
+<div class="card">
+  <h2>📂 Upload Asset Registry CSV</h2>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    The CSV must have an <code>asset_tag</code> column. Optional columns: <code>serial_number</code>, <code>description</code>.<br>
+    Uploading a new CSV <strong>completely replaces</strong> the old registry and auto-heals any orphaned scan records.
+  </p>
+
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
+    <strong style="color:var(--text);">Accepted column names:</strong><br>
+    <code>Asset ID</code> or <code>asset_tag</code> &mdash; required<br>
+    <code>Serial Number</code> &mdash; optional<br>
+    <code>description</code> &mdash; optional<br><br>
+    <strong style="color:var(--text);">Example (MDM export format):</strong><br>
+    <code>Asset ID,Serial Number</code><br>
+    <code>126295,0UG99FBDA22224</code><br>
+    <code>126296,0UG99FBDA22742</code>
+  </div>
+
+  <form method="POST" action="/admin/upload_csv" enctype="multipart/form-data">
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="csv_file" accept=".csv" style="flex:1;min-width:200px;" required />
+      <button type="submit" class="btn btn-primary">Upload & Replace</button>
+    </div>
+  </form>
+</div>
+
+<!-- Quick links -->
+<div style="display:flex;gap:1rem;flex-wrap:wrap;">
+  <a href="/admin/registry" class="btn btn-ghost">📋 View Registry</a>
+  {% if orphan_count %}
+    <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">
+      ⚠️ View {{ orphan_count }} Orphan{{ 's' if orphan_count != 1 }}
+    </a>
+  {% endif %}
+  <a href="/api/assets" class="btn btn-ghost" target="_blank">🔗 Assets API</a>
+</div>
+{% endblock %}

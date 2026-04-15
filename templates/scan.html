@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ '✅' if action == 'checkin' else '📤' }} {{ title }}</h1>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start;">
+
+  <!-- Scan Card -->
+  <div class="card">
+    <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
+      Scan or type an <strong>asset tag</strong> (5-6 digits) or <strong>serial number</strong> (10 characters).
+    </p>
+
+    <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">
+      Asset Tag or Serial Number
+    </label>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem;">
+      <input type="text" id="scanInput" placeholder="Scan or type…" autofocus autocomplete="off"
+             style="flex:1;" />
+      <button class="btn {{ 'btn-success' if action == 'checkin' else 'btn-primary' }}"
+              onclick="submitScan()">
+        {{ title }}
+      </button>
+    </div>
+
+    <div id="result" style="display:none;padding:.85rem 1rem;border-radius:7px;font-size:.9rem;margin-bottom:.5rem;"></div>
+  </div>
+
+  <!-- Last 10 Modified -->
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div style="padding:.9rem 1rem .6rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.6rem;">
+      <span style="font-size:.85rem;font-weight:600;">Last 10 Devices Modified</span>
+      <span class="badge badge-blue" style="font-size:.7rem;">{{ action }}</span>
+    </div>
+    <div id="recentItems">
+      {% for e in recent_events %}
+      <div style="display:flex;align-items:center;gap:.6rem;padding:.5rem 1rem;
+                  border-bottom:1px solid var(--border);font-size:.83rem;"
+           data-tag="{{ e.asset_tag }}">
+        <span style="color:var(--success);">✓</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            {{ e.asset_tag }}
+          </div>
+          <div style="color:var(--muted);font-size:.75rem;">
+            via {{ e.scan_type or '—' }}
+            {% if e.scanned_value and e.scanned_value != e.asset_tag %}
+              · scanned: {{ e.scanned_value }}
+            {% endif %}
+          </div>
+        </div>
+        <span style="color:var(--muted);font-size:.75rem;white-space:nowrap;">
+          {{ e.timestamp.strftime('%H:%M:%S') }}
+        </span>
+      </div>
+      {% else %}
+      <div id="emptyMsg" style="padding:1.5rem;text-align:center;color:var(--muted);font-size:.85rem;">
+        No recent activity yet.
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+const ACTION = '{{ action }}';
+
+// ─── Audio ────────────────────────────────────────────────────────────────────
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(type) {
+  if (type === 'success') {
+    // Two quick ascending beeps
+    beep(880, 0.00, 0.12, 'sine', 0.3);
+    beep(1320, 0.15, 0.18, 'sine', 0.3);
+  } else if (type === 'warning') {
+    // Single mid tone (unknown asset but accepted)
+    beep(660, 0.00, 0.25, 'sine', 0.25);
+  } else {
+    // Low double buzz for error/invalid
+    beep(180, 0.00, 0.18, 'sawtooth', 0.4);
+    beep(140, 0.20, 0.22, 'sawtooth', 0.4);
+  }
+}
+
+function beep(freq, startDelay, duration, type, gain) {
+  const osc  = ctx.createOscillator();
+  const vol  = ctx.createGain();
+  osc.connect(vol);
+  vol.connect(ctx.destination);
+  osc.type = type;
+  osc.frequency.value = freq;
+  vol.gain.setValueAtTime(gain, ctx.currentTime + startDelay);
+  vol.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startDelay + duration);
+  osc.start(ctx.currentTime + startDelay);
+  osc.stop(ctx.currentTime + startDelay + duration + 0.05);
+}
+
+// ─── Scan ─────────────────────────────────────────────────────────────────────
+document.getElementById('scanInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitScan();
+});
+
+async function submitScan() {
+  const input = document.getElementById('scanInput');
+  const val   = input.value.trim();
+  if (!val) return;
+  input.value = '';
+  input.focus();
+
+  const res  = await fetch('/api/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scan_value: val, action: ACTION }),
+  });
+  const data = await res.json();
+  const box  = document.getElementById('result');
+  box.style.display = 'block';
+
+  if (res.ok) {
+    if (data.warning) {
+      // Unknown asset — accepted but flagged
+      playTone('warning');
+      box.style.background = '#78350f33';
+      box.style.border     = '1px solid var(--warning)';
+      box.style.color      = 'var(--warning)';
+      box.innerHTML = `⚠️ ${data.message} — <strong>${data.asset_tag}</strong>
+                       <small style="opacity:.75">(via ${data.scan_type})</small>
+                       <br><small>${data.warning}</small>`;
+    } else {
+      // Clean success
+      playTone('success');
+      box.style.background = '#14532d33';
+      box.style.border     = '1px solid var(--success)';
+      box.style.color      = 'var(--success)';
+      box.innerHTML = `✓ ${data.message} — <strong>${data.asset_tag}</strong>
+                       <small style="opacity:.7">(via ${data.scan_type})</small>`;
+    }
+    prependRecent(data.asset_tag, data.scan_type, val, true);
+  } else {
+    // Error — invalid format or other failure
+    playTone('error');
+    box.style.background = '#7f1d1d33';
+    box.style.border     = '1px solid var(--danger)';
+    box.style.color      = 'var(--danger)';
+    box.innerHTML = `✗ ${data.error || 'Error'}`;
+    prependRecent(val, '—', val, false);
+  }
+}
+
+// ─── Recent list ─────────────────────────────────────────────────────────────
+function prependRecent(tag, scanType, scannedVal, ok) {
+  const container = document.getElementById('recentItems');
+
+  const empty = document.getElementById('emptyMsg');
+  if (empty) empty.remove();
+
+  const existing = container.querySelectorAll('[data-tag]');
+  if (existing.length >= 10) existing[existing.length - 1].remove();
+
+  const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const showScanned = scannedVal && scannedVal !== tag;
+
+  const div = document.createElement('div');
+  div.setAttribute('data-tag', tag);
+  div.style.cssText = 'display:flex;align-items:center;gap:.6rem;padding:.5rem 1rem;border-bottom:1px solid var(--border);font-size:.83rem;';
+  div.innerHTML = `
+    <span style="color:${ok ? 'var(--success)' : 'var(--danger)'};">${ok ? '✓' : '✗'}</span>
+    <div style="flex:1;min-width:0;">
+      <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${tag}</div>
+      <div style="color:var(--muted);font-size:.75rem;">
+        via ${scanType}${showScanned ? ' · scanned: ' + scannedVal : ''}
+      </div>
+    </div>
+    <span style="color:var(--muted);font-size:.75rem;white-space:nowrap;">${now}</span>
+  `;
+  container.insertBefore(div, container.firstChild);
+}
+</script>
+{% endblock %}

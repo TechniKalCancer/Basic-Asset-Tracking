@@ -1,37 +1,63 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Asset History</title>
-    <link rel="stylesheet" href="static/style.css">
-</head>
-<body>
-    <div class="container">
-        <div class="logo">
-            <img src="static/logo.png" alt="Work Logo">
-        </div>
+{% extends 'base.html' %}
+{% block title %}Asset History{% endblock %}
+{% block content %}
+<h1>📋 Asset History</h1>
 
-        <h1>Asset History for Asset {{ asset_id }}</h1>
-        <table>
-            <thead>
-                <tr>
-                    <th>Asset</th>
-                    <th>Action</th>
-                    <th>Time</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for event in asset_history %}
-                    <tr>
-                        <td>{{ asset_id }}</td>
-                        <td>{{ event.action }}</td>
-                        <td>{{ event.timestamp }}</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <a href="{{ url_for('index') }}">Back to Asset List</a>
+<div class="card" style="max-width:560px;">
+  <form method="GET" style="display:flex;gap:.6rem;flex-wrap:wrap;">
+    <input name="q" value="{{ query or '' }}"
+           placeholder="Search by asset tag or serial number…"
+           style="flex:1;min-width:200px;" autofocus />
+    <button type="submit" class="btn btn-primary">Look Up</button>
+  </form>
+  {% if query %}
+    <div style="margin-top:.6rem;font-size:.82rem;color:var(--muted);">
+      Showing results for <strong style="color:var(--text);">{{ query }}</strong>
+      {% if resolved_tag and resolved_tag != query %}
+        → resolved to asset tag <strong style="color:var(--accent);">{{ resolved_tag }}</strong>
+      {% endif %}
+      &nbsp;·&nbsp;<a href="/asset_history" style="color:var(--muted);">Clear</a>
     </div>
-</body>
-</html>
+  {% endif %}
+</div>
+
+{% if query %}
+  {% if events %}
+  <div class="card" style="padding:0;overflow:hidden;">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Action</th>
+          <th>Scanned Value</th>
+          <th>Scan Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in events %}
+        <tr>
+          <td style="white-space:nowrap;">{{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td>
+            {% if e.action == 'checkin' %}
+              <span class="badge badge-green">Check In</span>
+            {% else %}
+              <span class="badge badge-blue">Check Out</span>
+            {% endif %}
+          </td>
+          <td><code>{{ e.scanned_value or '—' }}</code></td>
+          <td style="color:var(--muted);">{{ e.scan_type or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <div class="card" style="color:var(--muted);text-align:center;padding:2rem;">
+      No history found for <strong style="color:var(--text);">{{ query }}</strong>.
+      {% if not resolved_tag %}
+        <br><small>This value was not found in the asset registry either.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

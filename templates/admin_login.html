@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}Admin Login{% endblock %}
+{% block content %}
+<div style="max-width:360px;margin:4rem auto;">
+  <div class="card">
+    <h1 style="text-align:center;margin-bottom:1.5rem;">🔒 Admin Login</h1>
+    <form method="POST" autocomplete="off">
+      <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">Password</label>
+      <input type="password" name="password" autofocus placeholder="Enter admin password"
+             style="margin-bottom:1rem;" autocomplete="current-password" />
+      <button type="submit" class="btn btn-primary" style="width:100%;">Login</button>
+    </form>
+    <p style="margin-top:1rem;font-size:.78rem;color:var(--muted);text-align:center;">
+      Locked out after 5 failed attempts for 5 minutes.
+    </p>
+  </div>
+</div>
+{% endblock %}

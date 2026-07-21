@@ -12,6 +12,10 @@
     <div class="num" style="color:{{ 'var(--warning)' if orphan_count else 'var(--success)' }}">{{ orphan_count }}</div>
     <div class="lbl">Orphaned Records</div>
   </div>
+  <div class="stat-card">
+    <div class="num">{{ people_count }}</div>
+    <div class="lbl">People</div>
+  </div>
 </div>
 
 <!-- CSV Upload -->
@@ -44,6 +48,7 @@
 <!-- Quick links -->
 <div style="display:flex;gap:1rem;flex-wrap:wrap;">
   <a href="/admin/registry" class="btn btn-ghost">📋 View Registry</a>
+  <a href="/admin/people" class="btn btn-ghost">👤 Manage People</a>
   {% if orphan_count %}
     <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">
       ⚠️ View {{ orphan_count }} Orphan{{ 's' if orphan_count != 1 }}

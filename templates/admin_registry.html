@@ -21,17 +21,32 @@
         <th>Asset Tag</th>
         <th>Serial Number</th>
         <th>Description</th>
+        <th>Assigned To</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
       {% for row in pagination.items %}
+      {% set asset = assets_by_tag.get(row.asset_tag) %}
       <tr>
         <td><code>{{ row.asset_tag }}</code></td>
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td>
+          {% if asset and asset.assigned_to %}
+            {{ asset.assigned_to.full_name }}
+          {% else %}
+            <span style="color:var(--muted);">Unassigned</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/assets/{{ row.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">
+            {{ 'Reassign' if asset and asset.assigned_to else 'Assign' }}
+          </a>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

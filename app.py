@@ -23,7 +23,9 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-in-prod')
 SESSION_TIMEOUT_MINUTES = 15
 WARNING_BEFORE_SECONDS  = 120  # warn 2 min before expiry
 
-ADMIN_PASSWORD_HASH = generate_password_hash(os.environ.get('ADMIN_PASSWORD', 'admin123'))
+ADMIN_PASSWORD_HASH = generate_password_hash(
+    os.environ.get('ADMIN_PASSWORD', 'admin123'), method='pbkdf2:sha256'
+)
 
 # ─── Simple in-memory login rate limiter ──────────────────────────────────────
 _login_attempts = defaultdict(list)  # ip -> [timestamp, ...]
@@ -74,18 +76,48 @@ class Asset(db.Model):
     it gets healed automatically when a CSV import adds that asset_tag.
     """
     __tablename__ = 'asset'
-    id           = db.Column(db.Integer, primary_key=True)
-    asset_tag    = db.Column(db.String(120), unique=True, nullable=False, index=True)
-    check_in     = db.Column(db.DateTime, nullable=True)
-    check_out    = db.Column(db.DateTime, nullable=True)
-    is_valid     = db.Column(db.Boolean, default=False, nullable=False)
+    id             = db.Column(db.Integer, primary_key=True)
+    asset_tag      = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    check_in       = db.Column(db.DateTime, nullable=True)
+    check_out      = db.Column(db.DateTime, nullable=True)
+    is_valid       = db.Column(db.Boolean, default=False, nullable=False)
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
+
+    assigned_to = db.relationship('Person', backref='assets')
 
     def to_dict(self):
         return {
-            'asset_tag': self.asset_tag,
-            'check_in':  self.check_in.isoformat() if self.check_in else None,
-            'check_out': self.check_out.isoformat() if self.check_out else None,
-            'is_valid':  self.is_valid,
+            'asset_tag':    self.asset_tag,
+            'check_in':     self.check_in.isoformat() if self.check_in else None,
+            'check_out':    self.check_out.isoformat() if self.check_out else None,
+            'is_valid':     self.is_valid,
+            'assigned_to':  self.assigned_to.full_name if self.assigned_to else None,
+        }
+
+
+class Person(db.Model):
+    """A staff/student record that an asset can be assigned to."""
+    __tablename__ = 'person'
+    id         = db.Column(db.Integer, primary_key=True)
+    first_name = db.Column(db.String(80), nullable=False)
+    last_name  = db.Column(db.String(80), nullable=False)
+    email      = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    role       = db.Column(db.String(20), nullable=False, default='staff')  # 'staff' | 'student'
+    department = db.Column(db.String(80), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    @property
+    def full_name(self):
+        return f'{self.first_name} {self.last_name}'
+
+    def to_dict(self):
+        return {
+            'id':         self.id,
+            'first_name': self.first_name,
+            'last_name':  self.last_name,
+            'email':      self.email,
+            'role':       self.role,
+            'department': self.department,
         }
 
 
@@ -224,9 +256,11 @@ def session_status():
 def admin_panel():
     registry_count = AssetRegistry.query.count()
     orphan_count   = Asset.query.filter_by(is_valid=False).count()
+    people_count   = Person.query.count()
     return render_template('admin_panel.html',
                            registry_count=registry_count,
-                           orphan_count=orphan_count)
+                           orphan_count=orphan_count,
+                           people_count=people_count)
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
@@ -359,7 +393,14 @@ def admin_registry():
             )
         )
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    return render_template('admin_registry.html', pagination=pagination, search=search)
+
+    page_tags = [row.asset_tag for row in pagination.items]
+    assets_by_tag = {
+        a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(page_tags))
+    }
+
+    return render_template('admin_registry.html', pagination=pagination, search=search,
+                           assets_by_tag=assets_by_tag)
 
 
 @app.route('/admin/orphans')
@@ -367,6 +408,166 @@ def admin_registry():
 def admin_orphans():
     orphans = Asset.query.filter_by(is_valid=False).order_by(Asset.asset_tag).all()
     return render_template('admin_orphans.html', orphans=orphans)
+
+
+# ─── People ───────────────────────────────────────────────────────────────────
+
+@app.route('/admin/people')
+@login_required
+def admin_people():
+    page     = request.args.get('page', 1, type=int)
+    per_page = 50
+    query    = Person.query.order_by(Person.last_name, Person.first_name)
+    search   = request.args.get('q', '').strip()
+    if search:
+        like = f'%{search}%'
+        query = query.filter(
+            db.or_(
+                Person.first_name.ilike(like),
+                Person.last_name.ilike(like),
+                Person.email.ilike(like),
+            )
+        )
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    return render_template('admin_people.html', pagination=pagination, search=search)
+
+
+def _person_form_values():
+    """Reads and normalizes the People create/edit form fields from the request."""
+    return {
+        'first_name': request.form.get('first_name', '').strip(),
+        'last_name':  request.form.get('last_name', '').strip(),
+        'email':      request.form.get('email', '').strip().lower(),
+        'role':       request.form.get('role', 'staff').strip(),
+        'department': request.form.get('department', '').strip() or None,
+    }
+
+
+def _validate_person_form(values):
+    """Returns an error message string, or None if the form values are valid."""
+    if not values['first_name'] or not values['last_name'] or not values['email']:
+        return 'First name, last name, and email are required.'
+    if '@' not in values['email'] or '.' not in values['email'].split('@')[-1]:
+        return 'Enter a valid email address.'
+    return None
+
+
+@app.route('/admin/people/new', methods=['GET', 'POST'])
+@login_required
+def admin_person_new():
+    if request.method == 'POST':
+        values = _person_form_values()
+        error = _validate_person_form(values)
+        if error:
+            flash(error, 'error')
+            return render_template('admin_person_form.html', person=None, form=values)
+
+        try:
+            person = Person(**values)
+            db.session.add(person)
+            db.session.commit()
+            flash(f'Added {person.full_name}.', 'success')
+            return redirect(url_for('admin_people'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not add person: {e}', 'error')
+            return render_template('admin_person_form.html', person=None, form=values)
+
+    return render_template('admin_person_form.html', person=None, form=None)
+
+
+@app.route('/admin/people/<int:person_id>/edit', methods=['GET', 'POST'])
+@login_required
+def admin_person_edit(person_id):
+    person = Person.query.get_or_404(person_id)
+
+    if request.method == 'POST':
+        values = _person_form_values()
+        error = _validate_person_form(values)
+        if error:
+            flash(error, 'error')
+            return render_template('admin_person_form.html', person=person, form=values)
+
+        try:
+            for field, value in values.items():
+                setattr(person, field, value)
+            db.session.commit()
+            flash(f'Updated {person.full_name}.', 'success')
+            return redirect(url_for('admin_people'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not update person: {e}', 'error')
+            return render_template('admin_person_form.html', person=person, form=values)
+
+    return render_template('admin_person_form.html', person=person, form=None)
+
+
+@app.route('/admin/people/<int:person_id>/delete', methods=['POST'])
+@login_required
+def admin_person_delete(person_id):
+    """Deletes a person. Any assets currently assigned to them are unassigned, not blocked."""
+    person = Person.query.get_or_404(person_id)
+    try:
+        unassigned = Asset.query.filter_by(assigned_to_id=person.id).update({'assigned_to_id': None})
+        db.session.delete(person)
+        db.session.commit()
+        msg = f'Deleted {person.full_name}.'
+        if unassigned:
+            msg += f' Unassigned {unassigned} asset{"s" if unassigned != 1 else ""}.'
+        flash(msg, 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not delete person: {e}', 'error')
+    return redirect(url_for('admin_people'))
+
+
+# ─── Asset Assignment ─────────────────────────────────────────────────────────
+
+@app.route('/admin/assets/<string:asset_tag>/assign', methods=['GET', 'POST'])
+@login_required
+def admin_asset_assign(asset_tag):
+    """
+    Assigns a person to an asset_tag. The asset_tag must exist in the registry;
+    the live Asset row is created on first assignment if scanning hasn't made one yet.
+    """
+    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+
+    if request.method == 'POST':
+        person_id = request.form.get('person_id', type=int)
+        if not person_id:
+            flash('Select a person to assign.', 'error')
+            return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+        person = Person.query.get_or_404(person_id)
+        try:
+            if not asset:
+                asset = Asset(asset_tag=asset_tag, is_valid=True)
+                db.session.add(asset)
+            asset.assigned_to_id = person.id
+            db.session.commit()
+            flash(f'Assigned {asset_tag} to {person.full_name}.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not assign asset: {e}', 'error')
+        return redirect(url_for('admin_registry'))
+
+    people = Person.query.order_by(Person.last_name, Person.first_name).all()
+    return render_template('admin_assign.html', registry_row=registry_row, asset=asset, people=people)
+
+
+@app.route('/admin/assets/<string:asset_tag>/unassign', methods=['POST'])
+@login_required
+def admin_asset_unassign(asset_tag):
+    asset = Asset.query.filter_by(asset_tag=asset_tag).first_or_404()
+    try:
+        asset.assigned_to_id = None
+        db.session.commit()
+        flash(f'Unassigned {asset_tag}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not unassign asset: {e}', 'error')
+    return redirect(url_for('admin_registry'))
 
 
 # ─── Scan / Check-in / Check-out API ─────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Asset Tracking System
 
-This is a simple asset tracking system built with Flask, SQLAlchemy, and JavaScript. It allows you to check in and check out assets, and view the history of asset actions.
+This is a simple asset tracking system built with Flask, SQLAlchemy, and JavaScript. It allows you to check in and check out assets, view the history of asset actions, keep a directory of people, and assign assets to them.
 
 ## Prerequisites
 
@@ -51,3 +51,11 @@ This is a simple asset tracking system built with Flask, SQLAlchemy, and JavaScr
 - `GET /api/assets`: Retrieve all assets.
 - `POST /api/assets/<asset_id>`: Check in or check out an asset.
 - `GET /asset_history`: Retrieve the history of actions for a specific asset.
+
+## People & Asset Assignment
+
+- `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), and optional department.
+- `/admin/people/new`, `/admin/people/<id>/edit`, `/admin/people/<id>/delete`: Manage people. Deleting a person unassigns (rather than blocks on) any assets they held.
+- `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person.
+- `/admin/assets/<asset_tag>/unassign`: Clear an asset's assignment.
+- The asset registry page (`/admin/registry`) shows each asset's current assignee and links to assign/reassign it.

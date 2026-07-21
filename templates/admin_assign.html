@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Assign {{ registry_row.asset_tag }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">Assign <code>{{ registry_row.asset_tag }}</code></h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/registry" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    {{ registry_row.description or 'No description on file.' }}
+    {% if asset and asset.assigned_to %}
+      <br>Currently assigned to <strong style="color:var(--text);">{{ asset.assigned_to.full_name }}</strong>.
+    {% endif %}
+  </p>
+
+  {% if people %}
+  <form method="POST">
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Assign to</label>
+      <select name="person_id" required>
+        <option value="" disabled {{ 'selected' if not (asset and asset.assigned_to) }}>Select a person…</option>
+        {% for person in people %}
+          <option value="{{ person.id }}" {{ 'selected' if asset and asset.assigned_to_id == person.id }}>
+            {{ person.full_name }} ({{ person.email }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Assign</button>
+  </form>
+  {% else %}
+  <p style="color:var(--muted);">No people in the system yet. <a href="/admin/people/new">Add one</a> first.</p>
+  {% endif %}
+
+  {% if asset and asset.assigned_to %}
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/unassign" style="margin-top:1rem;">
+    <button type="submit" class="btn btn-ghost" style="color:var(--danger);border-color:var(--danger);">Unassign</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -27,12 +27,36 @@ This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and J
 3. **Build and run the Docker containers:**
 
     ```sh
-    docker-compose up --build
+    docker compose up --build -d
     ```
+
+    This starts two containers: `db` (Postgres, the real database) and `web` (the app).
+    `web` waits for `db`'s healthcheck before starting.
 
 4. **Access the application:**
 
     Open your web browser and go to `http://localhost:8081`.
+
+## Database (Postgres)
+
+Data lives in a real Postgres database, not a throwaway file — the `db` service in
+`docker-compose.yml`, persisted in the named volume `basic-asset-tracking_db-data` so it
+survives container rebuilds/restarts.
+
+- **Credentials**: set `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` in `.env` before
+  first startup — Postgres only applies them when initializing a brand-new database, so
+  changing them later won't update one that already exists (you'd need to recreate the volume).
+- **Connect an external tool** (pgAdmin, TablePlus, DBeaver, `psql`, etc.): port `5432` is
+  published to the host, so connect to `localhost:5432` with the credentials from `.env`.
+- **`psql` via Docker directly**, no external tool needed:
+  ```sh
+  docker compose exec db psql -U asset_tracker -d asset_tracker
+  ```
+- **Back up**: `docker compose exec db pg_dump -U asset_tracker asset_tracker > backup.sql`
+- **Restore**: `docker compose exec -T db psql -U asset_tracker asset_tracker < backup.sql`
+- Running `app.py` directly (outside Docker, e.g. for local dev in a venv) still defaults to a
+  local SQLite file unless you set `DATABASE_URL` yourself — the Postgres wiring only kicks in
+  through `docker-compose.yml`'s `web` service.
 
 ## Project Structure
 

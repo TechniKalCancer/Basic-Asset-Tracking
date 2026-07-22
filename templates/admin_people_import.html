@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}Import People{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">📥 Import People</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/people" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <h2>Upload Roster CSV</h2>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    Bulk create or update people in one shot — e.g. a district SIS/HR export at the start of the
+    year. Each row is matched to an existing person by <code>external_id</code> (ID number) first,
+    falling back to <code>email</code> if no ID number is given or matched. A match updates that
+    person's attributes; no match creates a new person. Existing people not present in the CSV
+    are left alone — this never deletes anyone.
+  </p>
+
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
+    <strong style="color:var(--text);">Required columns:</strong> <code>first_name</code>, <code>last_name</code>, <code>email</code><br>
+    <strong style="color:var(--text);">Optional columns:</strong> <code>external_id</code> (also accepts <code>staff_id</code>/<code>student_id</code>),
+    <code>role</code> (staff/student), <code>department</code>, <code>site</code>,
+    <code>grad_year</code> (also accepts <code>graduation_year</code>)<br><br>
+    <strong style="color:var(--text);">Example:</strong><br>
+    <code>first_name,last_name,email,external_id,role,site,grad_year</code><br>
+    <code>Alex,Rivera,alex.rivera@example.edu,100482,student,North Elementary,2031</code><br>
+    <code>Jordan,Lee,jordan.lee@example.edu,100483,student,North Elementary,2031</code>
+  </div>
+
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="csv_file" accept=".csv" style="flex:1;min-width:200px;" required />
+      <button type="submit" class="btn btn-primary">Import From CSV</button>
+    </div>
+  </form>
+</div>
+
+{% if results %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr><th>Email</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td style="color:var(--muted);">{{ r.row }}</td>
+        <td style="color:{{ 'var(--success)' if r.ok else 'var(--danger)' }};">
+          {{ '✓' if r.ok else '✗' }} {{ r.message }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

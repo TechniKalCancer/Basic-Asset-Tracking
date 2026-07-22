@@ -91,11 +91,38 @@ random unique 6-digit tag:
 
 ## People & Asset Assignment
 
-- `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), optional department, and optional site (school/building — e.g. "North Elementary"). Search matches name, email, or site, so a common name like "Alex Smith" is easy to disambiguate across buildings.
-- `/admin/people/new`, `/admin/people/<id>/edit`, `/admin/people/<id>/delete`: Manage people. Deleting a person unassigns (rather than blocks on) any assets they held.
-- `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person. The "Assign to" field is a live search-as-you-type picker (backed by `/admin/people/search`, capped at 20 results) instead of a dropdown listing every person — it stays fast with thousands of people in the system. Results show the matching name, site, and email so you can tell duplicate names apart at a glance.
+- `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), optional department, optional site (school/building — e.g. "North Elementary"), and an optional **ID Number** (`external_id` — the district staff/student ID). Search matches name, email, site, or ID number. A `show` filter (`active` / `inactive` / `all`) controls whether graduated/withdrawn people appear (see Graduating Students below).
+- `/admin/people/new`, `/admin/people/<id>/edit`: Manage people individually.
+- `/admin/people/<id>/delete`: **Permanently** deletes a person — any assets they hold are unassigned first, and their `AssignmentHistory`/`Incident` rows are kept (with a name snapshot) but unlinked from the deleted record. Prefer graduating students instead of deleting them, since deleting removes them from every list with no undo. Reserve delete for genuine data-entry mistakes (e.g. a duplicate record).
+- `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person. The "Assign to" field is a live search-as-you-type picker (backed by `/admin/people/search`, capped at 20 results) instead of a dropdown listing every person — it stays fast with thousands of people in the system, and only ever offers active (non-graduated) people. Results show the matching name, site, and email so you can tell duplicate names apart at a glance.
 - `/admin/assets/<asset_tag>/unassign`: Clear an asset's assignment.
 - The asset registry page (`/admin/registry`) shows each asset's current assignee and links to assign/reassign it.
+
+### Bulk Import / Update People (`/admin/people/import`)
+
+Upload a district roster CSV to create new people and **update existing ones in bulk** — the ID
+Number is the key that makes this possible. Each row is matched to an existing person by
+`external_id` first (falling back to `email` if no ID number is given or matched); a match updates
+that person's fields, no match creates a new person. Existing people missing from the CSV are left
+alone — unlike the asset registry import, this never wipes anything.
+
+Required columns: `first_name`, `last_name`, `email`. Optional: `external_id` (also accepts
+`staff_id`/`student_id`), `role` (staff/student), `department`, `site`, `grad_year` (also accepts
+`graduation_year`). Re-running this each semester with a fresh SIS export is the intended workflow
+for keeping site/department/grade assignments current without hand-editing hundreds of records.
+
+### Graduating Students (`/admin/people/graduate`)
+
+Removes a whole graduating class from the active roster in one action, instead of deleting
+students one at a time. Pick a graduation year (set via the person form or bulk import); every
+active student with that `grad_year` gets any checked-out devices automatically unassigned, then
+is archived (`is_active = False`) — **not deleted**. Archived people:
+- Disappear from the default `/admin/people` list and from the assign-device search, so a
+  graduated student can't accidentally end up with a new device.
+- Keep their full assignment history and incident/fee records intact, since those stay linked to
+  the (now-archived) person record — useful for chasing down a damage fee after the fact.
+- Can be viewed via `/admin/people?show=inactive` and undone anytime with the **Reactivate**
+  button, e.g. if a student was graduated by mistake.
 
 ## Assignment History, Condition Notes & Status
 

@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Graduate Students{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🎓 Graduate Students</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/people" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    Removes a whole graduating class from the active roster in one action. Any devices they still
+    have checked out are automatically unassigned first. This <strong>archives</strong> rather than
+    deletes — their assignment history and incident/fee records stay intact, they just disappear
+    from People and the device-assign search. You can undo this later from
+    <a href="/admin/people?show=inactive">People → Show inactive</a>.
+  </p>
+
+  {% if grad_year_counts %}
+  <form method="POST" onsubmit="return confirm('Graduate all students shown? This will unassign their devices and remove them from active lists.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year</label>
+      <select name="grad_year">
+        {% for year, count in grad_year_counts.items() %}
+          <option value="{{ year }}">{{ year }} ({{ count }} student{{ 's' if count != 1 }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Graduate This Class</button>
+  </form>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;">
+    No active students have a graduation year set yet. Add one via
+    <a href="/admin/people/new">Add Person</a>, <a href="/admin/people">edit an existing person</a>,
+    or bulk-set it via <a href="/admin/people/import">Import People</a>.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

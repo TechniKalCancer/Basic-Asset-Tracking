@@ -187,6 +187,9 @@ class Person(db.Model):
     role       = db.Column(db.String(20), nullable=False, default='staff')  # 'staff' | 'student'
     department = db.Column(db.String(80), nullable=True)
     site       = db.Column(db.String(120), nullable=True, index=True)  # school/building, for disambiguating common names
+    external_id = db.Column(db.String(40), unique=True, nullable=True, index=True)  # district staff/student ID — bulk-import upsert key
+    grad_year  = db.Column(db.Integer, nullable=True, index=True)  # expected graduation year (students); blank for staff
+    is_active  = db.Column(db.Boolean, nullable=False, default=True, index=True)  # False once graduated/withdrawn — keeps history/incidents intact instead of deleting
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     @property
@@ -195,13 +198,16 @@ class Person(db.Model):
 
     def to_dict(self):
         return {
-            'id':         self.id,
-            'first_name': self.first_name,
-            'last_name':  self.last_name,
-            'email':      self.email,
-            'role':       self.role,
-            'department': self.department,
-            'site':       self.site,
+            'id':          self.id,
+            'first_name':  self.first_name,
+            'last_name':   self.last_name,
+            'email':       self.email,
+            'role':        self.role,
+            'department':  self.department,
+            'site':        self.site,
+            'external_id': self.external_id,
+            'grad_year':   self.grad_year,
+            'is_active':   self.is_active,
         }
 
 
@@ -825,7 +831,12 @@ def admin_orphans():
 def admin_people():
     page     = request.args.get('page', 1, type=int)
     per_page = 50
+    show     = request.args.get('show', 'active')  # 'active' | 'inactive' | 'all'
     query    = Person.query.order_by(Person.last_name, Person.first_name)
+    if show == 'active':
+        query = query.filter(Person.is_active.is_(True))
+    elif show == 'inactive':
+        query = query.filter(Person.is_active.is_(False))
     search   = request.args.get('q', '').strip()
     if search:
         like = f'%{search}%'
@@ -835,10 +846,11 @@ def admin_people():
                 Person.last_name.ilike(like),
                 Person.email.ilike(like),
                 Person.site.ilike(like),
+                Person.external_id.ilike(like),
             )
         )
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    return render_template('admin_people.html', pagination=pagination, search=search)
+    return render_template('admin_people.html', pagination=pagination, search=search, show=show)
 
 
 @app.route('/admin/people/search')
@@ -847,7 +859,8 @@ def admin_people_search():
     """
     Live search for the person-picker widget (e.g. on the assign page) — returns
     a small JSON list of matches instead of ever loading the full roster client-side,
-    so this stays fast with thousands of people.
+    so this stays fast with thousands of people. Only active people are returned,
+    so a graduated/withdrawn person can't accidentally be assigned a device.
     """
     q = request.args.get('q', '').strip()
     if len(q) < 2:
@@ -855,11 +868,13 @@ def admin_people_search():
 
     like = f'%{q}%'
     matches = Person.query.filter(
+        Person.is_active.is_(True),
         db.or_(
             Person.first_name.ilike(like),
             Person.last_name.ilike(like),
             Person.email.ilike(like),
             Person.site.ilike(like),
+            Person.external_id.ilike(like),
         )
     ).order_by(Person.last_name, Person.first_name).limit(20).all()
 
@@ -870,22 +885,31 @@ def admin_people_search():
 
 def _person_form_values():
     """Reads and normalizes the People create/edit form fields from the request."""
+    grad_year_raw = request.form.get('grad_year', '').strip()
     return {
-        'first_name': request.form.get('first_name', '').strip(),
-        'last_name':  request.form.get('last_name', '').strip(),
-        'email':      request.form.get('email', '').strip().lower(),
-        'role':       request.form.get('role', 'staff').strip(),
-        'department': request.form.get('department', '').strip() or None,
-        'site':       request.form.get('site', '').strip() or None,
+        'first_name':  request.form.get('first_name', '').strip(),
+        'last_name':   request.form.get('last_name', '').strip(),
+        'email':       request.form.get('email', '').strip().lower(),
+        'role':        request.form.get('role', 'staff').strip(),
+        'department':  request.form.get('department', '').strip() or None,
+        'site':        request.form.get('site', '').strip() or None,
+        'external_id': request.form.get('external_id', '').strip() or None,
+        'grad_year':   int(grad_year_raw) if grad_year_raw.isdigit() else None,
     }
 
 
-def _validate_person_form(values):
+def _validate_person_form(values, person_id=None):
     """Returns an error message string, or None if the form values are valid."""
     if not values['first_name'] or not values['last_name'] or not values['email']:
         return 'First name, last name, and email are required.'
     if '@' not in values['email'] or '.' not in values['email'].split('@')[-1]:
         return 'Enter a valid email address.'
+    if values['external_id']:
+        dupe = Person.query.filter(Person.external_id == values['external_id'])
+        if person_id:
+            dupe = dupe.filter(Person.id != person_id)
+        if dupe.first():
+            return f'ID number "{values["external_id"]}" is already assigned to another person.'
     return None
 
 
@@ -920,7 +944,7 @@ def admin_person_edit(person_id):
 
     if request.method == 'POST':
         values = _person_form_values()
-        error = _validate_person_form(values)
+        error = _validate_person_form(values, person_id=person_id)
         if error:
             flash(error, 'error')
             return render_template('admin_person_form.html', person=person, form=values)
@@ -939,18 +963,35 @@ def admin_person_edit(person_id):
     return render_template('admin_person_form.html', person=person, form=None)
 
 
+def _release_person_assets(person, condition_in):
+    """Unassigns every asset currently held by a person. Shared by delete and
+    the bulk graduate action. Returns the number of assets released."""
+    affected_assets = Asset.query.filter_by(assigned_to_id=person.id).all()
+    for asset in affected_assets:
+        _close_open_assignment(asset.asset_tag, condition_in=condition_in)
+        asset.assigned_to_id = None
+        asset.status = 'available'
+    return len(affected_assets)
+
+
 @app.route('/admin/people/<int:person_id>/delete', methods=['POST'])
 @login_required
 def admin_person_delete(person_id):
-    """Deletes a person. Any assets currently assigned to them are unassigned, not blocked."""
+    """
+    Permanently deletes a person record. Any assets currently assigned to them
+    are unassigned first, not blocked. AssignmentHistory/Incident rows are kept
+    (person_name is a snapshot) but their person_id link is cleared so the
+    foreign key doesn't block the delete.
+
+    For students leaving at graduation, prefer /admin/people/graduate instead —
+    it archives (is_active=False) rather than deleting, so history/incidents
+    stay fully linked. Use this route for genuine data-entry mistakes.
+    """
     person = Person.query.get_or_404(person_id)
     try:
-        affected_assets = Asset.query.filter_by(assigned_to_id=person.id).all()
-        for asset in affected_assets:
-            _close_open_assignment(asset.asset_tag, condition_in='Person deleted')
-            asset.assigned_to_id = None
-            asset.status = 'available'
-        unassigned = len(affected_assets)
+        unassigned = _release_person_assets(person, condition_in='Person deleted')
+        AssignmentHistory.query.filter_by(person_id=person.id).update({'person_id': None})
+        Incident.query.filter_by(person_id=person.id).update({'person_id': None})
         db.session.delete(person)
         db.session.commit()
         msg = f'Deleted {person.full_name}.'
@@ -961,6 +1002,160 @@ def admin_person_delete(person_id):
         db.session.rollback()
         flash(f'Could not delete person: {e}', 'error')
     return redirect(url_for('admin_people'))
+
+
+@app.route('/admin/people/<int:person_id>/reactivate', methods=['POST'])
+@login_required
+def admin_person_reactivate(person_id):
+    """Undoes an accidental graduate/archive — marks a person active again."""
+    person = Person.query.get_or_404(person_id)
+    person.is_active = True
+    db.session.commit()
+    flash(f'Reactivated {person.full_name}.', 'success')
+    return redirect(url_for('admin_people', show='inactive'))
+
+
+@app.route('/admin/people/import', methods=['GET', 'POST'])
+@login_required
+def admin_people_import():
+    """
+    Bulk create-or-update people from a district roster CSV — the "everyone
+    gets an ID number" workflow. Matches each row to an existing person by
+    external_id first, falling back to email (for rows/people that don't have
+    an ID number yet); if neither matches, a new person is created. Unlike the
+    asset registry import, this never wipes existing rows — it's an upsert.
+    """
+    results = None
+
+    if request.method == 'POST':
+        if 'csv_file' not in request.files or not request.files['csv_file'].filename:
+            flash('Choose a CSV file to upload.', 'error')
+            return redirect(url_for('admin_people_import'))
+
+        file = request.files['csv_file']
+        if not file.filename.lower().endswith('.csv'):
+            flash('File must be a .csv', 'error')
+            return redirect(url_for('admin_people_import'))
+
+        results = []
+        try:
+            content = file.stream.read().decode('utf-8-sig')
+            reader = csv.DictReader(io.StringIO(content))
+            fieldnames = [(f or '').strip().lower().replace(' ', '_') for f in (reader.fieldnames or [])]
+            reader.fieldnames = fieldnames
+
+            if 'first_name' not in fieldnames or 'last_name' not in fieldnames or 'email' not in fieldnames:
+                flash(f'CSV must have "first_name", "last_name", and "email" columns. '
+                      f'Found: {", ".join(fieldnames)}', 'error')
+                return redirect(url_for('admin_people_import'))
+
+            def clean(val):
+                v = (val or '').strip()
+                return v or None
+
+            created = updated = skipped = 0
+            for row in reader:
+                first_name = clean(row.get('first_name'))
+                last_name  = clean(row.get('last_name'))
+                email      = clean(row.get('email'))
+                email      = email.lower() if email else None
+                external_id = clean(row.get('external_id') or row.get('staff_id') or row.get('student_id'))
+                role       = clean(row.get('role'))
+                role       = role.lower() if role and role.lower() in ('staff', 'student') else None
+                department = clean(row.get('department'))
+                site       = clean(row.get('site'))
+                grad_year_raw = clean(row.get('grad_year') or row.get('graduation_year'))
+                grad_year  = int(grad_year_raw) if grad_year_raw and grad_year_raw.isdigit() else None
+
+                if not first_name or not last_name or not email:
+                    skipped += 1
+                    results.append({'row': email or external_id or '(blank)', 'ok': False,
+                                    'message': 'Missing first_name, last_name, or email.'})
+                    continue
+
+                person = None
+                if external_id:
+                    person = Person.query.filter_by(external_id=external_id).first()
+                if not person:
+                    person = Person.query.filter(db.func.lower(Person.email) == email).first()
+
+                if person and external_id and person.external_id and person.external_id != external_id:
+                    skipped += 1
+                    results.append({'row': email, 'ok': False,
+                                    'message': f'ID number conflict: {email} already has ID {person.external_id}.'})
+                    continue
+
+                if person:
+                    person.first_name = first_name
+                    person.last_name  = last_name
+                    person.email      = email
+                    if external_id:  person.external_id = external_id
+                    if role:         person.role = role
+                    if department:   person.department = department
+                    if site:         person.site = site
+                    if grad_year:    person.grad_year = grad_year
+                    updated += 1
+                    results.append({'row': email, 'ok': True, 'message': f'Updated {person.full_name}.'})
+                else:
+                    person = Person(
+                        first_name=first_name, last_name=last_name, email=email,
+                        external_id=external_id, role=role or 'staff',
+                        department=department, site=site, grad_year=grad_year,
+                    )
+                    db.session.add(person)
+                    created += 1
+                    results.append({'row': email, 'ok': True, 'message': f'Created {first_name} {last_name}.'})
+
+            db.session.commit()
+            flash(f'Created {created}, updated {updated}, skipped {skipped} row(s). See details below.',
+                  'success' if not skipped else 'info')
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Import failed: {e}', 'error')
+            return redirect(url_for('admin_people_import'))
+
+    return render_template('admin_people_import.html', results=results)
+
+
+@app.route('/admin/people/graduate', methods=['GET', 'POST'])
+@login_required
+def admin_people_graduate():
+    """
+    Bulk-removes a graduating class from the active roster in one action.
+    Archives (is_active=False) rather than deletes, so assignment history and
+    incident/fee records stay intact for anyone who ever had a device — it
+    just stops them from showing up in People or the assign-device search.
+    """
+    if request.method == 'POST':
+        grad_year_raw = request.form.get('grad_year', '').strip()
+        if not grad_year_raw.isdigit():
+            flash('Choose a valid graduation year.', 'error')
+            return redirect(url_for('admin_people_graduate'))
+        grad_year = int(grad_year_raw)
+
+        students = Person.query.filter_by(role='student', grad_year=grad_year, is_active=True).all()
+        if not students:
+            flash(f'No active students found with graduation year {grad_year}.', 'info')
+            return redirect(url_for('admin_people_graduate'))
+
+        unassigned_total = 0
+        for student in students:
+            unassigned_total += _release_person_assets(student, condition_in='Graduated')
+            student.is_active = False
+        db.session.commit()
+
+        flash(f'Graduated {len(students)} student{"s" if len(students) != 1 else ""} '
+              f'(class of {grad_year}). Unassigned {unassigned_total} device'
+              f'{"s" if unassigned_total != 1 else ""}.', 'success')
+        return redirect(url_for('admin_people', show='inactive'))
+
+    grad_year_counts = dict(
+        db.session.query(Person.grad_year, db.func.count(Person.id))
+        .filter(Person.role == 'student', Person.is_active.is_(True), Person.grad_year.isnot(None))
+        .group_by(Person.grad_year).order_by(Person.grad_year).all()
+    )
+    return render_template('admin_people_graduate.html', grad_year_counts=grad_year_counts)
 
 
 # ─── Asset Assignment ─────────────────────────────────────────────────────────
@@ -1107,6 +1302,10 @@ def admin_bulk_assign():
                 if not person:
                     results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
                                     'message': 'No person with this email — add them first.'})
+                    continue
+                if not person.is_active:
+                    results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
+                                    'message': f'{person.full_name} is graduated/inactive — reactivate first.'})
                     continue
 
                 due_date = None

@@ -24,6 +24,10 @@
       <input type="email" name="email" value="{{ values.email if values else '' }}" required />
     </div>
     <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">ID Number (optional)</label>
+      <input name="external_id" value="{{ (values.external_id or '') if values else '' }}" placeholder="District staff/student ID" />
+    </div>
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Role</label>
       <select name="role">
         <option value="staff"   {{ 'selected' if values and values.role == 'staff' }}>Staff</option>
@@ -34,9 +38,13 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Department (optional)</label>
       <input name="department" value="{{ (values.department or '') if values else '' }}" />
     </div>
-    <div style="margin-bottom:1.5rem;">
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site (optional)</label>
       <input name="site" value="{{ (values.site or '') if values else '' }}" placeholder="e.g. North Elementary" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year (optional, students)</label>
+      <input type="number" name="grad_year" value="{{ (values.grad_year or '') if values else '' }}" placeholder="e.g. 2031" />
     </div>
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if person else 'Add Person' }}</button>
   </form>

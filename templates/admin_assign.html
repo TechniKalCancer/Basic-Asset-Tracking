@@ -35,19 +35,18 @@
     {% endif %}
   </p>
 
-  {% if people %}
+  {% if has_people %}
   <form method="POST">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div style="margin-bottom:1rem;">
+    <div style="margin-bottom:1rem;position:relative;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Assign to</label>
-      <select name="person_id" required>
-        <option value="" disabled {{ 'selected' if not (asset and asset.assigned_to) }}>Select a person…</option>
-        {% for person in people %}
-          <option value="{{ person.id }}" {{ 'selected' if asset and asset.assigned_to_id == person.id }}>
-            {{ person.full_name }} ({{ person.email }})
-          </option>
-        {% endfor %}
-      </select>
+      <input type="hidden" name="person_id" id="personIdInput" value="{{ asset.assigned_to_id if asset and asset.assigned_to else '' }}" />
+      <input type="text" id="personSearchInput" autocomplete="off"
+             placeholder="Type a name, email, or site…"
+             value="{{ asset.assigned_to.full_name if asset and asset.assigned_to else '' }}" />
+      <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+           background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+           max-height:260px;overflow-y:auto;"></div>
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Condition Notes (optional)</label>
@@ -59,6 +58,10 @@
     </div>
     <button type="submit" class="btn btn-primary">Assign</button>
   </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+  </script>
   {% else %}
   <p style="color:var(--muted);">No people in the system yet. <a href="/admin/people/new">Add one</a> first.</p>
   {% endif %}

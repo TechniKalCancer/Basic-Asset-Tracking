@@ -30,9 +30,13 @@
         <option value="student" {{ 'selected' if values and values.role == 'student' }}>Student</option>
       </select>
     </div>
-    <div style="margin-bottom:1.5rem;">
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Department (optional)</label>
       <input name="department" value="{{ (values.department or '') if values else '' }}" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site (optional)</label>
+      <input name="site" value="{{ (values.site or '') if values else '' }}" placeholder="e.g. North Elementary" />
     </div>
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if person else 'Add Person' }}</button>
   </form>

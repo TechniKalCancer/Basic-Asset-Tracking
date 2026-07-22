@@ -186,6 +186,7 @@ class Person(db.Model):
     email      = db.Column(db.String(120), unique=True, nullable=False, index=True)
     role       = db.Column(db.String(20), nullable=False, default='staff')  # 'staff' | 'student'
     department = db.Column(db.String(80), nullable=True)
+    site       = db.Column(db.String(120), nullable=True, index=True)  # school/building, for disambiguating common names
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     @property
@@ -200,6 +201,7 @@ class Person(db.Model):
             'email':      self.email,
             'role':       self.role,
             'department': self.department,
+            'site':       self.site,
         }
 
 
@@ -832,10 +834,38 @@ def admin_people():
                 Person.first_name.ilike(like),
                 Person.last_name.ilike(like),
                 Person.email.ilike(like),
+                Person.site.ilike(like),
             )
         )
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     return render_template('admin_people.html', pagination=pagination, search=search)
+
+
+@app.route('/admin/people/search')
+@api_login_required
+def admin_people_search():
+    """
+    Live search for the person-picker widget (e.g. on the assign page) — returns
+    a small JSON list of matches instead of ever loading the full roster client-side,
+    so this stays fast with thousands of people.
+    """
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    like = f'%{q}%'
+    matches = Person.query.filter(
+        db.or_(
+            Person.first_name.ilike(like),
+            Person.last_name.ilike(like),
+            Person.email.ilike(like),
+            Person.site.ilike(like),
+        )
+    ).order_by(Person.last_name, Person.first_name).limit(20).all()
+
+    return jsonify([{
+        'id': p.id, 'full_name': p.full_name, 'email': p.email, 'site': p.site,
+    } for p in matches])
 
 
 def _person_form_values():
@@ -846,6 +876,7 @@ def _person_form_values():
         'email':      request.form.get('email', '').strip().lower(),
         'role':       request.form.get('role', 'staff').strip(),
         'department': request.form.get('department', '').strip() or None,
+        'site':       request.form.get('site', '').strip() or None,
     }
 
 
@@ -1006,7 +1037,7 @@ def admin_asset_assign(asset_tag):
         flash(message, 'info' if status == 'already' else ('success' if status == 'assigned' else 'error'))
         return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
-    people = Person.query.order_by(Person.last_name, Person.first_name).all()
+    has_people = Person.query.first() is not None
     history = AssignmentHistory.query.filter_by(asset_tag=asset_tag) \
         .order_by(AssignmentHistory.assigned_at.desc()).all()
     events = Event.query.filter_by(asset_tag=asset_tag) \
@@ -1018,7 +1049,7 @@ def admin_asset_assign(asset_tag):
     if asset and asset.assigned_to_id:
         current_person_incident_count = Incident.query.filter_by(person_id=asset.assigned_to_id).count()
 
-    return render_template('admin_assign.html', registry_row=registry_row, asset=asset, people=people,
+    return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
                            history=history, events=events, incidents=incidents,
                            current_person_incident_count=current_person_incident_count,
                            asset_statuses=ASSET_STATUSES,

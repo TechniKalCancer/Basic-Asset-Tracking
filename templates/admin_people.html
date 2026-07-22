@@ -10,7 +10,7 @@
 </div>
 
 <form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;">
-  <input name="q" value="{{ search }}" placeholder="Search name or email…" style="max-width:360px;" />
+  <input name="q" value="{{ search }}" placeholder="Search name, email, or site…" style="max-width:360px;" />
   <button type="submit" class="btn btn-ghost">Search</button>
   {% if search %}<a href="/admin/people" class="btn btn-ghost">Clear</a>{% endif %}
 </form>
@@ -22,6 +22,7 @@
         <th>Name</th>
         <th>Email</th>
         <th>Role</th>
+        <th>Site</th>
         <th>Department</th>
         <th>Assets</th>
         <th></th>
@@ -33,6 +34,7 @@
         <td>{{ person.full_name }}</td>
         <td style="color:var(--muted);">{{ person.email }}</td>
         <td><span class="badge {{ 'badge-blue' if person.role == 'staff' else 'badge-green' }}">{{ person.role }}</span></td>
+        <td style="color:var(--muted);">{{ person.site or '—' }}</td>
         <td style="color:var(--muted);">{{ person.department or '—' }}</td>
         <td style="color:var(--muted);">{{ person.assets|length }}</td>
         <td style="text-align:right;white-space:nowrap;">
@@ -45,7 +47,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
+      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

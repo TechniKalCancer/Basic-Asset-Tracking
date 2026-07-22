@@ -91,9 +91,9 @@ random unique 6-digit tag:
 
 ## People & Asset Assignment
 
-- `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), and optional department.
+- `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), optional department, and optional site (school/building — e.g. "North Elementary"). Search matches name, email, or site, so a common name like "Alex Smith" is easy to disambiguate across buildings.
 - `/admin/people/new`, `/admin/people/<id>/edit`, `/admin/people/<id>/delete`: Manage people. Deleting a person unassigns (rather than blocks on) any assets they held.
-- `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person.
+- `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person. The "Assign to" field is a live search-as-you-type picker (backed by `/admin/people/search`, capped at 20 results) instead of a dropdown listing every person — it stays fast with thousands of people in the system. Results show the matching name, site, and email so you can tell duplicate names apart at a glance.
 - `/admin/assets/<asset_tag>/unassign`: Clear an asset's assignment.
 - The asset registry page (`/admin/registry`) shows each asset's current assignee and links to assign/reassign it.
 
@@ -154,8 +154,10 @@ and the API endpoints. The one exception is devices enrolled as a kiosk:
 ## Dymo Label Printing
 
 The assign page (`/admin/assets/<asset_tag>/assign`) has a "Print Label" card that prints the
-asset tag and assigned person's name to a Dymo LabelWriter (built/tested against a 550 Turbo)
-using the official [DYMO Connect Framework](https://github.com/dymosoftware/dymo-connect-framework)
+asset tag and assigned person's name — plus a Code 128 barcode of the asset tag on the right
+half of the label, so it can be scanned back in by Check In/Check Out, the registry's scan
+lookup, or an audit — to a Dymo LabelWriter (built/tested against a 550 Turbo) using the
+official [DYMO Connect Framework](https://github.com/dymosoftware/dymo-connect-framework)
 JavaScript SDK, vendored at `static/js/dymo.connect.framework.js`.
 
 **On each machine you want to print from, one-time setup:**
@@ -168,12 +170,14 @@ JavaScript SDK, vendored at `static/js/dymo.connect.framework.js`.
 3. Load `/admin/assets/<asset_tag>/assign` — the Print Label card should detect DYMO Connect
    within a few seconds, list your printer(s), and show a live preview.
 
-**Label stock**: built for **30252 Address** (1-1/8" × 3-1/2"). To use a different label size,
-edit `DYMO_LABEL_XML` in `static/js/dymo_label_core.js` (shared by both single and bulk
-printing) — swap `PaperName` and the `DrawCommands` geometry for your stock (DYMO Connect's own
-label designer can export the XML for any label you create there), and keep the two
-`TextObject` names (`AssetTag`, `PersonName`) as-is since `buildAssetLabel()` targets them by
-name via `label.setObjectText()`.
+**Label stock**: built for **30252 Address** (1-1/8" × 3-1/2"), text on the left half and the
+barcode on the right half. To use a different label size, edit `DYMO_LABEL_XML` in
+`static/js/dymo_label_core.js` (shared by both single and bulk printing) — swap `PaperName` and
+the `DrawCommands` geometry for your stock (DYMO Connect's own label designer can export the XML
+for any label you create there), and keep the `AssetTag`/`PersonName`/`Barcode` object names
+as-is since `buildAssetLabel()` targets them by name via `label.setObjectText()`. The barcode
+always encodes the plain asset tag (no "— CHARGER" suffix), so scanning either the device's or
+the charger's printed label resolves to the same asset.
 
 I haven't been able to test actual printing end-to-end since I don't have Dymo hardware in
 this environment — the SDK calls follow DYMO's own official sample code exactly, but printing

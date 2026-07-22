@@ -1,7 +1,12 @@
 {% extends 'base.html' %}
 {% block title %}Admin Panel{% endblock %}
 {% block content %}
-<h1>⚙️ Admin Panel</h1>
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">⚙️ Admin Panel</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+</div>
 
 <div class="stat-grid">
   <div class="stat-card">

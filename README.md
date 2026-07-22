@@ -18,10 +18,10 @@ This is a simple asset tracking system built with Flask, SQLAlchemy, and JavaScr
 
 2. **Create a `.env` file:**
 
-    Create a `.env` file in the root directory of the project and add your environment variables. For example:
+    Copy `.env.example` to `.env` and fill in real values:
 
-    ```env
-    DATABASE_URL=sqlite:///assets.db
+    ```sh
+    cp .env.example .env
     ```
 
 3. **Build and run the Docker containers:**
@@ -59,3 +59,21 @@ This is a simple asset tracking system built with Flask, SQLAlchemy, and JavaScr
 - `/admin/assets/<asset_tag>/assign`: Assign or reassign an asset (must already exist in the registry) to a person.
 - `/admin/assets/<asset_tag>/unassign`: Clear an asset's assignment.
 - The asset registry page (`/admin/registry`) shows each asset's current assignee and links to assign/reassign it.
+
+## Google Workspace Sync (Stage 2 — framework only, not yet implemented)
+
+The scaffolding for syncing Chromebook info (model, org unit, recent user) from Google
+Workspace by serial number is in place, but the actual Admin SDK call is not implemented yet.
+
+- `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_ADMIN_IMPERSONATE_EMAIL` (see `.env.example`) control
+  whether sync shows as "Configured" in the admin panel. Leaving them blank is fine — the rest
+  of the app works normally, the sync button just stays disabled.
+- `Asset.google_model`, `google_org_unit`, `google_recent_user`, `google_last_sync_at` columns
+  already exist to hold synced data once it's wired up.
+- `sync_chromeos_device_from_google(serial_number)` in `app.py` is the function to fill in —
+  it currently raises `NotImplementedError`. It needs a Google Cloud service account with
+  domain-wide delegation authorized (in the Workspace Admin console) for the
+  `admin.directory.device.chromeos.readonly` scope, calling the `chromeosdevices` resource
+  of the Admin SDK Directory API while impersonating a super admin.
+- `/admin/assets/<asset_tag>/google_sync` (POST) is already wired to call it and store the
+  result — no route/UI changes should be needed to activate Stage 2, just that one function.

@@ -4,3 +4,8 @@ python-dotenv
 Werkzeug
 gunicorn
 psycopg2-binary
+
+# Google Workspace sync (Stage 2 — framework only, not yet implemented)
+google-api-python-client
+google-auth
+google-auth-httplib2

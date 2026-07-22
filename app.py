@@ -27,6 +27,11 @@ ADMIN_PASSWORD_HASH = generate_password_hash(
     os.environ.get('ADMIN_PASSWORD', 'admin123'), method='pbkdf2:sha256'
 )
 
+# ─── Google Workspace sync config (Stage 2 — framework only, not yet implemented) ──
+GOOGLE_SERVICE_ACCOUNT_FILE    = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')
+GOOGLE_ADMIN_IMPERSONATE_EMAIL = os.environ.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')
+GOOGLE_SYNC_ENABLED = bool(GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSONATE_EMAIL)
+
 # ─── Simple in-memory login rate limiter ──────────────────────────────────────
 _login_attempts = defaultdict(list)  # ip -> [timestamp, ...]
 MAX_ATTEMPTS    = 5
@@ -83,6 +88,12 @@ class Asset(db.Model):
     is_valid       = db.Column(db.Boolean, default=False, nullable=False)
     assigned_to_id = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
 
+    # Populated by Google Workspace Chrome device sync (Stage 2, not yet implemented).
+    google_model       = db.Column(db.String(120), nullable=True)
+    google_org_unit    = db.Column(db.String(255), nullable=True)
+    google_recent_user = db.Column(db.String(255), nullable=True)
+    google_last_sync_at = db.Column(db.DateTime, nullable=True)
+
     assigned_to = db.relationship('Person', backref='assets')
 
     def to_dict(self):
@@ -92,6 +103,10 @@ class Asset(db.Model):
             'check_out':    self.check_out.isoformat() if self.check_out else None,
             'is_valid':     self.is_valid,
             'assigned_to':  self.assigned_to.full_name if self.assigned_to else None,
+            'google_model':        self.google_model,
+            'google_org_unit':     self.google_org_unit,
+            'google_recent_user':  self.google_recent_user,
+            'google_last_sync_at': self.google_last_sync_at.isoformat() if self.google_last_sync_at else None,
         }
 
 
@@ -177,6 +192,30 @@ def heal_orphans():
     return healed
 
 
+def sync_chromeos_device_from_google(serial_number):
+    """
+    Looks up a Chromebook by serial number via the Google Admin SDK Directory API
+    and returns its model, org unit, and most recently synced user.
+
+    Stage 2 work — not implemented yet. Requires a Google Cloud service account
+    with domain-wide delegation authorized (in the Workspace Admin console) for
+    the https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly
+    scope, impersonating a super admin (GOOGLE_ADMIN_IMPERSONATE_EMAIL).
+
+    Args:
+        serial_number: The device's manufacturer serial number.
+
+    Returns:
+        A dict with keys 'model', 'org_unit', 'recent_user'.
+
+    Raises:
+        NotImplementedError: Always, until Stage 2 is built out.
+    """
+    from google.oauth2 import service_account  # noqa: F401 (Stage 2 wiring)
+    from googleapiclient.discovery import build  # noqa: F401 (Stage 2 wiring)
+    raise NotImplementedError('Google Workspace sync is configured but not implemented yet.')
+
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -260,7 +299,8 @@ def admin_panel():
     return render_template('admin_panel.html',
                            registry_count=registry_count,
                            orphan_count=orphan_count,
-                           people_count=people_count)
+                           people_count=people_count,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
@@ -553,7 +593,8 @@ def admin_asset_assign(asset_tag):
         return redirect(url_for('admin_registry'))
 
     people = Person.query.order_by(Person.last_name, Person.first_name).all()
-    return render_template('admin_assign.html', registry_row=registry_row, asset=asset, people=people)
+    return render_template('admin_assign.html', registry_row=registry_row, asset=asset, people=people,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
 @app.route('/admin/assets/<string:asset_tag>/unassign', methods=['POST'])
@@ -568,6 +609,42 @@ def admin_asset_unassign(asset_tag):
         db.session.rollback()
         flash(f'Could not unassign asset: {e}', 'error')
     return redirect(url_for('admin_registry'))
+
+
+@app.route('/admin/assets/<string:asset_tag>/google_sync', methods=['POST'])
+@login_required
+def admin_asset_google_sync(asset_tag):
+    """Pulls model/org-unit/recent-user from Google Workspace for one asset, by serial number."""
+    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet. Set GOOGLE_SERVICE_ACCOUNT_FILE '
+              'and GOOGLE_ADMIN_IMPERSONATE_EMAIL in .env to enable it.', 'info')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+    if not registry_row.serial_number:
+        flash(f'{asset_tag} has no serial number on file to look up.', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+    try:
+        info = sync_chromeos_device_from_google(registry_row.serial_number)
+        asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+        if not asset:
+            asset = Asset(asset_tag=asset_tag, is_valid=True)
+            db.session.add(asset)
+        asset.google_model        = info.get('model')
+        asset.google_org_unit     = info.get('org_unit')
+        asset.google_recent_user  = info.get('recent_user')
+        asset.google_last_sync_at = datetime.utcnow()
+        db.session.commit()
+        flash(f'Synced {asset_tag} from Google.', 'success')
+    except NotImplementedError as e:
+        flash(str(e), 'info')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Google sync failed: {e}', 'error')
+
+    return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
 # ─── Scan / Check-in / Check-out API ─────────────────────────────────────────

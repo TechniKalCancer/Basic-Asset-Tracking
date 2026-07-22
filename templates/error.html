@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:480px;margin:3rem auto;text-align:center;">
+  <div style="font-size:2.5rem;margin-bottom:.5rem;">
+    {% if code == 404 %}🔍{% elif code == 413 %}📦{% else %}⚠️{% endif %}
+  </div>
+  <h1 style="margin-bottom:.5rem;">{{ code }}</h1>
+  <p style="color:var(--muted);margin-bottom:1.5rem;">{{ message }}</p>
+  <a href="/" class="btn btn-primary">Go Home</a>
+</div>
+{% endblock %}

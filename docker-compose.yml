@@ -1,0 +1,13 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8081:8081"
+    env_file:
+      - .env
+    volumes:
+      - asset-tracker-data:/app/instance
+    restart: unless-stopped
+
+volumes:
+  asset-tracker-data:

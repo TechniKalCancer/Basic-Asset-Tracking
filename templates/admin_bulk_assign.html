@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Bulk Assign{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">👥 Bulk Assign</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <h2>Upload Roster CSV</h2>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    Assign a whole roster of students to their devices in one shot — e.g. at the start of the
+    year. Required columns: <code>asset_tag</code>, <code>email</code>. Optional: <code>due_date</code>
+    (<code>YYYY-MM-DD</code>). Each person must already exist in <a href="/admin/people">People</a> —
+    this won't create new people from a typo'd email, it'll just report the row as an error.
+  </p>
+
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
+    <strong style="color:var(--text);">Example:</strong><br>
+    <code>asset_tag,email,due_date</code><br>
+    <code>700001,alex.rivera@example.com,2027-06-01</code><br>
+    <code>700002,jordan.lee@example.com,</code>
+  </div>
+
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="csv_file" accept=".csv" style="flex:1;min-width:200px;" required />
+      <button type="submit" class="btn btn-primary">Assign From CSV</button>
+    </div>
+  </form>
+</div>
+
+{% if results %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr><th>Asset Tag</th><th>Email</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td><code>{{ r.asset_tag }}</code></td>
+        <td style="color:var(--muted);">{{ r.email }}</td>
+        <td style="color:{{ 'var(--success)' if r.ok else 'var(--danger)' }};">
+          {{ '✓' if r.ok else '✗' }} {{ r.message }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

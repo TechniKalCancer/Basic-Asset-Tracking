@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Asset Audit{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔍 Asset Audit</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.88rem;max-width:640px;margin-bottom:1.5rem;">
+  Physically verifying devices catches loss early instead of discovering it at year-end collection.
+  Walk a room or cart and scan every device you see — anything in scope that hasn't been scanned
+  since the audit start date shows up below as <strong style="color:var(--text);">missing</strong>.
+</p>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="num" style="color:var(--success);">{{ verified_count }}</div>
+    <div class="lbl">Verified</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:{{ 'var(--danger)' if missing else 'var(--success)' }};">{{ missing|length }}</div>
+    <div class="lbl">Missing</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ total_count }}</div>
+    <div class="lbl">In Scope</div>
+  </div>
+</div>
+
+<form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
+  <label style="font-size:.85rem;color:var(--muted);">Audit since</label>
+  <input type="date" name="since" value="{{ since }}" />
+  <select name="status" style="max-width:160px;">
+    <option value="">All statuses</option>
+    {% for s in asset_statuses %}
+      <option value="{{ s }}" {{ 'selected' if s == status_filter }}>{{ s|capitalize }}</option>
+    {% endfor %}
+  </select>
+  <select name="device_type" style="max-width:160px;">
+    <option value="">All device types</option>
+    {% for t in device_types %}
+      <option value="{{ t }}" {{ 'selected' if t == type_filter }}>{{ t|capitalize }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-ghost">Apply</button>
+</form>
+
+<form method="POST" action="/admin/audit/scan" class="card" style="display:flex;gap:.6rem;align-items:center;padding:1rem 1.5rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="since" value="{{ since }}">
+  <input type="hidden" name="status" value="{{ status_filter }}">
+  <input type="hidden" name="device_type" value="{{ type_filter }}">
+  <span style="font-size:1.3rem;">📷</span>
+  <input name="value" placeholder="Scan an asset tag or serial to mark it verified…" autocomplete="off" autofocus style="flex:1;" />
+  <button type="submit" class="btn btn-primary">Verify</button>
+</form>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr><th>Asset Tag</th><th>Serial Number</th><th>Description</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in missing %}
+      <tr>
+        <td><code>{{ row.asset_tag }}</code></td>
+        <td>{{ row.serial_number or '—' }}</td>
+        <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td style="text-align:right;">
+          <a href="/admin/assets/{{ row.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">View</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--success);padding:2rem;">Everything in scope has been verified. 🎉</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

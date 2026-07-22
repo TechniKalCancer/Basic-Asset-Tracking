@@ -111,7 +111,10 @@ async function submitScan() {
 
   const res  = await fetch('/api/scan', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content,
+    },
     body: JSON.stringify({ scan_value: val, action: ACTION }),
   });
   const data = await res.json();

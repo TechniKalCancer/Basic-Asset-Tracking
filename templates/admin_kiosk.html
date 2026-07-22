@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block title %}Kiosk Devices{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🖥️ Kiosk Devices</h1>
+  <span class="badge badge-blue">{{ devices|length }} enrolled</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.88rem;margin-bottom:1.5rem;max-width:640px;">
+  Everything on this site requires admin login by default. A device enrolled here can use
+  Check In / Check Out without logging in — nothing else. To enroll a device, log in and load
+  this page <strong>on that device</strong>, then use the form below.
+</p>
+
+<div class="card" style="max-width:480px;">
+  <h2>Enroll This Device</h2>
+  {% if current_device %}
+    <p style="color:var(--success);font-size:.9rem;">
+      ✅ This device is already enrolled as "<strong>{{ current_device.label or 'Unnamed device' }}</strong>".
+    </p>
+  {% else %}
+    <form method="POST" action="/admin/kiosk/enable">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Label (optional)</label>
+        <input name="label" placeholder="e.g. Front Desk Chromebook Station" />
+      </div>
+      <button type="submit" class="btn btn-primary">Enroll This Device</button>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Enrolled</th>
+        <th></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for device in devices %}
+      <tr>
+        <td>{{ device.label or 'Unnamed device' }}</td>
+        <td style="color:var(--muted);">{{ device.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>
+          {% if current_device and current_device.id == device.id %}
+            <span class="badge badge-green">This device</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/kiosk/{{ device.id }}/revoke"
+                onsubmit="return confirm('Revoke kiosk access for ' + {{ (device.label or 'this device')|tojson }} + '?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No kiosk devices enrolled yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

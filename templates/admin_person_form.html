@@ -10,6 +10,7 @@
 {% set values = form or person %}
 <div class="card" style="max-width:480px;">
   <form method="POST">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">First Name</label>
       <input name="first_name" value="{{ values.first_name if values else '' }}" required />

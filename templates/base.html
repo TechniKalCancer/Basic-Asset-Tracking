@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}Asset Tracker{% endblock %}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -89,6 +90,8 @@
     .btn-danger   { background: var(--danger);   color: #fff; }
     .btn-ghost    { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn:hover    { opacity: .88; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn:disabled:hover { opacity: .4; }
 
     input, select {
       background: var(--surface2);
@@ -144,7 +147,9 @@
     <a href="/">Home</a>
     <a href="/checkin">Check In</a>
     <a href="/checkout">Check Out</a>
-    <a href="/asset_history">History</a>
+    {% if session.get('admin_logged_in') %}
+      <a href="/asset_history">History</a>
+    {% endif %}
     <span class="spacer"></span>
     {% if session.get('admin_logged_in') %}
       <a href="/admin">Admin</a>

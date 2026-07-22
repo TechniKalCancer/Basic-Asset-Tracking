@@ -39,6 +39,7 @@
           <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
           <form method="POST" action="/admin/people/{{ person.id }}/delete" style="display:inline;"
                 onsubmit="return confirm('Delete {{ person.full_name }}? Any assigned assets will be unassigned.');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
           </form>
         </td>

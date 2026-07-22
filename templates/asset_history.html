@@ -29,6 +29,7 @@
         <tr>
           <th>Timestamp</th>
           <th>Action</th>
+          <th>Person</th>
           <th>Scanned Value</th>
           <th>Scan Type</th>
         </tr>
@@ -44,6 +45,7 @@
               <span class="badge badge-blue">Check Out</span>
             {% endif %}
           </td>
+          <td style="color:var(--muted);">{{ e.person_name or '—' }}</td>
           <td><code>{{ e.scanned_value or '—' }}</code></td>
           <td style="color:var(--muted);">{{ e.scan_type or '—' }}</td>
         </tr>

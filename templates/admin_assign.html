@@ -7,6 +7,26 @@
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
 </div>
 
+{% set status = asset.status if asset else 'available' %}
+{% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
+                        'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
+
+<div class="card" style="max-width:480px;">
+  <h2 style="display:flex;align-items:center;gap:.6rem;">
+    Status
+    <span class="badge {{ status_badge.get(status, 'badge-blue') }}">{{ status }}</span>
+  </h2>
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/status" style="display:flex;gap:.6rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="status" style="flex:1;">
+      {% for s in asset_statuses %}
+        <option value="{{ s }}" {{ 'selected' if s == status }}>{{ s|capitalize }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-ghost">Save</button>
+  </form>
+</div>
+
 <div class="card" style="max-width:480px;">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     {{ registry_row.description or 'No description on file.' }}
@@ -17,7 +37,8 @@
 
   {% if people %}
   <form method="POST">
-    <div style="margin-bottom:1.5rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Assign to</label>
       <select name="person_id" required>
         <option value="" disabled {{ 'selected' if not (asset and asset.assigned_to) }}>Select a person…</option>
@@ -28,6 +49,14 @@
         {% endfor %}
       </select>
     </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Condition Notes (optional)</label>
+      <input name="condition_out" placeholder="e.g. Minor scratch on lid" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Due Date (optional)</label>
+      <input type="date" name="due_date" />
+    </div>
     <button type="submit" class="btn btn-primary">Assign</button>
   </form>
   {% else %}
@@ -36,8 +65,114 @@
 
   {% if asset and asset.assigned_to %}
   <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/unassign" style="margin-top:1rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:.8rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Condition on Return (optional)</label>
+      <input name="condition_in" placeholder="e.g. Returned in good condition" />
+    </div>
     <button type="submit" class="btn btn-ghost" style="color:var(--danger);border-color:var(--danger);">Unassign</button>
   </form>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h2>📜 Assignment History</h2>
+  {% if history %}
+  <table>
+    <thead>
+      <tr><th>Person</th><th>Assigned</th><th>Due</th><th>Returned</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td>{{ h.person_name }}</td>
+        <td style="color:var(--muted);">{{ h.assigned_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:{{ 'var(--danger)' if (h.due_date and not h.unassigned_at and h.due_date < now) else 'var(--muted)' }};">
+          {{ h.due_date.strftime('%Y-%m-%d') if h.due_date else '—' }}
+        </td>
+        <td style="color:var(--muted);">
+          {% if h.unassigned_at %}{{ h.unassigned_at.strftime('%Y-%m-%d') }}{% else %}<span class="badge badge-blue" style="font-size:.7rem;">Current</span>{% endif %}
+        </td>
+        <td style="color:var(--muted);font-size:.8rem;">
+          {% if h.condition_out %}Out: {{ h.condition_out }}{% endif %}
+          {% if h.condition_out and h.condition_in %}<br>{% endif %}
+          {% if h.condition_in %}In: {{ h.condition_in }}{% endif %}
+          {% if not h.condition_out and not h.condition_in %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;">No assignment history yet.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h2>🔄 Check-In/Out Log</h2>
+  {% if events %}
+  <table>
+    <thead>
+      <tr><th>When</th><th>Action</th><th>Person</th></tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ e.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>
+          <span class="badge {{ 'badge-green' if e.action == 'checkin' else 'badge-blue' }}" style="font-size:.7rem;">
+            {{ e.action }}
+          </span>
+        </td>
+        <td style="color:var(--muted);">{{ e.person_name or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;">No check-in/out scans yet.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h2>🛠️ Incidents / Damage Reports</h2>
+  {% if asset and asset.assigned_to and current_person_incident_count %}
+    <p style="color:var(--warning);font-size:.85rem;margin-bottom:1rem;">
+      This will be incident #{{ current_person_incident_count + 1 }} for {{ asset.assigned_to.full_name }}
+      (across all assets, all time).
+    </p>
+  {% endif %}
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" style="margin-bottom:1rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:.8rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
+      <input name="description" placeholder="e.g. Cracked screen, reported by student" required />
+    </div>
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="fee_charged" style="width:auto;" />
+      Fee charged for this incident
+    </label>
+    <button type="submit" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">Log Incident</button>
+  </form>
+
+  {% if incidents %}
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Person</th><th>Description</th><th>Fee</th></tr>
+    </thead>
+    <tbody>
+      {% for inc in incidents %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:var(--muted);">{{ inc.person_name or '—' }}</td>
+        <td>{{ inc.description }}</td>
+        <td>{% if inc.fee_charged %}<span class="badge badge-yellow" style="font-size:.7rem;">Charged</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;">No incidents logged for this asset.</p>
   {% endif %}
 </div>
 
@@ -61,9 +196,38 @@
   {% endif %}
 
   <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/google_sync">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-ghost" {{ 'disabled' if not google_sync_enabled }}>
       Sync from Google{{ '' if google_sync_enabled else ' (not configured)' }}
     </button>
   </form>
 </div>
+
+<div class="card" style="max-width:480px;">
+  <h2>🖨️ Print Label</h2>
+  <p style="color:var(--muted);font-size:.78rem;margin-bottom:1rem;">
+    Requires DYMO Connect installed and running on this device. Label stock: 30252 Address.
+  </p>
+  <p id="dymoStatus" style="color:var(--muted);font-size:.85rem;">Checking for DYMO Connect…</p>
+  <div id="dymoControls" style="display:none;">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Printer</label>
+      <select id="printerSelect"></select>
+    </div>
+    <img id="labelPreview" style="display:none;max-width:100%;border:1px solid var(--border);border-radius:7px;margin-bottom:1rem;" alt="Label preview" />
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="printChargerLabel" style="width:auto;" />
+      Also print a second label for the charger
+    </label>
+    <button id="printLabelBtn" type="button" class="btn btn-primary">Print Label</button>
+  </div>
+</div>
+
+<script>
+  window.PRINT_LABEL_ASSET_TAG = {{ registry_row.asset_tag|tojson }};
+  window.PRINT_LABEL_PERSON_NAME = {{ (asset.assigned_to.full_name if asset and asset.assigned_to else '')|tojson }};
+</script>
+<script src="/static/js/dymo.connect.framework.js"></script>
+<script src="/static/js/dymo_label_core.js"></script>
+<script src="/static/js/print_label.js"></script>
 {% endblock %}

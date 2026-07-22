@@ -5,13 +5,32 @@
   <h1 style="margin:0;">📋 Asset Registry</h1>
   <span class="badge badge-blue">{{ pagination.total }} total</span>
   <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/registry/export" class="btn btn-ghost">⬇️ Export CSV</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
-<form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;">
-  <input name="q" value="{{ search }}" placeholder="Search tag, serial, or description…" style="max-width:360px;" />
-  <button type="submit" class="btn btn-ghost">Search</button>
-  {% if search %}<a href="/admin/registry" class="btn btn-ghost">Clear</a>{% endif %}
+<form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;">
+  <input name="q" value="{{ search }}" placeholder="Search tag, serial, or description…" style="max-width:360px;flex:1;" />
+  <select name="status" style="max-width:160px;">
+    <option value="">All statuses</option>
+    {% for s in asset_statuses %}
+      <option value="{{ s }}" {{ 'selected' if s == status_filter }}>{{ s|capitalize }}</option>
+    {% endfor %}
+  </select>
+  <select name="device_type" style="max-width:160px;">
+    <option value="">All device types</option>
+    {% for t in device_types %}
+      <option value="{{ t }}" {{ 'selected' if t == type_filter }}>{{ t|capitalize }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-ghost">Filter</button>
+  {% if search or status_filter or type_filter %}<a href="/admin/registry" class="btn btn-ghost">Clear</a>{% endif %}
+</form>
+
+<form method="GET" action="/admin/scan_lookup" class="card" style="display:flex;gap:.6rem;align-items:center;padding:1rem 1.5rem;">
+  <span style="font-size:1.3rem;">🔎</span>
+  <input name="value" placeholder="Scan or type an asset tag/serial to jump to it…" autocomplete="off" style="flex:1;" />
+  <button type="submit" class="btn btn-ghost">Go</button>
 </form>
 
 <div class="card" style="padding:0;overflow:hidden;">
@@ -21,17 +40,27 @@
         <th>Asset Tag</th>
         <th>Serial Number</th>
         <th>Description</th>
+        <th>Type</th>
+        <th>Status</th>
         <th>Assigned To</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
+      {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
+                              'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
       {% for row in pagination.items %}
       {% set asset = assets_by_tag.get(row.asset_tag) %}
       <tr>
         <td><code>{{ row.asset_tag }}</code></td>
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td style="color:var(--muted);">{{ row.device_type|capitalize }}</td>
+        <td>
+          <span class="badge {{ status_badge.get(asset.status if asset else 'available', 'badge-blue') }}">
+            {{ (asset.status if asset else 'available') }}
+          </span>
+        </td>
         <td>
           {% if asset and asset.assigned_to %}
             {{ asset.assigned_to.full_name }}
@@ -46,7 +75,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
+      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -55,13 +84,13 @@
 {% if pagination.pages > 1 %}
 <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;">
   {% if pagination.has_prev %}
-    <a href="?page={{ pagination.prev_num }}{% if search %}&q={{ search }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
+    <a href="?page={{ pagination.prev_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
   {% endif %}
   <span style="padding:.5rem 1rem;color:var(--muted);font-size:.88rem;">
     Page {{ pagination.page }} of {{ pagination.pages }}
   </span>
   {% if pagination.has_next %}
-    <a href="?page={{ pagination.next_num }}{% if search %}&q={{ search }}{% endif %}" class="btn btn-ghost">Next ›</a>
+    <a href="?page={{ pagination.next_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
   {% endif %}
 </div>
 {% endif %}

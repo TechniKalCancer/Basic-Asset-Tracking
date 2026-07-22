@@ -6,6 +6,9 @@
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
+  <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
+    ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
+  </span>
 </div>
 
 <div class="stat-grid">
@@ -23,6 +26,23 @@
   </div>
 </div>
 
+<!-- Status breakdown -->
+<div class="card">
+  <h2>📊 Assets by Status</h2>
+  <div class="stat-grid">
+    {% set status_colors = {'available': 'var(--success)', 'assigned': 'var(--accent)',
+                             'repair': 'var(--warning)', 'lost': 'var(--danger)', 'retired': 'var(--muted)'} %}
+    {% for s, count in status_counts.items() %}
+    <a href="/admin/registry?status={{ s }}" style="text-decoration:none;">
+      <div class="stat-card">
+        <div class="num" style="color:{{ status_colors.get(s, 'var(--accent)') }};">{{ count }}</div>
+        <div class="lbl">{{ s|capitalize }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
 <!-- CSV Upload -->
 <div class="card">
   <h2>📂 Upload Asset Registry CSV</h2>
@@ -35,7 +55,8 @@
     <strong style="color:var(--text);">Accepted column names:</strong><br>
     <code>Asset ID</code> or <code>asset_tag</code> &mdash; required<br>
     <code>Serial Number</code> &mdash; optional<br>
-    <code>description</code> &mdash; optional<br><br>
+    <code>description</code> &mdash; optional<br>
+    <code>device_type</code> or <code>type</code> &mdash; optional, one of: chromebook, laptop, ipad, charger, hotspot, other (defaults to chromebook)<br><br>
     <strong style="color:var(--text);">Example (MDM export format):</strong><br>
     <code>Asset ID,Serial Number</code><br>
     <code>126295,0UG99FBDA22224</code><br>
@@ -43,6 +64,7 @@
   </div>
 
   <form method="POST" action="/admin/upload_csv" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
       <input type="file" name="csv_file" accept=".csv" style="flex:1;min-width:200px;" required />
       <button type="submit" class="btn btn-primary">Upload & Replace</button>
@@ -54,6 +76,15 @@
 <div style="display:flex;gap:1rem;flex-wrap:wrap;">
   <a href="/admin/registry" class="btn btn-ghost">📋 View Registry</a>
   <a href="/admin/people" class="btn btn-ghost">👤 Manage People</a>
+  <a href="/admin/bulk_assign" class="btn btn-ghost">👥 Bulk Assign</a>
+  <a href="/admin/bulk_print" class="btn btn-ghost">🖨️ Bulk Print Labels</a>
+  <a href="/admin/audit" class="btn btn-ghost">🔍 Asset Audit</a>
+  <a href="/admin/kiosk" class="btn btn-ghost">🖥️ Kiosk Devices</a>
+  <a href="/admin/registry/export" class="btn btn-ghost">⬇️ Export CSV</a>
+  <a href="/admin/reminders" class="btn btn-ghost"
+     style="{{ 'color:var(--danger);border-color:var(--danger);' if overdue_count else '' }}">
+    ⏰ {{ 'View ' + overdue_count|string + ' Overdue' if overdue_count else 'Reminders' }}
+  </a>
   {% if orphan_count %}
     <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">
       ⚠️ View {{ orphan_count }} Orphan{{ 's' if orphan_count != 1 }}

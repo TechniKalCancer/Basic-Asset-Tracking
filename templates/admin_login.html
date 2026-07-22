@@ -5,6 +5,7 @@
   <div class="card">
     <h1 style="text-align:center;margin-bottom:1.5rem;">🔒 Admin Login</h1>
     <form method="POST" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">Password</label>
       <input type="password" name="password" autofocus placeholder="Enter admin password"
              style="margin-bottom:1rem;" autocomplete="current-password" />

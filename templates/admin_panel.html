@@ -47,13 +47,14 @@
 <div class="card">
   <h2>📂 Upload Asset Registry CSV</h2>
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
-    The CSV must have an <code>asset_tag</code> column. Optional columns: <code>serial_number</code>, <code>description</code>.<br>
+    All columns are optional — rows with no <code>asset_tag</code> (and no <code>serial_number</code>
+    to fall back on) get a random unique 6-digit tag self-assigned automatically.<br>
     Uploading a new CSV <strong>completely replaces</strong> the old registry and auto-heals any orphaned scan records.
   </p>
 
   <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
     <strong style="color:var(--text);">Accepted column names:</strong><br>
-    <code>Asset ID</code> or <code>asset_tag</code> &mdash; required<br>
+    <code>Asset ID</code> or <code>asset_tag</code> &mdash; optional, auto-assigned if blank<br>
     <code>Serial Number</code> &mdash; optional<br>
     <code>description</code> &mdash; optional<br>
     <code>device_type</code> or <code>type</code> &mdash; optional, one of: chromebook, laptop, ipad, charger, hotspot, other (defaults to chromebook)<br><br>

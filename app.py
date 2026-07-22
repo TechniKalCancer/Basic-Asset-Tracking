@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 import os
@@ -299,6 +300,19 @@ with app.app_context():
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+def _generate_asset_tag(existing_tags):
+    """
+    Returns a random unique 6-digit asset tag (100000-999999) not present in
+    existing_tags — used to self-assign a tag when one isn't provided, whether
+    adding a device manually or importing a CSV row with no asset_tag/serial.
+    """
+    for _ in range(50):
+        candidate = str(secrets.randbelow(900000) + 100000)
+        if candidate not in existing_tags:
+            return candidate
+    raise RuntimeError('Could not generate a unique asset tag after 50 attempts.')
+
+
 def resolve_scan(scanned_value: str):
     """
     Given a raw scan value, return (asset_tag, scan_type) or (None, None).
@@ -572,8 +586,9 @@ def upload_csv():
         desc_col   = next((c for c in DESC_COLS   if c in normalized_headers), None)
         type_col   = next((c for c in TYPE_COLS   if c in normalized_headers), None)
 
-        if not tag_col:
-            flash(f'CSV must have an "Asset ID" or "asset_tag" column. Found: {", ".join(normalized_headers)}', 'error')
+        if not any((tag_col, serial_col, desc_col, type_col)):
+            flash(f'CSV must have at least one recognized column (asset_tag, serial_number, '
+                  f'description, or device_type). Found: {", ".join(normalized_headers)}', 'error')
             return redirect(url_for('admin_panel'))
 
         rows = list(reader)
@@ -584,6 +599,7 @@ def upload_csv():
 
         imported = 0
         skipped  = 0
+        auto_assigned = 0
         seen_tags    = set()
         seen_serials = set()
 
@@ -593,7 +609,7 @@ def upload_csv():
             return None if (not v or v == '0') else v
 
         for row in rows:
-            tag    = clean(row.get(tag_col, ''))
+            tag    = clean(row.get(tag_col, ''))    if tag_col    else None
             serial = clean(row.get(serial_col, '')) if serial_col else None
             desc   = clean(row.get(desc_col, ''))   if desc_col   else None
             dtype  = clean(row.get(type_col, ''))   if type_col   else None
@@ -603,10 +619,15 @@ def upload_csv():
             if not tag and serial:
                 tag = serial
 
-            # Skip completely empty rows
-            if not tag:
+            # Skip rows where every recognized column is blank (e.g. stray blank CSV lines)
+            if not tag and not serial and not desc:
                 skipped += 1
                 continue
+
+            # Still no tag (no asset_id/serial given) but the row has real data — self-assign one
+            if not tag:
+                tag = _generate_asset_tag(seen_tags)
+                auto_assigned += 1
 
             # Skip duplicate tags
             if tag in seen_tags:
@@ -633,6 +654,8 @@ def upload_csv():
         healed = heal_orphans()
 
         msg = f'Imported {imported} assets.'
+        if auto_assigned:
+            msg += f' Self-assigned a tag for {auto_assigned} row{"s" if auto_assigned != 1 else ""} with none given.'
         if skipped:
             msg += f' Skipped {skipped} duplicate/invalid rows.'
         if healed:
@@ -655,6 +678,49 @@ def _filter_registry_by_status(query, status_filter):
         return query.filter(~AssetRegistry.asset_tag.in_(non_available))
     matching = db.session.query(Asset.asset_tag).filter(Asset.status == status_filter)
     return query.filter(AssetRegistry.asset_tag.in_(matching))
+
+
+@app.route('/admin/registry/new', methods=['GET', 'POST'])
+@login_required
+def admin_registry_new():
+    """Manually adds a single device. Leave asset_tag blank to self-assign a random 6-digit one."""
+    if request.method == 'POST':
+        tag = request.form.get('asset_tag', '').strip()
+        serial = request.form.get('serial_number', '').strip() or None
+        description = request.form.get('description', '').strip() or None
+        device_type = request.form.get('device_type', 'chromebook').strip()
+        device_type = device_type if device_type in DEVICE_TYPES else 'chromebook'
+
+        if tag and AssetRegistry.query.filter_by(asset_tag=tag).first():
+            flash(f'Asset tag "{tag}" already exists.', 'error')
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+
+        if serial and AssetRegistry.query.filter_by(serial_number=serial).first():
+            flash(f'A device with serial number "{serial}" already exists.', 'error')
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+
+        if not tag:
+            existing_tags = {t for (t,) in db.session.query(AssetRegistry.asset_tag).all()}
+            tag = _generate_asset_tag(existing_tags)
+
+        try:
+            db.session.add(AssetRegistry(
+                asset_tag=tag, serial_number=serial,
+                description=description, device_type=device_type,
+            ))
+            db.session.commit()
+            flash(f'Added device {tag} to the registry.', 'success')
+            return redirect(url_for('admin_asset_assign', asset_tag=tag))
+        except IntegrityError as e:
+            db.session.rollback()
+            flash('Could not add device: that asset tag or serial number is already in use.', 'error')
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not add device: {e}', 'error')
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+
+    return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=None)
 
 
 @app.route('/admin/registry')
@@ -1375,10 +1441,13 @@ def scan_asset():
     if action not in ('checkin', 'checkout'):
         return jsonify({'error': 'action must be checkin or checkout'}), 400
 
-    # Validate length — must be 5-6 digits (asset tag) or 10 chars (serial)
-    if len(scan_value) not in (5, 6, 10):
+    # Sanity-check length rather than requiring an exact match — different device
+    # brands use different serial/service-tag lengths (e.g. 10-char HP serials vs.
+    # 7-char Dell Service Tags), so this only catches obviously-wrong scans
+    # (empty, or way too short/long to be any real tag or serial).
+    if not (4 <= len(scan_value) <= 20):
         return jsonify({
-            'error': f'Invalid scan: "{scan_value}" is {len(scan_value)} characters. Asset tags must be 5-6 digits, serials must be 10 characters.',
+            'error': f'Invalid scan: "{scan_value}" is {len(scan_value)} characters — that doesn\'t look like a valid asset tag or serial number.',
             'invalid_format': True,
         }), 400
 

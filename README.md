@@ -52,6 +52,19 @@ This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and J
 - `POST /api/assets/<asset_id>`: Check in or check out an asset.
 - `GET /asset_history`: Retrieve the history of actions for a specific asset.
 
+## Adding Devices (manual or CSV)
+
+Asset tags aren't strictly required anymore — leave one blank and the system self-assigns a
+random unique 6-digit tag:
+
+- `/admin/registry/new` ("+ Add Device" on the registry page): add one device by hand. Leave
+  Asset Tag blank to auto-generate one, or type your own (checked for uniqueness).
+- CSV import (`/admin`): every column is now optional. A row with no `asset_tag`/`asset_id`
+  falls back to using `serial_number` as the tag (unchanged prior behavior); a row with
+  neither gets a self-assigned 6-digit tag. A CSV can even omit the `asset_tag` column
+  entirely — every row just gets a generated tag (handy for a batch of chargers or other
+  accessories you haven't physically labeled yet).
+
 ## People & Asset Assignment
 
 - `/admin/people`: List/search people. Each person has a first name, last name, email, role (staff/student), and optional department.

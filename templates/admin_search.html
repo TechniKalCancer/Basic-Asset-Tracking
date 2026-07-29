@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}Search{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔎 Search Results</h1>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+{% if not q %}
+<p style="color:var(--muted);">Type something into the search box at the top of any page.</p>
+{% elif not people and not assets %}
+<p style="color:var(--muted);">No people or assets matched "{{ q }}".</p>
+{% else %}
+
+{% if people %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <h2 style="padding:1.5rem 1.5rem 0;">👤 People ({{ people|length }})</h2>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Email</th><th>Site</th><th>Assets</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for person in people %}
+      <tr>
+        <td>{{ person.full_name }}</td>
+        <td style="color:var(--muted);">{{ person.email }}</td>
+        <td style="color:var(--muted);">{{ person.site or '—' }}</td>
+        <td style="color:var(--muted);">
+          {% if person.assets %}
+            <a href="/admin/registry?person_id={{ person.id }}">{{ person.assets|length }}</a>
+          {% else %}
+            0
+          {% endif %}
+        </td>
+        <td style="text-align:right;"><a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if assets %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <h2 style="padding:1.5rem 1.5rem 0;">💻 Assets ({{ assets|length }})</h2>
+  {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
+                          'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
+  <table>
+    <thead>
+      <tr><th>Asset Tag</th><th>Serial</th><th>Description</th><th>Status</th><th>Assigned To</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row, asset in assets %}
+      <tr>
+        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
+        <td>{{ row.serial_number or '—' }}</td>
+        <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td>
+          <span class="badge {{ status_badge.get(asset.status if asset else 'available', 'badge-blue') }}">
+            {{ (asset.status if asset else 'available') }}
+          </span>
+        </td>
+        <td style="color:var(--muted);">
+          {% if asset and asset.assigned_to %}{{ asset.assigned_to.full_name }}{% else %}Unassigned{% endif %}
+        </td>
+        <td style="text-align:right;">
+          <a href="/admin/assets/{{ row.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">View</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

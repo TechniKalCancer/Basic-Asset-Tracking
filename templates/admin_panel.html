@@ -12,20 +12,31 @@
 </div>
 
 <div class="stat-grid">
-  <div class="stat-card">
-    <div class="num">{{ registry_count }}</div>
-    <div class="lbl">Assets in Registry</div>
-  </div>
-  <div class="stat-card">
-    <div class="num" style="color:{{ 'var(--warning)' if orphan_count else 'var(--success)' }}">{{ orphan_count }}</div>
-    <div class="lbl">Orphaned Records</div>
-  </div>
-  <div class="stat-card">
-    <div class="num">{{ people_count }}</div>
-    <div class="lbl">People</div>
-  </div>
+  {% if can('devices') %}
+  <a href="/admin/registry" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num">{{ registry_count }}</div>
+      <div class="lbl">Assets in Registry</div>
+    </div>
+  </a>
+  <a href="/admin/orphans" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num" style="color:{{ 'var(--warning)' if orphan_count else 'var(--success)' }}">{{ orphan_count }}</div>
+      <div class="lbl">Orphaned Records</div>
+    </div>
+  </a>
+  {% endif %}
+  {% if can('people') %}
+  <a href="/admin/people" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num">{{ people_count }}</div>
+      <div class="lbl">People</div>
+    </div>
+  </a>
+  {% endif %}
 </div>
 
+{% if can('devices') %}
 <!-- Status breakdown -->
 <div class="card">
   <h2>📊 Assets by Status</h2>
@@ -42,7 +53,9 @@
     {% endfor %}
   </div>
 </div>
+{% endif %}
 
+{% if can('admin') %}
 <!-- CSV Upload -->
 <div class="card">
   <h2>📂 Upload Asset Registry CSV</h2>
@@ -72,27 +85,48 @@
     </div>
   </form>
 </div>
+{% endif %}
 
 <!-- Quick links -->
 <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+  {% if can('devices') %}
   <a href="/admin/registry" class="btn btn-ghost">📋 View Registry</a>
+  {% endif %}
+  {% if can('people') %}
   <a href="/admin/people" class="btn btn-ghost">👤 Manage People</a>
   <a href="/admin/people/import" class="btn btn-ghost">📥 Import People CSV</a>
   <a href="/admin/people/graduate" class="btn btn-ghost">🎓 Graduate Students</a>
+  {% endif %}
+  {% if can('loaners') %}
+  <a href="/admin/loaners" class="btn btn-ghost">🎒 Loaners</a>
+  {% endif %}
+  {% if can('admin') %}
   <a href="/admin/bulk_assign" class="btn btn-ghost">👥 Bulk Assign</a>
+  {% endif %}
+  {% if can('devices') %}
   <a href="/admin/bulk_print" class="btn btn-ghost">🖨️ Bulk Print Labels</a>
   <a href="/admin/audit" class="btn btn-ghost">🔍 Asset Audit</a>
+  {% endif %}
+  {% if can('admin') %}
   <a href="/admin/kiosk" class="btn btn-ghost">🖥️ Kiosk Devices</a>
+  <a href="/admin/users" class="btn btn-ghost">🔑 Users</a>
+  {% endif %}
+  {% if can('devices') %}
   <a href="/admin/registry/export" class="btn btn-ghost">⬇️ Export CSV</a>
+  {% endif %}
+  {% if can('admin') %}
   <a href="/admin/reminders" class="btn btn-ghost"
      style="{{ 'color:var(--danger);border-color:var(--danger);' if overdue_count else '' }}">
     ⏰ {{ 'View ' + overdue_count|string + ' Overdue' if overdue_count else 'Reminders' }}
   </a>
-  {% if orphan_count %}
+  {% endif %}
+  {% if can('devices') and orphan_count %}
     <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">
       ⚠️ View {{ orphan_count }} Orphan{{ 's' if orphan_count != 1 }}
     </a>
   {% endif %}
+  {% if can('devices') %}
   <a href="/api/assets" class="btn btn-ghost" target="_blank">🔗 Assets API</a>
+  {% endif %}
 </div>
 {% endblock %}

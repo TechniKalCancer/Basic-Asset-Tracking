@@ -49,7 +49,13 @@
         <td><span class="badge {{ 'badge-blue' if person.role == 'staff' else 'badge-green' }}">{{ person.role }}</span></td>
         <td style="color:var(--muted);">{{ person.site or '—' }}</td>
         <td style="color:var(--muted);">{{ person.department or '—' }}</td>
-        <td style="color:var(--muted);">{{ person.assets|length }}</td>
+        <td style="color:var(--muted);">
+          {% if person.assets %}
+            <a href="/admin/registry?person_id={{ person.id }}">{{ person.assets|length }}</a>
+          {% else %}
+            0
+          {% endif %}
+        </td>
         <td style="text-align:right;white-space:nowrap;">
           <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
           {% if not person.is_active %}

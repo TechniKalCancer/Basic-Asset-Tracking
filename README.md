@@ -168,6 +168,47 @@ and the API endpoints. The one exception is devices enrolled as a kiosk:
   just the kiosk itself) deletes its token, which locks it out immediately on its next request.
   Useful if a kiosk machine is lost or compromised.
 
+## User Accounts & Permissions
+
+Beyond the single shared `ADMIN_PASSWORD` (which always logs in as a full superuser — leave the
+username field blank), you can create named accounts with limited access:
+
+- `/admin/users` (superuser only): create/edit/delete named accounts. Each one has a username,
+  password, and a checkbox per area — **People**, **Devices** (the asset registry/assign flow),
+  **Loaners**, **Repairs** — plus an **Admin** checkbox for a second full superuser. Unchecking
+  "Active" on an existing user disables their login without deleting the account.
+- Log in with a username to use a named account instead of the shared password.
+- Routes are gated server-side by area (e.g. `/admin/people*` requires People, `/admin/loaners*`
+  requires Loaners), and the nav bar / dashboard quick-links hide whatever a user can't access —
+  so a Loaners-only account never even sees a People link to click.
+- A handful of sensitive, cross-cutting operations (CSV registry replace, bulk assign, kiosk
+  device management, reminder settings) are superuser-only regardless of the People/Devices/
+  Loaners checkboxes, to keep the permission model simple.
+
+## Global Search
+
+Every admin page has a search box in the nav bar (`/admin/search`). It checks People and Assets
+at once — tag, serial, description, name, email, site, ID number. A single unambiguous match
+jumps straight to that record (a person's device list, or an asset's detail page); multiple
+matches show a combined results page for both.
+
+## Loaner Devices
+
+A separate short-term checkout system for a pool of spare devices, distinct from the main
+per-student assignment workflow:
+
+- From `/admin/registry` or `/admin/loaners`, mark any device as a loaner ("Mark Loaner"). It
+  stays in the regular registry too — being a loaner doesn't remove it from anything else.
+- `/admin/loaners`: shows the whole loaner pool with current status, and lets staff check a
+  loaner out to (or back in from) any person directly.
+- `/loaner_checkout` and `/loaner_checkin`: public self-service pages (same kiosk-or-login access
+  as Check In/Check Out) — a student searches for their own name, then scans/types the loaner's
+  asset tag or serial. Checkin just needs the asset tag/serial; the system already knows who has
+  it. Leaving the due date blank defaults to a 7-day loan.
+- Overdue loaners get an email automatically once an hour (if `SMTP_USERNAME`/`SMTP_PASSWORD` are
+  set) — no one has to remember to check. There's also a "Send Reminders Now" button on
+  `/admin/loaners` for an immediate resend without waiting for the next hourly pass.
+
 ## Filters, Export & Dashboard
 
 - `/admin/registry` has a status filter dropdown alongside the existing tag/serial/description

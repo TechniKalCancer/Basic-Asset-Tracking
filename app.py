@@ -1,13 +1,15 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
-from sqlalchemy.exc import IntegrityError
+from flask_wtf.csrf import CSRFError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 import os
 import csv
 import io
 import time
+import threading
 import secrets
 import smtplib
 import logging
@@ -63,6 +65,18 @@ def _handle_not_found(e):
 @app.errorhandler(413)
 def _handle_too_large(e):
     return render_template('error.html', code=413, message='That file is too large to upload.'), 413
+
+
+@app.errorhandler(CSRFError)
+def _handle_csrf_error(e):
+    """
+    A stale/mismatched CSRF token usually just means the form was sitting open
+    long enough for the session to change underneath it (timeout, another tab
+    logging out, etc.) — redirect back to a fresh login instead of a raw 400.
+    """
+    session.clear()
+    flash('Your session expired before that finished submitting. Please try again.', 'error')
+    return redirect(url_for('admin_login'))
 
 
 @app.errorhandler(500)
@@ -125,6 +139,7 @@ class AssetRegistry(db.Model):
     serial_number = db.Column(db.String(120), unique=True, nullable=True, index=True)
     description   = db.Column(db.String(255), nullable=True)
     device_type   = db.Column(db.String(40), nullable=False, default='chromebook', index=True)
+    is_loaner     = db.Column(db.Boolean, nullable=False, default=False, index=True)  # part of the short-term loaner pool, not permanently assigned to anyone
 
     def to_dict(self):
         return {
@@ -132,6 +147,7 @@ class AssetRegistry(db.Model):
             'serial_number': self.serial_number,
             'description': self.description,
             'device_type': self.device_type,
+            'is_loaner': self.is_loaner,
         }
 
 
@@ -257,6 +273,26 @@ class Event(db.Model):
         }
 
 
+class User(db.Model):
+    """
+    A named admin account with per-area permissions. Layered on top of the
+    single shared ADMIN_PASSWORD login (env var) rather than replacing it —
+    that password still logs in as a full superuser, so there's always a
+    recovery path if every User account gets locked out or deleted.
+    """
+    __tablename__ = 'user'
+    id            = db.Column(db.Integer, primary_key=True)
+    username      = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_admin      = db.Column(db.Boolean, nullable=False, default=False)  # superuser: everything, incl. managing users
+    can_people    = db.Column(db.Boolean, nullable=False, default=False)
+    can_devices   = db.Column(db.Boolean, nullable=False, default=False)
+    can_loaners   = db.Column(db.Boolean, nullable=False, default=False)
+    can_repairs   = db.Column(db.Boolean, nullable=False, default=False)
+    is_active     = db.Column(db.Boolean, nullable=False, default=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class KioskDevice(db.Model):
     """
     A browser/device enrolled to use Check In / Check Out without admin login.
@@ -302,8 +338,36 @@ class Incident(db.Model):
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
+class LoanerCheckout(db.Model):
+    """
+    A short-term loaner checkout — unlike AssignmentHistory, a loaner isn't
+    pre-assigned to anyone ahead of time, so the student has to identify
+    themselves at checkout. person_name is a snapshot, same reasoning as
+    elsewhere: history stays readable even if the Person is later deleted.
+    """
+    __tablename__ = 'loaner_checkout'
+    id               = db.Column(db.Integer, primary_key=True)
+    asset_tag        = db.Column(db.String(120), nullable=False, index=True)
+    person_id        = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
+    person_name      = db.Column(db.String(160), nullable=False)
+    checked_out_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    due_date         = db.Column(db.Date, nullable=True)
+    checked_in_at    = db.Column(db.DateTime, nullable=True)
+    reminder_sent_at = db.Column(db.DateTime, nullable=True)
+    condition_notes  = db.Column(db.String(255), nullable=True)
+
+
 with app.app_context():
-    db.create_all()
+    try:
+        db.create_all()
+    except (IntegrityError, ProgrammingError):
+        # Multiple gunicorn workers boot concurrently and each run create_all()
+        # against a fresh database; the loser of that race hits either a
+        # duplicate-key error on Postgres's system catalog (IntegrityError) or
+        # a "relation already exists" error for a brand-new table
+        # (ProgrammingError) — either way the tables it wanted now exist (the
+        # winner just created them). Harmless — move on.
+        db.session.rollback()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -416,7 +480,12 @@ def _admin_session_active():
     if last_active:
         elapsed = datetime.now(timezone.utc).timestamp() - last_active
         if elapsed > SESSION_TIMEOUT_MINUTES * 60:
-            session.clear()
+            # Only drop the auth keys, not the whole session — a full clear()
+            # also wipes the CSRF token, which silently invalidates any login
+            # form already open in another tab (or from an earlier redirect
+            # here) even though that page's token was never actually used yet.
+            session.pop('admin_logged_in', None)
+            session.pop('last_active', None)
             return False
     session['last_active'] = datetime.now(timezone.utc).timestamp()
     session.permanent = True
@@ -440,6 +509,52 @@ def login_required(f):
             return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated
+
+
+def _current_user():
+    """The logged-in User row, or None if this session used the legacy shared
+    ADMIN_PASSWORD login (which has no associated User record)."""
+    user_id = session.get('user_id')
+    return User.query.get(user_id) if user_id else None
+
+
+def _has_permission(perm):
+    """
+    session['is_admin'] is set for both the legacy ADMIN_PASSWORD login and any
+    User with is_admin=True — either way, a superuser passes every check.
+    Otherwise perm must match one of the current User's can_* columns.
+    """
+    if session.get('is_admin'):
+        return True
+    user = _current_user()
+    if not user or not user.is_active:
+        return False
+    return {
+        'people':  user.can_people,
+        'devices': user.can_devices,
+        'loaners': user.can_loaners,
+        'repairs': user.can_repairs,
+    }.get(perm, False)
+
+
+def require_permission(perm):
+    """Like login_required, but also requires the given area permission
+    ('people', 'devices', 'loaners', 'repairs', or 'admin' for superuser-only)."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            was_logged_in = session.get('admin_logged_in')
+            if not _admin_session_active():
+                msg = ('Your session expired after 15 minutes of inactivity.' if was_logged_in
+                       else 'Please log in to access the admin panel.')
+                flash(msg, 'error')
+                return redirect(url_for('admin_login'))
+            if not _has_permission(perm):
+                flash('Your account doesn\'t have permission to access that page.', 'error')
+                return redirect(url_for('admin_panel'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 
 def kiosk_or_login_required(f):
@@ -475,6 +590,14 @@ def kiosk_or_api_login_required(f):
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
+@app.context_processor
+def inject_permission_helper():
+    """Exposes can('people'|'devices'|'loaners'|'repairs') to every template, so
+    nav links and buttons can hide themselves for users without that permission
+    instead of just bouncing them back with an error after they click."""
+    return {'can': _has_permission}
+
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     # Redirect already-logged-in admins
@@ -489,17 +612,33 @@ def admin_login():
             flash(f'Too many failed attempts. Try again in {wait} seconds.', 'error')
             return render_template('admin_login.html')
 
+        username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        if check_password_hash(ADMIN_PASSWORD_HASH, password):
-            session.clear()
-            session['admin_logged_in'] = True
-            session['last_active'] = datetime.now(timezone.utc).timestamp()
-            session.permanent = True
-            return redirect(url_for('admin_panel'))
+
+        # Blank username = the legacy shared ADMIN_PASSWORD login, always a
+        # full superuser. A username looks up a named User account instead.
+        if not username:
+            if check_password_hash(ADMIN_PASSWORD_HASH, password):
+                session.clear()
+                session['admin_logged_in'] = True
+                session['is_admin'] = True
+                session['last_active'] = datetime.now(timezone.utc).timestamp()
+                session.permanent = True
+                return redirect(url_for('admin_panel'))
+        else:
+            user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
+            if user and user.is_active and check_password_hash(user.password_hash, password):
+                session.clear()
+                session['admin_logged_in'] = True
+                session['user_id'] = user.id
+                session['is_admin'] = user.is_admin
+                session['last_active'] = datetime.now(timezone.utc).timestamp()
+                session.permanent = True
+                return redirect(url_for('admin_panel'))
 
         _record_attempt(ip)
         attempts_left = MAX_ATTEMPTS - len(_login_attempts[ip])
-        flash(f'Invalid password. {attempts_left} attempt{"s" if attempts_left != 1 else ""} remaining.', 'error')
+        flash(f'Invalid username or password. {attempts_left} attempt{"s" if attempts_left != 1 else ""} remaining.', 'error')
 
     return render_template('admin_login.html')
 
@@ -551,7 +690,7 @@ def admin_panel():
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
-@login_required
+@require_permission('admin')
 def upload_csv():
     """
     Accepts a CSV with columns: asset_tag, serial_number (optional), description (optional).
@@ -689,7 +828,7 @@ def _filter_registry_by_status(query, status_filter):
 
 
 @app.route('/admin/registry/new', methods=['GET', 'POST'])
-@login_required
+@require_permission('devices')
 def admin_registry_new():
     """Manually adds a single device. Leave asset_tag blank to self-assign a random 6-digit one."""
     if request.method == 'POST':
@@ -732,7 +871,7 @@ def admin_registry_new():
 
 
 @app.route('/admin/registry')
-@login_required
+@require_permission('devices')
 def admin_registry():
     page          = request.args.get('page', 1, type=int)
     per_page      = 50
@@ -740,6 +879,7 @@ def admin_registry():
     search        = request.args.get('q', '').strip()
     status_filter = request.args.get('status', '').strip()
     type_filter   = request.args.get('device_type', '').strip()
+    person_filter = request.args.get('person_id', '').strip()
 
     if search:
         like = f'%{search}%'
@@ -759,6 +899,18 @@ def admin_registry():
     else:
         type_filter = ''
 
+    person_filter_name = None
+    if person_filter.isdigit():
+        person = Person.query.get(int(person_filter))
+        if person:
+            person_filter_name = person.full_name
+            owned_tags = db.session.query(Asset.asset_tag).filter(Asset.assigned_to_id == person.id)
+            query = query.filter(AssetRegistry.asset_tag.in_(owned_tags))
+        else:
+            person_filter = ''
+    else:
+        person_filter = ''
+
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
     page_tags = [row.asset_tag for row in pagination.items]
@@ -769,11 +921,12 @@ def admin_registry():
     return render_template('admin_registry.html', pagination=pagination, search=search,
                            status_filter=status_filter, asset_statuses=ASSET_STATUSES,
                            type_filter=type_filter, device_types=DEVICE_TYPES,
+                           person_filter=person_filter, person_filter_name=person_filter_name,
                            assets_by_tag=assets_by_tag)
 
 
 @app.route('/admin/registry/export')
-@login_required
+@require_permission('devices')
 def admin_registry_export():
     """Exports the full asset list (not just the current page) as CSV, including
     live status and assignment — useful as a backup/reporting snapshot."""
@@ -798,7 +951,7 @@ def admin_registry_export():
 
 
 @app.route('/admin/scan_lookup')
-@login_required
+@require_permission('devices')
 def admin_scan_lookup():
     """
     Jumps straight to an asset's assign page from a scanned/typed tag or serial number.
@@ -817,8 +970,43 @@ def admin_scan_lookup():
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
-@app.route('/admin/orphans')
+@app.route('/admin/search')
 @login_required
+def admin_search():
+    """
+    Global lookup from the nav bar search box — checks both People and Assets
+    at once. A single unambiguous match jumps straight to that record instead
+    of showing a results page.
+    """
+    q = request.args.get('q', '').strip()
+    people, assets = [], []
+
+    if len(q) >= 2:
+        people = Person.query.filter(_person_search_filter(q)) \
+            .order_by(Person.last_name, Person.first_name).limit(25).all()
+
+        like = f'%{q}%'
+        registry_rows = AssetRegistry.query.filter(
+            db.or_(
+                AssetRegistry.asset_tag.ilike(like),
+                AssetRegistry.serial_number.ilike(like),
+                AssetRegistry.description.ilike(like),
+            )
+        ).order_by(AssetRegistry.asset_tag).limit(25).all()
+        tags = [r.asset_tag for r in registry_rows]
+        assets_by_tag = {a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(tags))}
+        assets = [(r, assets_by_tag.get(r.asset_tag)) for r in registry_rows]
+
+        if len(people) == 1 and not assets:
+            return redirect(url_for('admin_registry', person_id=people[0].id))
+        if len(assets) == 1 and not people:
+            return redirect(url_for('admin_asset_assign', asset_tag=assets[0][0].asset_tag))
+
+    return render_template('admin_search.html', q=q, people=people, assets=assets)
+
+
+@app.route('/admin/orphans')
+@require_permission('devices')
 def admin_orphans():
     orphans = Asset.query.filter_by(is_valid=False).order_by(Asset.asset_tag).all()
     return render_template('admin_orphans.html', orphans=orphans)
@@ -826,8 +1014,27 @@ def admin_orphans():
 
 # ─── People ───────────────────────────────────────────────────────────────────
 
+def _person_search_filter(q):
+    """
+    Multi-token fuzzy match: each whitespace-separated token must match at least
+    one field. This lets "John Smith" (or "Smith John") find John Smith even
+    though neither single field contains the whole two-word query.
+    """
+    conditions = []
+    for token in q.split():
+        like = f'%{token}%'
+        conditions.append(db.or_(
+            Person.first_name.ilike(like),
+            Person.last_name.ilike(like),
+            Person.email.ilike(like),
+            Person.site.ilike(like),
+            Person.external_id.ilike(like),
+        ))
+    return db.and_(*conditions)
+
+
 @app.route('/admin/people')
-@login_required
+@require_permission('people')
 def admin_people():
     page     = request.args.get('page', 1, type=int)
     per_page = 50
@@ -839,16 +1046,7 @@ def admin_people():
         query = query.filter(Person.is_active.is_(False))
     search   = request.args.get('q', '').strip()
     if search:
-        like = f'%{search}%'
-        query = query.filter(
-            db.or_(
-                Person.first_name.ilike(like),
-                Person.last_name.ilike(like),
-                Person.email.ilike(like),
-                Person.site.ilike(like),
-                Person.external_id.ilike(like),
-            )
-        )
+        query = query.filter(_person_search_filter(search))
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     return render_template('admin_people.html', pagination=pagination, search=search, show=show)
 
@@ -866,16 +1064,9 @@ def admin_people_search():
     if len(q) < 2:
         return jsonify([])
 
-    like = f'%{q}%'
     matches = Person.query.filter(
         Person.is_active.is_(True),
-        db.or_(
-            Person.first_name.ilike(like),
-            Person.last_name.ilike(like),
-            Person.email.ilike(like),
-            Person.site.ilike(like),
-            Person.external_id.ilike(like),
-        )
+        _person_search_filter(q),
     ).order_by(Person.last_name, Person.first_name).limit(20).all()
 
     return jsonify([{
@@ -914,7 +1105,7 @@ def _validate_person_form(values, person_id=None):
 
 
 @app.route('/admin/people/new', methods=['GET', 'POST'])
-@login_required
+@require_permission('people')
 def admin_person_new():
     if request.method == 'POST':
         values = _person_form_values()
@@ -938,7 +1129,7 @@ def admin_person_new():
 
 
 @app.route('/admin/people/<int:person_id>/edit', methods=['GET', 'POST'])
-@login_required
+@require_permission('people')
 def admin_person_edit(person_id):
     person = Person.query.get_or_404(person_id)
 
@@ -975,7 +1166,7 @@ def _release_person_assets(person, condition_in):
 
 
 @app.route('/admin/people/<int:person_id>/delete', methods=['POST'])
-@login_required
+@require_permission('people')
 def admin_person_delete(person_id):
     """
     Permanently deletes a person record. Any assets currently assigned to them
@@ -1005,7 +1196,7 @@ def admin_person_delete(person_id):
 
 
 @app.route('/admin/people/<int:person_id>/reactivate', methods=['POST'])
-@login_required
+@require_permission('people')
 def admin_person_reactivate(person_id):
     """Undoes an accidental graduate/archive — marks a person active again."""
     person = Person.query.get_or_404(person_id)
@@ -1016,7 +1207,7 @@ def admin_person_reactivate(person_id):
 
 
 @app.route('/admin/people/import', methods=['GET', 'POST'])
-@login_required
+@require_permission('people')
 def admin_people_import():
     """
     Bulk create-or-update people from a district roster CSV — the "everyone
@@ -1119,7 +1310,7 @@ def admin_people_import():
 
 
 @app.route('/admin/people/graduate', methods=['GET', 'POST'])
-@login_required
+@require_permission('people')
 def admin_people_graduate():
     """
     Bulk-removes a graduating class from the active roster in one action.
@@ -1200,7 +1391,7 @@ def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None
 
 
 @app.route('/admin/assets/<string:asset_tag>/assign', methods=['GET', 'POST'])
-@login_required
+@require_permission('devices')
 def admin_asset_assign(asset_tag):
     """
     Assigns a person to an asset_tag. The asset_tag must exist in the registry;
@@ -1252,7 +1443,7 @@ def admin_asset_assign(asset_tag):
 
 
 @app.route('/admin/bulk_assign', methods=['GET', 'POST'])
-@login_required
+@require_permission('admin')
 def admin_bulk_assign():
     """
     Bulk-assigns a whole roster in one upload — the start-of-year "hand out
@@ -1332,30 +1523,71 @@ def admin_bulk_assign():
 
 
 @app.route('/admin/bulk_print')
-@login_required
+@require_permission('devices')
 def admin_bulk_print():
     """
     Lists devices to print labels for (defaults to currently-assigned ones —
     the "just handed out a cart of Chromebooks" case) with checkboxes; actual
-    printing happens client-side via the DYMO SDK, looping over the selection.
+    printing happens client-side via the DYMO SDK, looping over the selection
+    in the same order the rows appear in the table.
+
+    order=scan lists devices in the order they were scanned during an Asset
+    Audit session instead of alphabetical by tag — so labels print in the same
+    sequence they were physically handled, and can be applied stack-by-stack
+    without hunting back through everything already set aside.
     """
     type_filter = request.args.get('device_type', '').strip()
-    status_filter = request.args.get('status', 'assigned').strip()
+    order_mode = request.args.get('order', 'tag').strip()
+    if order_mode not in ('tag', 'scan'):
+        order_mode = 'tag'
+    default_status = '' if order_mode == 'scan' else 'assigned'
+    status_filter = request.args.get('status', default_status).strip()
 
-    query = AssetRegistry.query.order_by(AssetRegistry.asset_tag)
-    if type_filter in DEVICE_TYPES:
-        query = query.filter(AssetRegistry.device_type == type_filter)
-    else:
+    since_str = request.args.get('since', '').strip()
+    try:
+        since = datetime.strptime(since_str, '%Y-%m-%d') if since_str else None
+    except ValueError:
+        since = None
+    if not since:
+        since = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    since_str = since.strftime('%Y-%m-%d')
+
+    if type_filter not in DEVICE_TYPES:
         type_filter = ''
-    if status_filter in ASSET_STATUSES:
-        query = _filter_registry_by_status(query, status_filter)
-    else:
+    if status_filter not in ASSET_STATUSES:
         status_filter = ''
 
-    rows = query.all()
+    if order_mode == 'scan':
+        # First-scan time per tag today (or since the given date) gives the
+        # exact physical walk order; re-scanning a tag doesn't move it later.
+        scan_times = (db.session.query(AuditScan.asset_tag, db.func.min(AuditScan.scanned_at))
+                      .filter(AuditScan.scanned_at >= since)
+                      .group_by(AuditScan.asset_tag)
+                      .order_by(db.func.min(AuditScan.scanned_at))
+                      .all())
+        ordered_tags = [tag for tag, _ in scan_times]
+        registry_by_tag = {r.asset_tag: r for r in AssetRegistry.query.filter(
+            AssetRegistry.asset_tag.in_(ordered_tags)
+        )}
+        rows = [registry_by_tag[t] for t in ordered_tags if t in registry_by_tag]
+        if type_filter:
+            rows = [r for r in rows if r.device_type == type_filter]
+    else:
+        query = AssetRegistry.query.order_by(AssetRegistry.asset_tag)
+        if type_filter:
+            query = query.filter(AssetRegistry.device_type == type_filter)
+        rows = query.all()
+
     assets_by_tag = {a.asset_tag: a for a in Asset.query.filter(
         Asset.asset_tag.in_([r.asset_tag for r in rows])
     )}
+
+    if status_filter:
+        def _matches_status(row):
+            asset = assets_by_tag.get(row.asset_tag)
+            current = asset.status if asset else 'available'
+            return current == status_filter
+        rows = [r for r in rows if _matches_status(r)]
 
     candidates = []
     for row in rows:
@@ -1365,11 +1597,12 @@ def admin_bulk_print():
 
     return render_template('admin_bulk_print.html', candidates=candidates,
                            status_filter=status_filter, type_filter=type_filter,
+                           order_mode=order_mode, since=since_str,
                            asset_statuses=ASSET_STATUSES, device_types=DEVICE_TYPES)
 
 
 @app.route('/admin/assets/<string:asset_tag>/unassign', methods=['POST'])
-@login_required
+@require_permission('devices')
 def admin_asset_unassign(asset_tag):
     asset = Asset.query.filter_by(asset_tag=asset_tag).first_or_404()
     condition_in = request.form.get('condition_in', '').strip() or None
@@ -1386,7 +1619,7 @@ def admin_asset_unassign(asset_tag):
 
 
 @app.route('/admin/assets/<string:asset_tag>/status', methods=['POST'])
-@login_required
+@require_permission('devices')
 def admin_asset_status(asset_tag):
     """Manual status override, independent of assignment (e.g. marking a device 'repair')."""
     AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
@@ -1410,7 +1643,7 @@ def admin_asset_status(asset_tag):
 
 
 @app.route('/admin/assets/<string:asset_tag>/google_sync', methods=['POST'])
-@login_required
+@require_permission('devices')
 def admin_asset_google_sync(asset_tag):
     """Pulls model/org-unit/recent-user from Google Workspace for one asset, by serial number."""
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
@@ -1448,7 +1681,7 @@ def admin_asset_google_sync(asset_tag):
 # ─── Kiosk Devices ──────────────────────────────────────────────────────────────
 
 @app.route('/admin/kiosk')
-@login_required
+@require_permission('admin')
 def admin_kiosk():
     devices = KioskDevice.query.order_by(KioskDevice.created_at.desc()).all()
     token = request.cookies.get('kiosk_token')
@@ -1457,7 +1690,7 @@ def admin_kiosk():
 
 
 @app.route('/admin/kiosk/enable', methods=['POST'])
-@login_required
+@require_permission('admin')
 def admin_kiosk_enable():
     """Enrolls the device making this request (i.e. the kiosk itself) via a long-lived cookie."""
     label = request.form.get('label', '').strip() or None
@@ -1477,7 +1710,7 @@ def admin_kiosk_enable():
 
 
 @app.route('/admin/kiosk/<int:device_id>/revoke', methods=['POST'])
-@login_required
+@require_permission('admin')
 def admin_kiosk_revoke(device_id):
     """Revocable from any admin session — doesn't require physical access to the kiosk."""
     device = KioskDevice.query.get_or_404(device_id)
@@ -1490,6 +1723,77 @@ def admin_kiosk_revoke(device_id):
         db.session.rollback()
         flash(f'Could not revoke device: {e}', 'error')
     return redirect(url_for('admin_kiosk'))
+
+
+# ─── Users & Permissions ──────────────────────────────────────────────────────
+
+def _user_form_permissions():
+    return {
+        'is_admin':    bool(request.form.get('is_admin')),
+        'can_people':  bool(request.form.get('can_people')),
+        'can_devices': bool(request.form.get('can_devices')),
+        'can_loaners': bool(request.form.get('can_loaners')),
+        'can_repairs': bool(request.form.get('can_repairs')),
+    }
+
+
+@app.route('/admin/users')
+@require_permission('admin')
+def admin_users():
+    users = User.query.order_by(User.username).all()
+    return render_template('admin_users.html', users=users)
+
+
+@app.route('/admin/users/new', methods=['GET', 'POST'])
+@require_permission('admin')
+def admin_user_new():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        if not username or not password:
+            flash('Username and password are required.', 'error')
+            return render_template('admin_user_form.html', user=None)
+        if User.query.filter(db.func.lower(User.username) == username.lower()).first():
+            flash(f'Username "{username}" is already taken.', 'error')
+            return render_template('admin_user_form.html', user=None)
+
+        user = User(username=username, password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
+                     **_user_form_permissions())
+        db.session.add(user)
+        db.session.commit()
+        flash(f'Created user "{username}".', 'success')
+        return redirect(url_for('admin_users'))
+
+    return render_template('admin_user_form.html', user=None)
+
+
+@app.route('/admin/users/<int:user_id>/edit', methods=['GET', 'POST'])
+@require_permission('admin')
+def admin_user_edit(user_id):
+    user = User.query.get_or_404(user_id)
+    if request.method == 'POST':
+        new_password = request.form.get('password', '')
+        for field, value in _user_form_permissions().items():
+            setattr(user, field, value)
+        user.is_active = bool(request.form.get('is_active'))
+        if new_password:
+            user.password_hash = generate_password_hash(new_password, method='pbkdf2:sha256')
+        db.session.commit()
+        flash(f'Updated user "{user.username}".', 'success')
+        return redirect(url_for('admin_users'))
+
+    return render_template('admin_user_form.html', user=user)
+
+
+@app.route('/admin/users/<int:user_id>/delete', methods=['POST'])
+@require_permission('admin')
+def admin_user_delete(user_id):
+    user = User.query.get_or_404(user_id)
+    username = user.username
+    db.session.delete(user)
+    db.session.commit()
+    flash(f'Deleted user "{username}".', 'success')
+    return redirect(url_for('admin_users'))
 
 
 # ─── Overdue Reminders ────────────────────────────────────────────────────────
@@ -1505,7 +1809,7 @@ def _overdue_assignments():
 
 
 @app.route('/admin/reminders')
-@login_required
+@require_permission('admin')
 def admin_reminders():
     overdue = _overdue_assignments()
     today = datetime.utcnow().date()
@@ -1514,7 +1818,7 @@ def admin_reminders():
 
 
 @app.route('/admin/reminders/send', methods=['POST'])
-@login_required
+@require_permission('admin')
 def admin_reminders_send():
     if not EMAIL_ENABLED:
         flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
@@ -1556,10 +1860,228 @@ def admin_reminders_send():
     return redirect(url_for('admin_reminders'))
 
 
+# ─── Loaners ──────────────────────────────────────────────────────────────────
+
+LOANER_REMINDER_RESEND_HOURS = 24
+LOANER_DEFAULT_LOAN_DAYS = 7
+
+
+@app.route('/admin/assets/<string:asset_tag>/toggle_loaner', methods=['POST'])
+@require_permission('devices')
+def admin_toggle_loaner(asset_tag):
+    row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    row.is_loaner = not row.is_loaner
+    db.session.commit()
+    flash(f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.', 'success')
+    return redirect(request.referrer or url_for('admin_loaners'))
+
+
+def _overdue_loaners():
+    """Open loaner checkouts (not yet returned) whose due_date has passed."""
+    today = datetime.utcnow().date()
+    return LoanerCheckout.query.filter(
+        LoanerCheckout.checked_in_at.is_(None),
+        LoanerCheckout.due_date.isnot(None),
+        LoanerCheckout.due_date < today,
+    ).order_by(LoanerCheckout.due_date).all()
+
+
+def _send_overdue_loaner_reminders():
+    """
+    Emails anyone with an overdue loaner. Safe to call repeatedly (e.g. from a
+    background loop) — reminder_sent_at gates re-sending to once per
+    LOANER_REMINDER_RESEND_HOURS, so it won't spam the same student hourly.
+    Returns (sent, failed, skipped) counts.
+    """
+    if not EMAIL_ENABLED:
+        return 0, 0, 0
+
+    sent = failed = skipped = 0
+    now = datetime.utcnow()
+    for row in _overdue_loaners():
+        if row.reminder_sent_at and (now - row.reminder_sent_at).total_seconds() < LOANER_REMINDER_RESEND_HOURS * 3600:
+            continue
+        person = Person.query.get(row.person_id) if row.person_id else None
+        if not person:
+            skipped += 1
+            continue
+        days_overdue = (now.date() - row.due_date).days
+        subject = f'Reminder: loaner {row.asset_tag} is overdue for return'
+        body = (
+            f'Hi {person.first_name},\n\n'
+            f'Our records show loaner device {row.asset_tag} was due back on '
+            f'{row.due_date.strftime("%Y-%m-%d")} ({days_overdue} day{"s" if days_overdue != 1 else ""} ago).\n\n'
+            'Please return it to the office as soon as possible. If you\'ve already returned it, '
+            'this reminder can be ignored.\n\nThanks!'
+        )
+        try:
+            send_email(person.email, subject, body)
+            row.reminder_sent_at = now
+            sent += 1
+        except Exception as e:
+            failed += 1
+            logger.error('Loaner reminder email failed for %s -> %s: %s', row.asset_tag, person.email, e)
+
+    db.session.commit()
+    return sent, failed, skipped
+
+
+def _loaner_reminder_loop():
+    """Background daemon: checks for overdue loaners once an hour so students
+    get emailed automatically without anyone having to click a button. The
+    reminder_sent_at gate in _send_overdue_loaner_reminders() keeps this safe
+    even though gunicorn runs multiple worker processes, each with their own
+    copy of this loop."""
+    while True:
+        time.sleep(3600)
+        try:
+            with app.app_context():
+                _send_overdue_loaner_reminders()
+        except Exception as e:
+            logger.error('Loaner reminder background loop error: %s', e)
+
+
+if EMAIL_ENABLED:
+    threading.Thread(target=_loaner_reminder_loop, daemon=True).start()
+
+
+@app.route('/admin/loaners')
+@require_permission('loaners')
+def admin_loaners():
+    loaner_rows = AssetRegistry.query.filter_by(is_loaner=True).order_by(AssetRegistry.asset_tag).all()
+    tags = [r.asset_tag for r in loaner_rows]
+    open_checkouts = {
+        c.asset_tag: c for c in LoanerCheckout.query.filter(
+            LoanerCheckout.asset_tag.in_(tags), LoanerCheckout.checked_in_at.is_(None)
+        )
+    }
+    overdue_count = len(_overdue_loaners())
+    return render_template('admin_loaners.html', loaner_rows=loaner_rows, open_checkouts=open_checkouts,
+                           overdue_count=overdue_count, email_enabled=EMAIL_ENABLED,
+                           today=datetime.utcnow().date())
+
+
+@app.route('/admin/loaners/send_reminders', methods=['POST'])
+@require_permission('loaners')
+def admin_loaners_send_reminders():
+    if not EMAIL_ENABLED:
+        flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
+        return redirect(url_for('admin_loaners'))
+    sent, failed, skipped = _send_overdue_loaner_reminders()
+    msg = f'Sent {sent} reminder{"s" if sent != 1 else ""}.'
+    if failed:
+        msg += f' {failed} failed to send.'
+    if skipped:
+        msg += f' {skipped} skipped (person no longer exists).'
+    flash(msg, 'success' if sent else 'info')
+    return redirect(url_for('admin_loaners'))
+
+
+def _checkout_loaner(asset_tag, person, due_date=None):
+    """Shared checkout logic used by both the admin page and student self-service."""
+    row = AssetRegistry.query.filter_by(asset_tag=asset_tag, is_loaner=True).first()
+    if not row:
+        return 'error', f'{asset_tag} is not a loaner device.'
+    already_out = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
+    if already_out:
+        return 'error', f'{asset_tag} is already checked out to {already_out.person_name}.'
+    db.session.add(LoanerCheckout(
+        asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
+        due_date=due_date or (datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)),
+    ))
+    db.session.commit()
+    return 'ok', f'Checked out {asset_tag} to {person.full_name}.'
+
+
+def _checkin_loaner(asset_tag, condition_notes=None):
+    """Shared checkin logic used by both the admin page and student self-service."""
+    open_row = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
+    if not open_row:
+        return 'error', f'{asset_tag} is not currently checked out as a loaner.'
+    open_row.checked_in_at = datetime.utcnow()
+    if condition_notes:
+        open_row.condition_notes = condition_notes
+    db.session.commit()
+    return 'ok', f'Checked in {asset_tag} (was with {open_row.person_name}).'
+
+
+@app.route('/admin/loaners/checkout', methods=['POST'])
+@require_permission('loaners')
+def admin_loaners_checkout():
+    asset_tag = request.form.get('asset_tag', '').strip()
+    person_id = request.form.get('person_id', '').strip()
+    due_date_str = request.form.get('due_date', '').strip()
+    person = Person.query.get(int(person_id)) if person_id.isdigit() else None
+    if not asset_tag or not person:
+        flash('Choose both a person and a loaner asset tag.', 'error')
+        return redirect(url_for('admin_loaners'))
+    due_date = None
+    if due_date_str:
+        try:
+            due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            flash('Invalid due date.', 'error')
+            return redirect(url_for('admin_loaners'))
+    status, message = _checkout_loaner(asset_tag, person, due_date)
+    flash(message, 'success' if status == 'ok' else 'error')
+    return redirect(url_for('admin_loaners'))
+
+
+@app.route('/admin/loaners/checkin', methods=['POST'])
+@require_permission('loaners')
+def admin_loaners_checkin():
+    asset_tag = request.form.get('asset_tag', '').strip()
+    status, message = _checkin_loaner(asset_tag)
+    flash(message, 'success' if status == 'ok' else 'error')
+    return redirect(url_for('admin_loaners'))
+
+
+@app.route('/loaner_checkout', methods=['GET', 'POST'])
+@kiosk_or_login_required
+def loaner_checkout_page():
+    if request.method == 'POST':
+        person_id = request.form.get('person_id', '').strip()
+        scan_value = request.form.get('scan_value', '').strip()
+        person = Person.query.get(int(person_id)) if person_id.isdigit() else None
+        if not person or not person.is_active:
+            flash('Search for your name and select yourself from the list first.', 'error')
+            return redirect(url_for('loaner_checkout_page'))
+        if not scan_value:
+            flash('Scan or type the loaner asset tag/serial.', 'error')
+            return redirect(url_for('loaner_checkout_page'))
+        asset_tag, _ = resolve_scan(scan_value)
+        if not asset_tag:
+            flash(f'"{scan_value}" was not found in the asset registry.', 'error')
+            return redirect(url_for('loaner_checkout_page'))
+        status, message = _checkout_loaner(asset_tag, person)
+        flash(message, 'success' if status == 'ok' else 'error')
+        return redirect(url_for('loaner_checkout_page'))
+
+    return render_template('loaner_checkout.html')
+
+
+@app.route('/loaner_checkin', methods=['GET', 'POST'])
+@kiosk_or_login_required
+def loaner_checkin_page():
+    if request.method == 'POST':
+        scan_value = request.form.get('scan_value', '').strip()
+        if not scan_value:
+            flash('Scan or type the loaner asset tag/serial.', 'error')
+            return redirect(url_for('loaner_checkin_page'))
+        asset_tag, _ = resolve_scan(scan_value)
+        if not asset_tag:
+            asset_tag = scan_value  # fall back to raw value so a direct tag match on LoanerCheckout still works
+        status, message = _checkin_loaner(asset_tag)
+        flash(message, 'success' if status == 'ok' else 'error')
+        return redirect(url_for('loaner_checkin_page'))
+
+    return render_template('loaner_checkin.html')
+
+
 # ─── Asset Audit ──────────────────────────────────────────────────────────────
 
 @app.route('/admin/audit')
-@login_required
+@require_permission('devices')
 def admin_audit():
     """
     Physical inventory check: scan every device you can find, and anything
@@ -1599,7 +2121,7 @@ def admin_audit():
 
 
 @app.route('/admin/audit/scan', methods=['POST'])
-@login_required
+@require_permission('devices')
 def admin_audit_scan():
     value = request.form.get('value', '').strip()
     redirect_args = {k: request.form.get(k, '') for k in ('since', 'status', 'device_type') if request.form.get(k)}
@@ -1621,7 +2143,7 @@ def admin_audit_scan():
 # ─── Incident / Damage Reports ────────────────────────────────────────────────
 
 @app.route('/admin/assets/<string:asset_tag>/incidents', methods=['POST'])
-@login_required
+@require_permission('devices')
 def admin_incident_add(asset_tag):
     """Logs a damage/loss report against an asset, snapshotting the currently assigned person."""
     AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()

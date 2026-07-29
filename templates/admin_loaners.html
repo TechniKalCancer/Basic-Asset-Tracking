@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block title %}Loaners{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🎒 Loaners</h1>
+  <span class="badge badge-blue">{{ loaner_rows|length }} in pool</span>
+  {% if overdue_count %}
+    <span class="badge badge-red">{{ overdue_count }} overdue</span>
+  {% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/loaner_checkout" class="btn btn-ghost" target="_blank">📤 Student Checkout Page</a>
+  <a href="/loaner_checkin" class="btn btn-ghost" target="_blank">📥 Student Checkin Page</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+{% if overdue_count %}
+<div class="card" style="display:flex;align-items:center;gap:1rem;">
+  <span style="color:var(--danger);">{{ overdue_count }} loaner{{ 's are' if overdue_count != 1 else ' is' }} overdue for return.</span>
+  <span class="spacer" style="flex:1;"></span>
+  <form method="POST" action="/admin/loaners/send_reminders">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not email_enabled }}>
+      ✉️ Send Reminders Now{{ '' if email_enabled else ' (email not configured)' }}
+    </button>
+  </form>
+</div>
+{% endif %}
+<p style="color:var(--muted);font-size:.82rem;margin-top:-.8rem;margin-bottom:1.5rem;">
+  Overdue loaners are also emailed automatically once an hour — the button above is just for an immediate resend.
+</p>
+
+<div class="card">
+  <h2>Check Out a Loaner</h2>
+  <form method="POST" action="/admin/loaners/checkout" style="display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="position:relative;flex:1;min-width:220px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Student</label>
+      <input type="hidden" name="person_id" id="personIdInput" />
+      <input type="text" id="personSearchInput" autocomplete="off" placeholder="Type a name, email, or site…" />
+      <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+           background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+           max-height:260px;overflow-y:auto;"></div>
+    </div>
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Asset Tag / Serial</label>
+      <input name="asset_tag" placeholder="Scan or type…" />
+    </div>
+    <div style="min-width:150px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Due Date (optional)</label>
+      <input type="date" name="due_date" />
+    </div>
+    <button type="submit" class="btn btn-primary">Check Out</button>
+  </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+  </script>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Asset Tag</th>
+        <th>Serial</th>
+        <th>Description</th>
+        <th>Status</th>
+        <th>Checked Out To</th>
+        <th>Due</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in loaner_rows %}
+      {% set checkout = open_checkouts.get(row.asset_tag) %}
+      <tr>
+        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
+        <td>{{ row.serial_number or '—' }}</td>
+        <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td>
+          {% if checkout %}
+            <span class="badge {{ 'badge-red' if checkout.due_date and checkout.due_date < today else 'badge-blue' }}">Checked Out</span>
+          {% else %}
+            <span class="badge badge-green">Available</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--muted);">{{ checkout.person_name if checkout else '—' }}</td>
+        <td style="color:{{ 'var(--danger)' if checkout and checkout.due_date and checkout.due_date < today else 'var(--muted)' }};">
+          {{ checkout.due_date.strftime('%Y-%m-%d') if checkout and checkout.due_date else '—' }}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if checkout %}
+          <form method="POST" action="/admin/loaners/checkin" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="asset_tag" value="{{ row.asset_tag }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Check In</button>
+          </form>
+          {% endif %}
+          <form method="POST" action="/admin/assets/{{ row.asset_tag }}/toggle_loaner" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Remove from Pool</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">
+        No devices are marked as loaners yet. Mark one from the <a href="/admin/registry">Asset Registry</a>.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -6,8 +6,11 @@
     <h1 style="text-align:center;margin-bottom:1.5rem;">🔒 Admin Login</h1>
     <form method="POST" autocomplete="off">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">Username (leave blank for the shared admin password)</label>
+      <input type="text" name="username" autofocus placeholder="e.g. jsmith"
+             style="margin-bottom:1rem;" autocomplete="username" />
       <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">Password</label>
-      <input type="password" name="password" autofocus placeholder="Enter admin password"
+      <input type="password" name="password" placeholder="Enter password"
              style="margin-bottom:1rem;" autocomplete="current-password" />
       <button type="submit" class="btn btn-primary" style="width:100%;">Login</button>
     </form>

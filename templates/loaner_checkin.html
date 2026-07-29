@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block title %}Loaner Checkin{% endblock %}
+{% block content %}
+<h1>✅ Loaner Checkin</h1>
+
+<div class="card" style="max-width:480px;">
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
+    Scan or type the asset tag/serial of the loaner device you're returning.
+  </p>
+
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Asset Tag / Serial</label>
+      <input type="text" name="scan_value" autofocus autocomplete="off" placeholder="Scan or type…" />
+    </div>
+    <button type="submit" class="btn btn-success">Check In</button>
+  </form>
+</div>
+{% endblock %}

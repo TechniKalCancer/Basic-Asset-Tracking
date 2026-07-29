@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔑 Users</h1>
+  <span class="badge badge-blue">{{ users|length }} total</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/users/new" class="btn btn-primary">+ Add User</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  These are additional named accounts with limited permissions. The shared admin password (leave username
+  blank at login) always has full access, regardless of what's set here.
+</p>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Admin</th>
+        <th>People</th>
+        <th>Devices</th>
+        <th>Loaners</th>
+        <th>Repairs</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td>{{ user.username }}</td>
+        <td>{{ '✓' if user.is_admin else '—' }}</td>
+        <td>{{ '✓' if user.can_people else '—' }}</td>
+        <td>{{ '✓' if user.can_devices else '—' }}</td>
+        <td>{{ '✓' if user.can_loaners else '—' }}</td>
+        <td>{{ '✓' if user.can_repairs else '—' }}</td>
+        <td>
+          {% if user.is_active %}
+            <span class="badge badge-green">Active</span>
+          {% else %}
+            <span class="badge badge-red">Disabled</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/users/{{ user.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
+          <form method="POST" action="/admin/users/{{ user.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('Delete user {{ user.username }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No users yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -45,6 +45,27 @@
     nav .spacer { flex: 1; pointer-events: none; }
     nav .logout { color: var(--danger) !important; border: 1px solid var(--danger); border-radius: 6px; padding: .25rem .7rem; font-size: .82rem; }
     nav .logout:hover { background: var(--danger); color: #fff !important; }
+    nav .nav-search { display: flex; }
+    nav .nav-search input {
+      width: 220px;
+      padding: .35rem .7rem;
+      font-size: .85rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px 0 0 6px;
+      color: var(--text);
+    }
+    nav .nav-search button {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-left: none;
+      border-radius: 0 6px 6px 0;
+      color: var(--muted);
+      padding: .35rem .6rem;
+      cursor: pointer;
+      font-size: .9rem;
+    }
+    nav .nav-search button:hover { color: var(--text); }
     #session-warning {
       display: none;
       position: fixed;
@@ -152,8 +173,16 @@
     {% endif %}
     <span class="spacer"></span>
     {% if session.get('admin_logged_in') %}
+      <form class="nav-search" method="GET" action="/admin/search">
+        <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
+        <button type="submit" title="Search">🔎</button>
+      </form>
       <a href="/admin">Admin</a>
-      <a href="/admin/people">People</a>
+      {% if can('people') %}<a href="/admin/people">People</a>{% endif %}
+      {% if can('loaners') %}<a href="/admin/loaners">Loaners</a>{% endif %}
+      {% if session.get('is_admin') %}
+        <a href="/admin/users">Users</a>
+      {% endif %}
       <a href="/admin/logout" class="logout">Logout</a>
     {% else %}
       <a href="/admin/login">Admin</a>

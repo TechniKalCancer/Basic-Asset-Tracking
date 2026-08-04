@@ -58,34 +58,46 @@ survives container rebuilds/restarts.
   local SQLite file unless you set `DATABASE_URL` yourself — the Postgres wiring only kicks in
   through `docker-compose.yml`'s `web` service.
 
-### Schema migrations (no Alembic)
+### Schema migrations (Flask-Migrate / Alembic)
 
-There's no migration framework — `db.create_all()` runs automatically on every boot, which
-creates any **brand-new tables** (e.g. `repair`, `activity_log`) but never alters an
-**existing** table's columns. If you're pulling an update that adds columns to an existing
-table, run the `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` statements for that change by
-hand against Postgres before (or right after) deploying the new code — check the PR/commit
-that introduced the columns for the exact statements. Always back up first:
+Schema changes are managed by [Flask-Migrate](https://flask-migrate.readthedocs.io/) (built on
+Alembic), tracked in the `migrations/` folder. There's a single **baseline migration**
+(`migrations/versions/ff757c46630a_baseline_*.py`) that creates the entire schema as of this
+README update — before that, changes were applied by hand via `ALTER TABLE`, which is why
+history doesn't go back further than one migration.
+
+**How it runs:** `entrypoint.sh` runs `flask db upgrade` once, before gunicorn starts (see the
+`Dockerfile`/`entrypoint.sh`) — not per-worker, and not via `db.create_all()` anymore. This
+means:
+- A **brand-new deployment** (empty database) gets every table created by replaying the full
+  migration history from scratch — no manual setup step needed.
+- An **existing deployment** just applies whatever migrations it hasn't seen yet. Already
+  up to date → it's a no-op and boots normally.
+
+**Making a schema change going forward:**
+
+1. Edit the model(s) in `app.py`.
+2. Generate a migration script from the diff:
+   ```sh
+   docker compose exec web flask db migrate -m "short description of the change"
+   ```
+   (or run `flask db migrate` locally against a Postgres instance if not using Docker — Alembic
+   needs a live DB connection to autogenerate the diff, unlike a plain model edit.)
+3. **Read the generated file in `migrations/versions/`** before committing — autogenerate is
+   usually right but doesn't always guess renames/complex changes correctly.
+4. Commit the migration file alongside the model change. It applies automatically on the next
+   deploy via `entrypoint.sh`'s `flask db upgrade` — no separate manual step, and no more
+   copy-pasting `ALTER TABLE` statements into a deploy checklist.
+
+**Always back up before a deploy that includes a schema change:**
 
 ```sh
 docker compose exec db pg_dump -U asset_tracker asset_tracker > backup_$(date +%Y%m%d_%H%M%S).sql
 ```
 
-The columns added for the Purchase/Warranty, Fee, Repair, and Google-loaner-autodisable
-features (see below) were:
-
-```sql
-ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS purchase_date DATE;
-ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS purchase_cost NUMERIC(10,2);
-ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS warranty_expiration DATE;
-ALTER TABLE incident        ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(8,2);
-ALTER TABLE incident        ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
-ALTER TABLE asset           ADD COLUMN IF NOT EXISTS google_enabled BOOLEAN;
-ALTER TABLE site            ADD COLUMN IF NOT EXISTS google_loaner_autodisable_enabled BOOLEAN NOT NULL DEFAULT false;
-```
-
-The `repair` and `activity_log` tables themselves need no manual step — `db.create_all()`
-creates them the first time the app boots against a database that doesn't have them yet.
+**Local dev outside Docker** (`python app.py` directly, no `entrypoint.sh` involved): run
+`FLASK_APP=app.py flask db upgrade` yourself once before starting the app, and again after
+pulling any update that adds a new migration file.
 
 ## Project Structure
 

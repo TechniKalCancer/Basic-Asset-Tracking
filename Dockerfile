@@ -13,14 +13,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
+ENV FLASK_APP=app.py
+
 # Run as a non-root user
 RUN useradd --create-home --shell /bin/bash appuser \
     && mkdir -p /app/instance \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && chmod +x /app/entrypoint.sh
 USER appuser
 
 # Expose the port from app.py
 EXPOSE 8081
 
-# Production WSGI server: 3 workers, 60s timeout, access log to stdout
-CMD ["gunicorn", "--bind", "0.0.0.0:8081", "--workers", "3", "--timeout", "60", "--access-logfile", "-", "app:app"]
+# entrypoint.sh runs `flask db upgrade` once, then execs gunicorn (3 workers, 60s timeout,
+# access log to stdout) — see entrypoint.sh for why the migration runs there and not per-worker.
+ENTRYPOINT ["/app/entrypoint.sh"]

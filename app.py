@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash, has_request_context
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 import os
@@ -129,6 +130,7 @@ def _record_attempt(ip):
     _login_attempts[ip].append(time.time())
 
 db = SQLAlchemy(app)
+migrate = Migrate(app, db)
 
 
 # ─── Models ───────────────────────────────────────────────────────────────────
@@ -457,17 +459,12 @@ class LoanerCheckout(db.Model):
     condition_notes  = db.Column(db.String(255), nullable=True)
 
 
-with app.app_context():
-    try:
-        db.create_all()
-    except (IntegrityError, ProgrammingError):
-        # Multiple gunicorn workers boot concurrently and each run create_all()
-        # against a fresh database; the loser of that race hits either a
-        # duplicate-key error on Postgres's system catalog (IntegrityError) or
-        # a "relation already exists" error for a brand-new table
-        # (ProgrammingError) — either way the tables it wanted now exist (the
-        # winner just created them). Harmless — move on.
-        db.session.rollback()
+# Schema creation/upgrades are handled by Flask-Migrate (`flask db upgrade`),
+# run once from entrypoint.sh before gunicorn starts — not here. Running it
+# in-process per gunicorn worker (the old db.create_all() approach) doesn't
+# work safely with Alembic's single version-tracking table the way it did
+# with create_all()'s idempotent CREATE TABLE IF NOT EXISTS-like behavior.
+# For local dev outside Docker, run `flask db upgrade` once yourself first.
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

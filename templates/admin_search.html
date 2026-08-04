@@ -24,7 +24,7 @@
       <tr>
         <td>{{ person.full_name }}</td>
         <td style="color:var(--muted);">{{ person.email }}</td>
-        <td style="color:var(--muted);">{{ person.site or '—' }}</td>
+        <td style="color:var(--muted);">{{ person.site.name if person.site else '—' }}</td>
         <td style="color:var(--muted);">
           {% if person.assets %}
             <a href="/admin/registry?person_id={{ person.id }}">{{ person.assets|length }}</a>

@@ -39,8 +39,13 @@
       <input name="department" value="{{ (values.department or '') if values else '' }}" />
     </div>
     <div style="margin-bottom:1rem;">
-      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site (optional)</label>
-      <input name="site" value="{{ (values.site or '') if values else '' }}" placeholder="e.g. North Elementary" />
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+      <select name="site_id" required>
+        <option value="">Choose a site…</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}" {{ 'selected' if values and values.site_id == site.id }}>{{ site.name }}</option>
+        {% endfor %}
+      </select>
     </div>
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year (optional, students)</label>

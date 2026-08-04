@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Site' if site else 'Add Site' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Site' if site else 'Add Site' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/sites" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Name</label>
+      <input name="name" value="{{ (form.name if form else (site.name if site else '')) }}" placeholder="e.g. Fox Creek Middle School" required />
+    </div>
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="google_loaner_autodisable_enabled" style="width:auto;"
+             {{ 'checked' if (form.get('google_loaner_autodisable_enabled') if form else (site and site.google_loaner_autodisable_enabled)) }} />
+      Auto-disable loaner Chromebooks in Google when checked in, re-enable on checkout
+      <span style="color:var(--muted);">(requires Google sync + GOOGLE_LOANER_AUTO_DISABLE_ENABLED configured)</span>
+    </label>
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if site else 'Add Site' }}</button>
+  </form>
+</div>
+{% endblock %}

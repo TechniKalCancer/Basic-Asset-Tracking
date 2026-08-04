@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Sites{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🏫 Sites</h1>
+  <span class="badge badge-blue">{{ sites|length }} total</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/sites/new" class="btn btn-primary">+ Add Site</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Schools/buildings that people, devices, and named admin users get scoped to. Only super admins can
+  manage this list.
+</p>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for site in sites %}
+      <tr>
+        <td>{{ site.name }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/sites/{{ site.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
+          <form method="POST" action="/admin/sites/{{ site.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('Delete site {{ site.name }}? Only works if nothing is assigned to it.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="2" style="text-align:center;color:var(--muted);padding:2rem;">No sites yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

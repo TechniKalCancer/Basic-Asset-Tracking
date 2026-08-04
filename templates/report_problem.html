@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Report a Problem{% endblock %}
+{% block content %}
+<h1>🚩 Report a Problem</h1>
+
+<div class="card" style="max-width:480px;">
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
+    Find your name, scan or type your device's asset tag/serial, and describe what's wrong.
+  </p>
+
+  <form method="POST" style="position:relative;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;position:relative;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Your Name</label>
+      <input type="hidden" name="person_id" id="personIdInput" />
+      <input type="text" id="personSearchInput" autocomplete="off" autofocus placeholder="Type your name…" />
+      <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+           background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+           max-height:260px;overflow-y:auto;"></div>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Asset Tag / Serial</label>
+      <input type="text" name="scan_value" id="scanInput" autocomplete="off" placeholder="Scan or type…" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">What's wrong?</label>
+      <textarea name="description" rows="4" placeholder="e.g. Cracked screen, won't charge, keys not working…" style="width:100%;resize:vertical;"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Submit Report</button>
+  </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+  </script>
+</div>
+{% endblock %}

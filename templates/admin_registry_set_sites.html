@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Set Device Sites{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🏫 Set Device Sites</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/registry" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <h2>Upload CSV</h2>
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
+    Non-destructive — matches existing devices by <code>asset_tag</code> and only updates their site.
+    Doesn't touch anything else about the device, and never creates or deletes registry rows. Use this
+    to fill in sites the automatic backfill couldn't figure out.
+  </p>
+
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
+    <strong style="color:var(--text);">Required columns:</strong> <code>asset_tag</code>, <code>site</code><br>
+    <code>site</code> must exactly match an existing site's name.<br><br>
+    <strong style="color:var(--text);">Example:</strong><br>
+    <code>asset_tag,site</code><br>
+    <code>483920,Fox Creek Middle School</code><br>
+    <code>483921,Fox Creek Middle School</code>
+  </div>
+
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="csv_file" accept=".csv" style="flex:1;min-width:200px;" required />
+      <button type="submit" class="btn btn-primary">Upload</button>
+    </div>
+  </form>
+</div>
+
+{% if results %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <table>
+    <thead>
+      <tr><th>Asset Tag</th><th>Result</th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr>
+        <td style="color:var(--muted);"><code>{{ r.row }}</code></td>
+        <td style="color:{{ 'var(--success)' if r.ok else 'var(--danger)' }};">
+          {{ '✓' if r.ok else '✗' }} {{ r.message }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

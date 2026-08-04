@@ -6,10 +6,29 @@
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
+  {% if google_loaner_autodisable_active %}
+  <span class="badge badge-blue">🔒 Loaner Auto-Disable: Active</span>
+  {% endif %}
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
     ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>
 </div>
+
+{% if can('admin') and overdue_count %}
+<div class="card" style="display:flex;align-items:center;gap:1rem;">
+  <span style="color:var(--danger);">{{ overdue_count }} assignment{{ 's are' if overdue_count != 1 else ' is' }} overdue for return.</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/reminders" class="btn btn-primary">⏰ View Overdue</a>
+</div>
+{% endif %}
+
+{% if is_super_admin() and orphan_count %}
+<div class="card" style="display:flex;align-items:center;gap:1rem;">
+  <span style="color:var(--warning);">{{ orphan_count }} scan{{ 's' if orphan_count != 1 }} recorded against unknown asset tag{{ 's' if orphan_count != 1 }} (orphaned records).</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">⚠️ View Orphans</a>
+</div>
+{% endif %}
 
 <div class="stat-grid">
   {% if can('devices') %}
@@ -19,12 +38,22 @@
       <div class="lbl">Assets in Registry</div>
     </div>
   </a>
+  {% if warranty_expiring_count %}
+  <a href="/admin/registry?warranty=expiring" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num" style="color:var(--warning);">{{ warranty_expiring_count }}</div>
+      <div class="lbl">Warranty Expiring Soon</div>
+    </div>
+  </a>
+  {% endif %}
+  {% if is_super_admin() %}
   <a href="/admin/orphans" style="text-decoration:none;">
     <div class="stat-card">
       <div class="num" style="color:{{ 'var(--warning)' if orphan_count else 'var(--success)' }}">{{ orphan_count }}</div>
       <div class="lbl">Orphaned Records</div>
     </div>
   </a>
+  {% endif %}
   {% endif %}
   {% if can('people') %}
   <a href="/admin/people" style="text-decoration:none;">
@@ -55,14 +84,42 @@
 </div>
 {% endif %}
 
-{% if can('admin') %}
+{% if is_super_admin() and site_breakdown %}
+<!-- Per-site breakdown -->
+<div class="card">
+  <h2>🏫 By Site</h2>
+  <table>
+    <thead><tr><th>Site</th><th>Devices</th><th>People</th></tr></thead>
+    <tbody>
+      {% for s in site_breakdown %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td style="color:var(--muted);">{{ s.registry_count }}</td>
+        <td style="color:var(--muted);">{{ s.people_count }}</td>
+      </tr>
+      {% endfor %}
+      {% if unassigned_devices %}
+      <tr>
+        <td style="color:var(--muted);">Unassigned</td>
+        <td style="color:var(--warning);">{{ unassigned_devices }}</td>
+        <td style="color:var(--muted);">—</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if is_super_admin() %}
 <!-- CSV Upload -->
 <div class="card">
   <h2>📂 Upload Asset Registry CSV</h2>
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     All columns are optional — rows with no <code>asset_tag</code> (and no <code>serial_number</code>
     to fall back on) get a random unique 6-digit tag self-assigned automatically.<br>
-    Uploading a new CSV <strong>completely replaces</strong> the old registry and auto-heals any orphaned scan records.
+    Uploading a new CSV <strong>completely replaces the entire registry, every site</strong>, and auto-heals
+    any orphaned scan records — this is why it's super-admin only. Site admins can fill in devices' sites
+    without replacing anything via <a href="/admin/registry/set_sites">Set Sites (CSV)</a> instead.
   </p>
 
   <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;margin-bottom:1rem;font-size:.83rem;color:var(--muted);">
@@ -86,47 +143,4 @@
   </form>
 </div>
 {% endif %}
-
-<!-- Quick links -->
-<div style="display:flex;gap:1rem;flex-wrap:wrap;">
-  {% if can('devices') %}
-  <a href="/admin/registry" class="btn btn-ghost">📋 View Registry</a>
-  {% endif %}
-  {% if can('people') %}
-  <a href="/admin/people" class="btn btn-ghost">👤 Manage People</a>
-  <a href="/admin/people/import" class="btn btn-ghost">📥 Import People CSV</a>
-  <a href="/admin/people/graduate" class="btn btn-ghost">🎓 Graduate Students</a>
-  {% endif %}
-  {% if can('loaners') %}
-  <a href="/admin/loaners" class="btn btn-ghost">🎒 Loaners</a>
-  {% endif %}
-  {% if can('admin') %}
-  <a href="/admin/bulk_assign" class="btn btn-ghost">👥 Bulk Assign</a>
-  {% endif %}
-  {% if can('devices') %}
-  <a href="/admin/bulk_print" class="btn btn-ghost">🖨️ Bulk Print Labels</a>
-  <a href="/admin/audit" class="btn btn-ghost">🔍 Asset Audit</a>
-  {% endif %}
-  {% if can('admin') %}
-  <a href="/admin/kiosk" class="btn btn-ghost">🖥️ Kiosk Devices</a>
-  <a href="/admin/users" class="btn btn-ghost">🔑 Users</a>
-  {% endif %}
-  {% if can('devices') %}
-  <a href="/admin/registry/export" class="btn btn-ghost">⬇️ Export CSV</a>
-  {% endif %}
-  {% if can('admin') %}
-  <a href="/admin/reminders" class="btn btn-ghost"
-     style="{{ 'color:var(--danger);border-color:var(--danger);' if overdue_count else '' }}">
-    ⏰ {{ 'View ' + overdue_count|string + ' Overdue' if overdue_count else 'Reminders' }}
-  </a>
-  {% endif %}
-  {% if can('devices') and orphan_count %}
-    <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">
-      ⚠️ View {{ orphan_count }} Orphan{{ 's' if orphan_count != 1 }}
-    </a>
-  {% endif %}
-  {% if can('devices') %}
-  <a href="/api/assets" class="btn btn-ghost" target="_blank">🔗 Assets API</a>
-  {% endif %}
-</div>
 {% endblock %}

@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Repairs{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🛠️ Repairs</h1>
+  <span class="badge badge-blue">{{ open_repairs|length }} open</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Asset Tag</th>
+        <th>Vendor</th>
+        <th>Ticket #</th>
+        <th>Issue</th>
+        <th>Sent</th>
+        <th>Expected Back</th>
+        <th>Had It</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in open_repairs %}
+      <tr>
+        <td><a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a></td>
+        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+        <td style="color:var(--muted);">{{ r.ticket_number or '—' }}</td>
+        <td style="color:var(--muted);">{{ r.issue_description or '—' }}</td>
+        <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:{{ 'var(--danger)' if r.expected_return_at and r.expected_return_at < today else 'var(--muted)' }};white-space:nowrap;">
+          {{ r.expected_return_at.strftime('%Y-%m-%d') if r.expected_return_at else '—' }}
+        </td>
+        <td style="color:var(--muted);">{{ r.person_name_snapshot or '—' }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/assets/{{ r.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">Mark Returned</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No open repairs.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if closed_repairs %}
+<div class="card" style="padding:0;overflow-x:auto;margin-top:1.5rem;">
+  <h2 style="padding:1.5rem 1.5rem 0;">Recently Returned</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Asset Tag</th>
+        <th>Vendor</th>
+        <th>Sent</th>
+        <th>Returned</th>
+        <th>Outcome</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in closed_repairs %}
+      <tr>
+        <td><a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a></td>
+        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+        <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:var(--muted);white-space:nowrap;">{{ r.returned_at.strftime('%Y-%m-%d') }}</td>
+        <td>
+          {% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
+          <span class="badge {{ outcome_badge.get(r.outcome, 'badge-blue') }}" style="font-size:.7rem;">
+            {{ repair_outcomes.get(r.outcome, r.outcome or '—') }}
+          </span>
+        </td>
+        <td style="color:var(--muted);">{{ r.notes or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

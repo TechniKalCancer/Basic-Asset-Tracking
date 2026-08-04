@@ -1,8 +1,8 @@
 {% extends 'base.html' %}
-{% block title %}Add Device{% endblock %}
+{% block title %}Edit {{ registry_row.asset_tag }}{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
-  <h1 style="margin:0;">➕ Add Device</h1>
+  <h1 style="margin:0;">✏️ Edit <code>{{ registry_row.asset_tag }}</code></h1>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
 </div>
@@ -11,24 +11,22 @@
   <form method="POST">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;">
-      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">
-        Asset Tag <span style="font-weight:400;">(optional — leave blank to self-assign a random 6-digit tag)</span>
-      </label>
-      <input name="asset_tag" value="{{ form.asset_tag if form else '' }}" placeholder="e.g. 483920" />
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Asset Tag</label>
+      <input value="{{ registry_row.asset_tag }}" disabled style="opacity:.6;" />
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Serial Number (optional)</label>
-      <input name="serial_number" value="{{ form.serial_number if form else '' }}" />
+      <input name="serial_number" value="{{ registry_row.serial_number or '' }}" />
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description (optional)</label>
-      <input name="description" value="{{ form.description if form else '' }}" placeholder="e.g. Dell Latitude 5420" />
+      <input name="description" value="{{ registry_row.description or '' }}" placeholder="e.g. Dell Latitude 5420" />
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Type</label>
       <select name="device_type">
         {% for t in device_types %}
-          <option value="{{ t }}" {{ 'selected' if form and form.device_type == t }}>{{ t|capitalize }}</option>
+          <option value="{{ t }}" {{ 'selected' if registry_row.device_type == t }}>{{ t|capitalize }}</option>
         {% endfor %}
       </select>
     </div>
@@ -37,23 +35,23 @@
       <select name="site_id" required>
         <option value="">Choose a site…</option>
         {% for site in sites %}
-        <option value="{{ site.id }}" {{ 'selected' if form and form.site_id == site.id|string }}>{{ site.name }}</option>
+        <option value="{{ site.id }}" {{ 'selected' if registry_row.site_id == site.id }}>{{ site.name }}</option>
         {% endfor %}
       </select>
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Purchase Date (optional)</label>
-      <input type="date" name="purchase_date" value="{{ form.purchase_date if form else '' }}" />
+      <input type="date" name="purchase_date" value="{{ registry_row.purchase_date.strftime('%Y-%m-%d') if registry_row.purchase_date else '' }}" />
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Purchase Cost (optional)</label>
-      <input name="purchase_cost" value="{{ form.purchase_cost if form else '' }}" placeholder="e.g. 329.99" />
+      <input name="purchase_cost" value="{{ registry_row.purchase_cost if registry_row.purchase_cost is not none else '' }}" placeholder="e.g. 329.99" />
     </div>
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Warranty Expiration (optional)</label>
-      <input type="date" name="warranty_expiration" value="{{ form.warranty_expiration if form else '' }}" />
+      <input type="date" name="warranty_expiration" value="{{ registry_row.warranty_expiration.strftime('%Y-%m-%d') if registry_row.warranty_expiration else '' }}" />
     </div>
-    <button type="submit" class="btn btn-primary">Add Device</button>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
   </form>
 </div>
 {% endblock %}

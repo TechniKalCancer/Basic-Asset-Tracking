@@ -5,7 +5,10 @@
   <h1 style="margin:0;">📋 Asset Registry</h1>
   <span class="badge badge-blue">{{ pagination.total }} total</span>
   <span class="spacer" style="flex:1;"></span>
+  {% if can('devices_manage') %}
   <a href="/admin/registry/new" class="btn btn-primary">➕ Add Device</a>
+  <a href="/admin/registry/set_sites" class="btn btn-ghost">🏫 Set Sites (CSV)</a>
+  {% endif %}
   <a href="/admin/registry/export" class="btn btn-ghost">⬇️ Export CSV</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
@@ -33,8 +36,13 @@
       <option value="{{ t }}" {{ 'selected' if t == type_filter }}>{{ t|capitalize }}</option>
     {% endfor %}
   </select>
+  <select name="warranty" style="max-width:180px;">
+    <option value="">All warranties</option>
+    <option value="expiring" {{ 'selected' if warranty_filter == 'expiring' }}>Expiring Soon</option>
+    <option value="expired" {{ 'selected' if warranty_filter == 'expired' }}>Expired</option>
+  </select>
   <button type="submit" class="btn btn-ghost">Filter</button>
-  {% if search or status_filter or type_filter %}<a href="/admin/registry{% if person_filter %}?person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Clear</a>{% endif %}
+  {% if search or status_filter or type_filter or warranty_filter %}<a href="/admin/registry{% if person_filter %}?person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Clear</a>{% endif %}
 </form>
 
 <form method="GET" action="/admin/scan_lookup" class="card" style="display:flex;gap:.6rem;align-items:center;padding:1rem 1.5rem;">
@@ -43,7 +51,7 @@
   <button type="submit" class="btn btn-ghost">Go</button>
 </form>
 
-<div class="card" style="padding:0;overflow:hidden;">
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
@@ -51,6 +59,7 @@
         <th>Serial Number</th>
         <th>Description</th>
         <th>Type</th>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th>Site</th>{% endif %}
         <th>Status</th>
         <th>Assigned To</th>
         <th></th>
@@ -66,11 +75,21 @@
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
         <td style="color:var(--muted);">{{ row.device_type|capitalize }}</td>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}
+        <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
+        {% endif %}
         <td>
           <span class="badge {{ status_badge.get(asset.status if asset else 'available', 'badge-blue') }}">
             {{ (asset.status if asset else 'available') }}
           </span>
           {% if row.is_loaner %}<span class="badge badge-yellow" style="font-size:.7rem;">Loaner</span>{% endif %}
+          {% if row.warranty_expiration %}
+            {% if row.warranty_expiration < today %}
+              <span class="badge badge-red" style="font-size:.7rem;" title="Warranty expired {{ row.warranty_expiration.strftime('%Y-%m-%d') }}">Warranty Expired</span>
+            {% elif (row.warranty_expiration - today).days <= 60 %}
+              <span class="badge badge-yellow" style="font-size:.7rem;" title="Warranty expires {{ row.warranty_expiration.strftime('%Y-%m-%d') }}">Warranty Expiring</span>
+            {% endif %}
+          {% endif %}
         </td>
         <td>
           {% if asset and asset.assigned_to %}
@@ -83,16 +102,24 @@
           <a href="/admin/assets/{{ row.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">
             {{ 'Reassign' if asset and asset.assigned_to else 'Assign' }}
           </a>
+          {% if can('devices_manage') %}
+          <a href="/admin/registry/{{ row.asset_tag }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
           <form method="POST" action="/admin/assets/{{ row.asset_tag }}/toggle_loaner" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">
               {{ 'Unmark Loaner' if row.is_loaner else 'Mark Loaner' }}
             </button>
           </form>
+          <form method="POST" action="/admin/registry/{{ row.asset_tag }}/delete" style="display:inline;"
+                onsubmit="return confirm('Permanently delete {{ row.asset_tag }} from the registry?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
+      <tr><td colspan="{{ 8 if (current_site_ids() is none or current_site_ids()|length > 1) else 7 }}" style="text-align:center;color:var(--muted);padding:2rem;">No assets found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -101,13 +128,13 @@
 {% if pagination.pages > 1 %}
 <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;">
   {% if pagination.has_prev %}
-    <a href="?page={{ pagination.prev_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
+    <a href="?page={{ pagination.prev_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
   {% endif %}
   <span style="padding:.5rem 1rem;color:var(--muted);font-size:.88rem;">
     Page {{ pagination.page }} of {{ pagination.pages }}
   </span>
   {% if pagination.has_next %}
-    <a href="?page={{ pagination.next_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
+    <a href="?page={{ pagination.next_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
   {% endif %}
 </div>
 {% endif %}

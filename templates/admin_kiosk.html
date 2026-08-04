@@ -27,6 +27,15 @@
         <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Label (optional)</label>
         <input name="label" placeholder="e.g. Front Desk Chromebook Station" />
       </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+        <select name="site_id" required>
+          <option value="">Choose a site…</option>
+          {% for site in sites %}
+          <option value="{{ site.id }}">{{ site.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <button type="submit" class="btn btn-primary">Enroll This Device</button>
     </form>
   {% endif %}
@@ -37,6 +46,7 @@
     <thead>
       <tr>
         <th>Label</th>
+        <th>Site</th>
         <th>Enrolled</th>
         <th></th>
         <th></th>
@@ -46,6 +56,7 @@
       {% for device in devices %}
       <tr>
         <td>{{ device.label or 'Unnamed device' }}</td>
+        <td style="color:var(--muted);">{{ device.site.name if device.site else '—' }}</td>
         <td style="color:var(--muted);">{{ device.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
         <td>
           {% if current_device and current_device.id == device.id %}
@@ -61,7 +72,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No kiosk devices enrolled yet.</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No kiosk devices enrolled yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -47,7 +47,7 @@
         <td style="color:var(--muted);">{{ person.email }}</td>
         <td style="color:var(--muted);">{{ person.external_id or '—' }}</td>
         <td><span class="badge {{ 'badge-blue' if person.role == 'staff' else 'badge-green' }}">{{ person.role }}</span></td>
-        <td style="color:var(--muted);">{{ person.site or '—' }}</td>
+        <td style="color:var(--muted);">{{ person.site.name if person.site else '—' }}</td>
         <td style="color:var(--muted);">{{ person.department or '—' }}</td>
         <td style="color:var(--muted);">
           {% if person.assets %}

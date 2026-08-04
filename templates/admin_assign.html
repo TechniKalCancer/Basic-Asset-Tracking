@@ -3,6 +3,7 @@
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
   <h1 style="margin:0;">Assign <code>{{ registry_row.asset_tag }}</code></h1>
+  {% if registry_row.site %}<span class="badge badge-blue">🏫 {{ registry_row.site.name }}</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
 </div>
@@ -151,6 +152,10 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
       <input name="description" placeholder="e.g. Cracked screen, reported by student" required />
     </div>
+    <div style="margin-bottom:.8rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Fee Amount (optional)</label>
+      <input name="fee_amount" placeholder="e.g. 50.00" />
+    </div>
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="fee_charged" style="width:auto;" />
       Fee charged for this incident
@@ -161,7 +166,7 @@
   {% if incidents %}
   <table>
     <thead>
-      <tr><th>Date</th><th>Person</th><th>Description</th><th>Fee</th></tr>
+      <tr><th>Date</th><th>Person</th><th>Description</th><th>Fee</th><th></th></tr>
     </thead>
     <tbody>
       {% for inc in incidents %}
@@ -169,7 +174,24 @@
         <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--muted);">{{ inc.person_name or '—' }}</td>
         <td>{{ inc.description }}</td>
-        <td>{% if inc.fee_charged %}<span class="badge badge-yellow" style="font-size:.7rem;">Charged</span>{% else %}—{% endif %}</td>
+        <td style="white-space:nowrap;">
+          {% if inc.fee_charged %}
+            {% if inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% endif %}
+            {% if inc.paid_at %}
+              <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+            {% else %}
+              <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if inc.fee_charged and not inc.paid_at %}
+          <form method="POST" action="/admin/incidents/{{ inc.id }}/mark_paid" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -178,6 +200,79 @@
   <p style="color:var(--muted);font-size:.88rem;">No incidents logged for this asset.</p>
   {% endif %}
 </div>
+
+{% if can('repairs') %}
+<div class="card" style="max-width:480px;">
+  <h2>🛠️ Repair</h2>
+  {% if open_repair %}
+    <p style="color:var(--muted);font-size:.88rem;margin-bottom:.5rem;">
+      Sent {{ open_repair.sent_at.strftime('%Y-%m-%d') }}{% if open_repair.vendor %} to {{ open_repair.vendor }}{% endif %}
+      {% if open_repair.ticket_number %} &mdash; ticket #{{ open_repair.ticket_number }}{% endif %}.
+      {% if open_repair.expected_return_at %}Expected back {{ open_repair.expected_return_at.strftime('%Y-%m-%d') }}.{% endif %}
+    </p>
+    {% if open_repair.issue_description %}
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">Issue: {{ open_repair.issue_description }}</p>
+    {% endif %}
+    <form method="POST" action="/admin/repairs/{{ open_repair.id }}/return">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Outcome</label>
+        <select name="outcome" required>
+          <option value="">Choose…</option>
+          {% for key, label in repair_outcomes.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
+        <input name="notes" placeholder="e.g. Replaced under warranty, no charge" />
+      </div>
+      <button type="submit" class="btn btn-ghost">Mark Returned</button>
+    </form>
+  {% else %}
+    <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/repairs/send">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Vendor (optional)</label>
+        <input name="vendor" placeholder="e.g. CompuCom" />
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (optional)</label>
+        <input name="ticket_number" />
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description (optional)</label>
+        <input name="issue_description" placeholder="e.g. Won't power on" />
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return (optional)</label>
+        <input type="date" name="expected_return_at" />
+      </div>
+      <button type="submit" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">Send to Repair</button>
+    </form>
+  {% endif %}
+
+  {% if closed_repairs %}
+  <h3 style="margin-top:1.5rem;font-size:.9rem;color:var(--muted);">Past Repairs</h3>
+  <table>
+    <thead>
+      <tr><th>Sent</th><th>Returned</th><th>Outcome</th><th>Vendor</th></tr>
+    </thead>
+    <tbody>
+      {% for r in closed_repairs %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:var(--muted);white-space:nowrap;">{{ r.returned_at.strftime('%Y-%m-%d') }}</td>
+        <td>{{ repair_outcomes.get(r.outcome, r.outcome) }}</td>
+        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card" style="max-width:480px;">
   <h2 style="display:flex;align-items:center;gap:.6rem;">

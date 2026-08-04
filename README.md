@@ -58,6 +58,35 @@ survives container rebuilds/restarts.
   local SQLite file unless you set `DATABASE_URL` yourself — the Postgres wiring only kicks in
   through `docker-compose.yml`'s `web` service.
 
+### Schema migrations (no Alembic)
+
+There's no migration framework — `db.create_all()` runs automatically on every boot, which
+creates any **brand-new tables** (e.g. `repair`, `activity_log`) but never alters an
+**existing** table's columns. If you're pulling an update that adds columns to an existing
+table, run the `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` statements for that change by
+hand against Postgres before (or right after) deploying the new code — check the PR/commit
+that introduced the columns for the exact statements. Always back up first:
+
+```sh
+docker compose exec db pg_dump -U asset_tracker asset_tracker > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+The columns added for the Purchase/Warranty, Fee, Repair, and Google-loaner-autodisable
+features (see below) were:
+
+```sql
+ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS purchase_date DATE;
+ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS purchase_cost NUMERIC(10,2);
+ALTER TABLE asset_registry ADD COLUMN IF NOT EXISTS warranty_expiration DATE;
+ALTER TABLE incident        ADD COLUMN IF NOT EXISTS fee_amount NUMERIC(8,2);
+ALTER TABLE incident        ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP;
+ALTER TABLE asset           ADD COLUMN IF NOT EXISTS google_enabled BOOLEAN;
+ALTER TABLE site            ADD COLUMN IF NOT EXISTS google_loaner_autodisable_enabled BOOLEAN NOT NULL DEFAULT false;
+```
+
+The `repair` and `activity_log` tables themselves need no manual step — `db.create_all()`
+creates them the first time the app boots against a database that doesn't have them yet.
+
 ## Project Structure
 
 - `app.py`: The main Flask application file.
@@ -320,6 +349,98 @@ Workspace by serial number is in place, but the actual Admin SDK call is not imp
   of the Admin SDK Directory API while impersonating a super admin.
 - `/admin/assets/<asset_tag>/google_sync` (POST) is already wired to call it and store the
   result — no route/UI changes should be needed to activate Stage 2, just that one function.
+
+## Purchase & Warranty Tracking
+
+Each registry entry can optionally hold a **purchase date**, **purchase cost**, and
+**warranty expiration** — set them when adding/editing a device (`/admin/registry/new`,
+`/admin/registry/<tag>/edit`) or via CSV import (optional `purchase_date`, `purchase_cost`/`cost`,
+`warranty_expiration`/`warranty` columns). The registry page shows a **Warranty Expiring**/
+**Warranty Expired** badge on affected devices and a `?warranty=expiring`/`?warranty=expired`
+filter; the admin dashboard shows a **Warranty Expiring Soon** stat card (devices whose warranty
+runs out within 60 days) linking straight into that filter. CSV export includes all three columns.
+
+## Repairs (RMA Tracking)
+
+A real tracking record for devices sent out for repair, separate from just labeling a device
+`repair` in its status:
+
+- From a device's assign page, **Send to Repair** (requires the **Repairs** permission) records
+  vendor, ticket number, issue description, and expected return date, and sets the device's
+  status to `repair` in the same step. A device's status can no longer be set to `repair`
+  directly through the plain status dropdown — that now redirects you to Send to Repair instead,
+  so a repair is never entered without a tracking record. If a device's status is changed away
+  from `repair` some other way while a repair record is still open, that record auto-closes
+  itself (matching how an open loaner checkout auto-closes on device delete).
+- **Mark Returned** requires an outcome — **Fixed** (device goes back into service, `assigned`
+  if it still has an owner or `available` otherwise), **Could Not Repair**, or **Replaced**
+  (both retire the physical unit; adding its replacement is an ordinary separate "Add Device").
+- `/admin/repairs`: fleet-wide list of open and recently-closed repairs, gated by a dedicated
+  **Repairs** permission (`can_repairs` on a `User`) independent of Devices access — useful for
+  a repair-desk-only account that shouldn't otherwise touch the registry.
+
+## Fee Tracker
+
+Incidents can now carry a dollar amount, not just a "fee charged" checkbox:
+
+- Logging an incident (`/admin/assets/<asset_tag>/incidents`) accepts an optional **Fee Amount**
+  — entering one automatically marks the incident as charged, regardless of the checkbox.
+- `/admin/fees`: "who owes money" — every unpaid, charged incident grouped by person with a
+  per-person subtotal and a grand total, each with a one-click **Mark Paid**.
+- Deleting a person or graduating a class with unpaid charged incidents **warns but doesn't
+  block** — the flash message notes the outstanding balance so it doesn't silently disappear,
+  but the delete/graduate still goes through (matches how the rest of the app already handles
+  similar situations rather than adding a new hard-stop).
+
+## Self-Service: Report a Problem
+
+`/report_problem` lets a student or staff member report a device issue themselves, without
+needing a staff member to type it in — same kiosk-or-login access as Check In/Check Out/Loaner
+Checkout. They search for their own name, scan or type the asset tag/serial, and describe the
+problem; it's logged as an ordinary incident (no fee fields exposed — assessing a fee stays an
+office decision made later from the device's assign page) snapshotting the *reporter's own*
+identity, the same self-service pattern the Loaner Checkout page already uses.
+
+## Activity Log
+
+An accountability trail of who changed what: `/admin/activity` lists admin-side mutations
+across People, Devices, Loaners, Users, Sites, Kiosk, Incidents/Fees, and Repairs, each row
+showing when it happened, who did it (a named user, the shared admin login, an enrolled kiosk,
+or "System" for the automated overdue-reminder background job), the action type, and a
+human-readable summary. Filterable by actor, action, and date range, paginated 50/page. A
+site-scoped admin only sees rows tied to one of their own sites; district-wide actions (Users,
+Sites) are super-admin-only. This deliberately does **not** log every `/api/scan` check-in/out —
+that volume is already fully captured by the existing `Event` table; this log exists for the
+things nothing else records an actor for.
+
+## Google Sync: Loaner Auto-Disable / Auto-Enable
+
+Building on the Google Workspace Sync scaffolding above, a loaner Chromebook can be
+automatically **disabled in Google the moment it's checked in**, and **re-enabled the moment
+it's checked out** — so a student can't keep using a loaner after handing it back in.
+
+- This is a separate, bigger-blast-radius opt-in on top of the read-only sync: it needs its own
+  **write-scope** Google service account (`admin.directory.device.chromeos`, not `.readonly`)
+  with domain-wide delegation authorized, and the `GOOGLE_LOANER_AUTO_DISABLE_ENABLED=true` env
+  var set (see `.env.example`). Neither exists yet in this deployment — `set_chromeos_device_enabled()`
+  in `app.py` currently raises `NotImplementedError`, same pattern as the read-only sync stub.
+- Even with the env var and service account in place, it only runs for sites that have opted in
+  via the **"Auto-disable loaner Chromebooks..."** checkbox on that site's Add/Edit form
+  (Admin ▾ → Sites) — lets you pilot at one school before it's live everywhere.
+- The check/act logic (`_sync_loaner_google_state()`) is wrapped so a Google-side failure only
+  logs an error — it never blocks or rolls back the actual local checkout/checkin, and never
+  raises back up to the person waiting on it.
+
+## Navigation
+
+The top nav is grouped into click-toggle dropdowns — **Devices ▾**, **People ▾**, **Loaners ▾**,
+a standalone **Repairs** link, and **Admin ▾** (Dashboard, Kiosk Devices, Reminders, Activity
+Log, plus Users/Sites for accounts with those permissions) — replacing the old flat link row and
+the Admin Panel's button wall, both of which had grown past what a single row could hold. The
+Reminders and Sites entries carry a small red badge with the current overdue-assignment/orphan
+count. The Admin Panel dashboard itself keeps its data-driven content (stat tiles, per-site
+breakdown, CSV upload) and promotes the overdue/orphan counts to alert banners at the top of the
+page, so that urgency signal isn't lost now that the button wall is gone.
 
 ## Production Hardening
 

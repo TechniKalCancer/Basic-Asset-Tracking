@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash, has_request_context
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
@@ -15,7 +15,8 @@ import smtplib
 import logging
 import sys
 from email.message import EmailMessage
-from collections import defaultdict
+from decimal import Decimal, InvalidOperation
+from collections import defaultdict, OrderedDict
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -97,6 +98,11 @@ GOOGLE_SERVICE_ACCOUNT_FILE    = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')
 GOOGLE_ADMIN_IMPERSONATE_EMAIL = os.environ.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')
 GOOGLE_SYNC_ENABLED = bool(GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSONATE_EMAIL)
 
+# Remotely disabling a live device is a much bigger blast radius than the
+# read-only sync above, so it gets its own separate opt-in on top of
+# GOOGLE_SYNC_ENABLED — and a per-site flag on top of that (see Site.google_loaner_autodisable_enabled).
+GOOGLE_LOANER_AUTO_DISABLE_ENABLED = os.environ.get('GOOGLE_LOANER_AUTO_DISABLE_ENABLED', '').lower() in ('1', 'true', 'yes')
+
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──
 SMTP_SERVER     = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT       = int(os.environ.get('SMTP_PORT', '587'))
@@ -127,6 +133,24 @@ db = SQLAlchemy(app)
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
+class Site(db.Model):
+    """A school/building. The unit that people, devices, and admin users are scoped to."""
+    __tablename__ = 'site'
+    id         = db.Column(db.Integer, primary_key=True)
+    name       = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    google_loaner_autodisable_enabled = db.Column(db.Boolean, nullable=False, default=False)  # per-site opt-in pilot gate, see _sync_loaner_google_state
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UserSite(db.Model):
+    """Join table: which sites a (non-super-admin) User account can see/manage."""
+    __tablename__ = 'user_site'
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'site_id', name='uq_user_site'),)
+
+
 class AssetRegistry(db.Model):
     """
     The source-of-truth list loaded from CSV.
@@ -140,6 +164,12 @@ class AssetRegistry(db.Model):
     description   = db.Column(db.String(255), nullable=True)
     device_type   = db.Column(db.String(40), nullable=False, default='chromebook', index=True)
     is_loaner     = db.Column(db.Boolean, nullable=False, default=False, index=True)  # part of the short-term loaner pool, not permanently assigned to anyone
+    site_id       = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
+    purchase_date = db.Column(db.Date, nullable=True)
+    purchase_cost = db.Column(db.Numeric(10, 2), nullable=True)
+    warranty_expiration = db.Column(db.Date, nullable=True)
+
+    site = db.relationship('Site')
 
     def to_dict(self):
         return {
@@ -148,6 +178,10 @@ class AssetRegistry(db.Model):
             'description': self.description,
             'device_type': self.device_type,
             'is_loaner': self.is_loaner,
+            'site': self.site.name if self.site else None,
+            'purchase_date': self.purchase_date.isoformat() if self.purchase_date else None,
+            'purchase_cost': str(self.purchase_cost) if self.purchase_cost is not None else None,
+            'warranty_expiration': self.warranty_expiration.isoformat() if self.warranty_expiration else None,
         }
 
 
@@ -171,6 +205,7 @@ class Asset(db.Model):
     google_org_unit    = db.Column(db.String(255), nullable=True)
     google_recent_user = db.Column(db.String(255), nullable=True)
     google_last_sync_at = db.Column(db.DateTime, nullable=True)
+    google_enabled     = db.Column(db.Boolean, nullable=True)  # last known enabled/disabled state, set by the loaner auto-disable sync
 
     assigned_to = db.relationship('Person', backref='assets')
 
@@ -202,11 +237,14 @@ class Person(db.Model):
     email      = db.Column(db.String(120), unique=True, nullable=False, index=True)
     role       = db.Column(db.String(20), nullable=False, default='staff')  # 'staff' | 'student'
     department = db.Column(db.String(80), nullable=True)
-    site       = db.Column(db.String(120), nullable=True, index=True)  # school/building, for disambiguating common names
+    site_legacy = db.Column('site', db.String(120), nullable=True, index=True)  # old free-text site column, kept for the one-time backfill only — use `site` (the relationship) everywhere else
+    site_id    = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
     external_id = db.Column(db.String(40), unique=True, nullable=True, index=True)  # district staff/student ID — bulk-import upsert key
     grad_year  = db.Column(db.Integer, nullable=True, index=True)  # expected graduation year (students); blank for staff
     is_active  = db.Column(db.Boolean, nullable=False, default=True, index=True)  # False once graduated/withdrawn — keeps history/incidents intact instead of deleting
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    site = db.relationship('Site')
 
     @property
     def full_name(self):
@@ -220,7 +258,7 @@ class Person(db.Model):
             'email':       self.email,
             'role':        self.role,
             'department':  self.department,
-            'site':        self.site,
+            'site':        self.site.name if self.site else None,
             'external_id': self.external_id,
             'grad_year':   self.grad_year,
             'is_active':   self.is_active,
@@ -284,13 +322,20 @@ class User(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
-    is_admin      = db.Column(db.Boolean, nullable=False, default=False)  # superuser: everything, incl. managing users
+    is_admin      = db.Column(db.Boolean, nullable=False, default=False)  # full permission *within whatever sites this user has*, incl. managing users
+    is_super_admin = db.Column(db.Boolean, nullable=False, default=False)  # sees/manages every site, independent of is_admin
     can_people    = db.Column(db.Boolean, nullable=False, default=False)
     can_devices   = db.Column(db.Boolean, nullable=False, default=False)
+    can_devices_manage = db.Column(db.Boolean, nullable=False, default=False)  # add/edit/remove devices, set sites, mark loaners — implies can_devices too
     can_loaners   = db.Column(db.Boolean, nullable=False, default=False)
+    can_loaner_checkinout = db.Column(db.Boolean, nullable=False, default=False)  # just processing loaner checkout/checkin, not the full pool — implied by can_loaners too
+    can_checkinout = db.Column(db.Boolean, nullable=False, default=False)  # the plain device Check In / Check Out pages + /api/scan
     can_repairs   = db.Column(db.Boolean, nullable=False, default=False)
+    can_manage_users = db.Column(db.Boolean, nullable=False, default=False)  # add/edit/delete User accounts, narrower than is_admin (can't grant is_admin/is_super_admin)
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    sites = db.relationship('Site', secondary='user_site', backref='users')
 
 
 class KioskDevice(db.Model):
@@ -304,7 +349,10 @@ class KioskDevice(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     token      = db.Column(db.String(64), unique=True, nullable=False, index=True)
     label      = db.Column(db.String(120), nullable=True)
+    site_id    = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    site = db.relationship('Site')
 
 
 class AuditScan(db.Model):
@@ -335,7 +383,59 @@ class Incident(db.Model):
     person_name = db.Column(db.String(160), nullable=True)
     description = db.Column(db.Text, nullable=False)
     fee_charged = db.Column(db.Boolean, nullable=False, default=False)
+    fee_amount  = db.Column(db.Numeric(8, 2), nullable=True)
+    paid_at     = db.Column(db.DateTime, nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class Repair(db.Model):
+    """
+    A device sent out for RMA/repair — separate from the plain 'repair' Asset
+    status label, this is the actual tracking record (vendor, ticket, dates).
+    Wired to the can('repairs') permission. person_name_snapshot mirrors the
+    same pattern as Incident/AssignmentHistory: readable even if the person
+    who had the device is later deleted.
+    """
+    __tablename__ = 'repair'
+    id                   = db.Column(db.Integer, primary_key=True)
+    asset_tag            = db.Column(db.String(120), nullable=False, index=True)
+    vendor               = db.Column(db.String(160), nullable=True)
+    ticket_number        = db.Column(db.String(80), nullable=True)
+    issue_description    = db.Column(db.Text, nullable=True)
+    person_name_snapshot = db.Column(db.String(160), nullable=True)
+    sent_at              = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expected_return_at   = db.Column(db.Date, nullable=True)
+    returned_at          = db.Column(db.DateTime, nullable=True)
+    outcome              = db.Column(db.String(20), nullable=True)  # 'fixed' | 'could_not_repair' | 'replaced'
+    notes                = db.Column(db.Text, nullable=True)
+
+
+REPAIR_OUTCOMES = {
+    'fixed': 'Fixed',
+    'could_not_repair': 'Could Not Repair',
+    'replaced': 'Replaced',
+}
+
+
+class ActivityLog(db.Model):
+    """
+    An accountability trail of admin-side mutations — who did what, when.
+    Deliberately does NOT log every /api/scan check-in/out (that volume is
+    already fully captured by Event); this is for the things nothing else
+    records an actor for: people/devices/loaners/users/sites/repairs/fees.
+    site_id is best-effort (None for things like Users/Sites CRUD or a bulk
+    import spanning multiple sites) — a site-scoped admin only sees rows
+    with a matching site_id, so leaving it None makes a row super-admin-only.
+    """
+    __tablename__ = 'activity_log'
+    id            = db.Column(db.Integer, primary_key=True)
+    timestamp     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    actor_type    = db.Column(db.String(20), nullable=False)  # 'user' | 'legacy_admin' | 'kiosk' | 'system'
+    actor_label   = db.Column(db.String(160), nullable=False)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    site_id       = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
+    action        = db.Column(db.String(60), nullable=False, index=True)
+    summary       = db.Column(db.Text, nullable=False)
 
 
 class LoanerCheckout(db.Model):
@@ -440,6 +540,58 @@ def sync_chromeos_device_from_google(serial_number):
     raise NotImplementedError('Google Workspace sync is configured but not implemented yet.')
 
 
+def set_chromeos_device_enabled(serial_number, enabled):
+    """
+    Enables or disables a Chromebook in Google Workspace by serial number —
+    resolves the device ID, then calls the Admin SDK's chromeosdevices().action()
+    with action='reenable' (enabled=True) or 'disable' (enabled=False).
+
+    Needs a write-scope service account (https://www.googleapis.com/auth/admin.directory.device.chromeos,
+    not the .readonly scope sync_chromeos_device_from_google() above uses) with
+    domain-wide delegation authorized in the Workspace Admin console — same
+    manual prerequisite as the read-only sync, not yet set up.
+
+    Args:
+        serial_number: The device's manufacturer serial number.
+        enabled: True to re-enable, False to disable.
+
+    Raises:
+        NotImplementedError: Always, until the write-scope service account is configured.
+    """
+    from google.oauth2 import service_account  # noqa: F401 (write-scope wiring)
+    from googleapiclient.discovery import build  # noqa: F401 (write-scope wiring)
+    raise NotImplementedError('Google Workspace loaner auto-disable is enabled but not implemented yet.')
+
+
+def _sync_loaner_google_state(registry_row, enabled):
+    """
+    Best-effort Google enable/disable for a loaner Chromebook on checkout/checkin.
+    No-ops (logs and returns) unless GOOGLE_SYNC_ENABLED, the separate
+    GOOGLE_LOANER_AUTO_DISABLE_ENABLED env var, AND this device's site's opt-in
+    flag are all true, and the device has a serial number on file. Never raises
+    and never touches db.session — the checkout/checkin has already committed
+    by the time this runs, so a Google-side failure shouldn't roll back the
+    local checkout/checkin or block the person waiting on it.
+    """
+    if not (GOOGLE_SYNC_ENABLED and GOOGLE_LOANER_AUTO_DISABLE_ENABLED):
+        return
+    if not (registry_row.site and registry_row.site.google_loaner_autodisable_enabled):
+        return
+    if not registry_row.serial_number:
+        logger.info('Skipping Google loaner auto-%s for %s: no serial number on file.',
+                    'enable' if enabled else 'disable', registry_row.asset_tag)
+        return
+    try:
+        set_chromeos_device_enabled(registry_row.serial_number, enabled)
+        asset = Asset.query.filter_by(asset_tag=registry_row.asset_tag).first()
+        if asset:
+            asset.google_enabled = enabled
+            db.session.commit()
+    except Exception as e:
+        logger.error('Google loaner auto-%s failed for %s: %s',
+                     'enable' if enabled else 'disable', registry_row.asset_tag, e)
+
+
 def send_email(to_email, subject, body):
     """
     Sends a plain-text email via SMTP (Gmail by default: smtp.gmail.com:587 with
@@ -518,6 +670,64 @@ def _current_user():
     return User.query.get(user_id) if user_id else None
 
 
+def _current_site_ids():
+    """
+    None = unrestricted (super admin, or the legacy shared-password login).
+    Otherwise the list of site_ids the current session may see/act on.
+    Empty list = sees nothing — e.g. a named user not yet assigned any site,
+    or a kiosk enrolled without one. Only meaningful inside a route already
+    gated by login_required/require_permission/kiosk_or_login_required, since
+    it trusts the session is already valid rather than re-checking expiry.
+    """
+    if session.get('admin_logged_in'):
+        if session.get('is_super_admin'):
+            return None
+        user = _current_user()
+        return [s.id for s in user.sites] if user else []
+    token = request.cookies.get('kiosk_token')
+    if token:
+        device = KioskDevice.query.filter_by(token=token).first()
+        return [device.site_id] if device and device.site_id else []
+    return []
+
+
+def _current_actor():
+    """
+    Resolves who's making the current request, for the activity log. Covers
+    the three real 'logged in' states this app has (named User, legacy
+    shared-password login, kiosk device) plus a 'system' fallback for code
+    that runs with no request context (the hourly reminder background thread).
+    Returns (actor_type, actor_label, actor_user_id).
+    """
+    if not has_request_context():
+        return 'system', 'System (background job)', None
+    if session.get('admin_logged_in'):
+        user = _current_user()
+        if user:
+            return 'user', user.username, user.id
+        return 'legacy_admin', 'Admin (shared login)', None
+    token = request.cookies.get('kiosk_token')
+    if token:
+        device = KioskDevice.query.filter_by(token=token).first()
+        if device:
+            return 'kiosk', f'Kiosk: {device.label or device.token[:8]}', None
+    return 'system', 'System (background job)', None
+
+
+def _log_activity(action, summary, site_id=None):
+    """
+    Records an admin-side mutation. Never commits itself — call this before
+    the route's own db.session.commit() so the log entry and the action it
+    describes are always atomic. site_id is best-effort; leave it None for
+    anything without one clear site (Users/Sites CRUD, a multi-site bulk import).
+    """
+    actor_type, actor_label, actor_user_id = _current_actor()
+    db.session.add(ActivityLog(
+        actor_type=actor_type, actor_label=actor_label, actor_user_id=actor_user_id,
+        site_id=site_id, action=action, summary=summary,
+    ))
+
+
 def _has_permission(perm):
     """
     session['is_admin'] is set for both the legacy ADMIN_PASSWORD login and any
@@ -531,9 +741,13 @@ def _has_permission(perm):
         return False
     return {
         'people':  user.can_people,
-        'devices': user.can_devices,
+        'devices': user.can_devices or user.can_devices_manage,
+        'devices_manage': user.can_devices_manage,
         'loaners': user.can_loaners,
+        'loaner_checkinout': user.can_loaner_checkinout or user.can_loaners,
+        'checkinout': user.can_checkinout,
         'repairs': user.can_repairs,
+        'manage_users': user.can_manage_users,
     }.get(perm, False)
 
 
@@ -555,6 +769,25 @@ def require_permission(perm):
             return f(*args, **kwargs)
         return decorated
     return decorator
+
+
+def require_super_admin(f):
+    """Like require_permission, but for district-wide features (managing Sites,
+    the full-registry CSV replace) that even a site-scoped is_admin=True user
+    shouldn't be able to touch."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        was_logged_in = session.get('admin_logged_in')
+        if not _admin_session_active():
+            msg = ('Your session expired after 15 minutes of inactivity.' if was_logged_in
+                   else 'Please log in to access the admin panel.')
+            flash(msg, 'error')
+            return redirect(url_for('admin_login'))
+        if not session.get('is_super_admin'):
+            flash('Only a super admin can access that page.', 'error')
+            return redirect(url_for('admin_panel'))
+        return f(*args, **kwargs)
+    return decorated
 
 
 def kiosk_or_login_required(f):
@@ -588,14 +821,73 @@ def kiosk_or_api_login_required(f):
     return decorated
 
 
+def kiosk_or_permission_required(perm):
+    """Like kiosk_or_login_required, but a logged-in (non-kiosk) session also
+    needs the given area permission — a kiosk device's cookie always passes,
+    since kiosks are physically dedicated to this one job."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if _kiosk_device_valid():
+                return f(*args, **kwargs)
+            was_logged_in = session.get('admin_logged_in')
+            if not _admin_session_active():
+                msg = ('Your session expired after 15 minutes of inactivity.' if was_logged_in
+                       else 'Please log in, or use a device enrolled in Kiosk Mode.')
+                flash(msg, 'error')
+                return redirect(url_for('admin_login'))
+            if not _has_permission(perm):
+                flash('Your account doesn\'t have permission to access that page.', 'error')
+                return redirect(url_for('admin_panel'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def kiosk_or_api_permission_required(perm):
+    """Like kiosk_or_permission_required, but returns JSON errors instead of redirecting."""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if _kiosk_device_valid():
+                return f(*args, **kwargs)
+            if not _admin_session_active():
+                return jsonify({'error': 'Unauthorized. Log in or use a device enrolled in Kiosk Mode.'}), 401
+            if not _has_permission(perm):
+                return jsonify({'error': 'Your account doesn\'t have permission to do that.'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
 @app.context_processor
 def inject_permission_helper():
     """Exposes can('people'|'devices'|'loaners'|'repairs') to every template, so
     nav links and buttons can hide themselves for users without that permission
-    instead of just bouncing them back with an error after they click."""
-    return {'can': _has_permission}
+    instead of just bouncing them back with an error after they click. Also
+    exposes site-scope helpers so templates can hide site columns/filters for
+    single-site users and gate Sites management to super admins.
+
+    nav_overdue_count/nav_orphan_count power the small badges on the Admin ▾
+    nav dropdown — only computed for a logged-in admin session (not kiosk-only
+    visitors, who never see that dropdown), and only when the relevant
+    permission is held, so this doesn't add queries to every page load."""
+    nav_overdue_count = 0
+    nav_orphan_count = 0
+    if session.get('admin_logged_in'):
+        if _has_permission('admin'):
+            nav_overdue_count = len(_overdue_assignments(_current_site_ids()))
+        if session.get('is_super_admin'):
+            nav_orphan_count = Asset.query.filter_by(is_valid=False).count()
+    return {
+        'can': _has_permission,
+        'is_super_admin': lambda: bool(session.get('is_super_admin')),
+        'current_site_ids': _current_site_ids,
+        'nav_overdue_count': nav_overdue_count,
+        'nav_orphan_count': nav_orphan_count,
+    }
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -622,6 +914,7 @@ def admin_login():
                 session.clear()
                 session['admin_logged_in'] = True
                 session['is_admin'] = True
+                session['is_super_admin'] = True
                 session['last_active'] = datetime.now(timezone.utc).timestamp()
                 session.permanent = True
                 return redirect(url_for('admin_panel'))
@@ -632,6 +925,7 @@ def admin_login():
                 session['admin_logged_in'] = True
                 session['user_id'] = user.id
                 session['is_admin'] = user.is_admin
+                session['is_super_admin'] = user.is_super_admin
                 session['last_active'] = datetime.now(timezone.utc).timestamp()
                 session.permanent = True
                 return redirect(url_for('admin_panel'))
@@ -666,18 +960,41 @@ def session_status():
 @app.route('/admin')
 @login_required
 def admin_panel():
-    registry_count = AssetRegistry.query.count()
-    orphan_count   = Asset.query.filter_by(is_valid=False).count()
-    people_count   = Person.query.count()
+    site_ids = _current_site_ids()
+    registry_count = _scope_registry(AssetRegistry.query, site_ids).count()
+    people_count   = _scope_people(Person.query, site_ids).count()
 
     # Assets with no Asset row yet are implicitly 'available' (the default status).
-    explicit_counts = dict(
-        db.session.query(Asset.status, db.func.count(Asset.id)).group_by(Asset.status).all()
-    )
+    status_query = db.session.query(Asset.status, db.func.count(Asset.id))
+    if site_ids is not None:
+        status_query = status_query.join(AssetRegistry, AssetRegistry.asset_tag == Asset.asset_tag) \
+            .filter(AssetRegistry.site_id.in_(site_ids))
+    explicit_counts = dict(status_query.group_by(Asset.status).all())
     non_available_explicit = sum(v for k, v in explicit_counts.items() if k != 'available')
     status_counts = {s: explicit_counts.get(s, 0) for s in ASSET_STATUSES}
     status_counts['available'] = registry_count - non_available_explicit
-    overdue_count = len(_overdue_assignments())
+    overdue_count = len(_overdue_assignments(site_ids))
+    warranty_expiring_count = _filter_registry_by_warranty(
+        _scope_registry(AssetRegistry.query, site_ids), 'expiring').count()
+
+    # Orphans have no site to attribute, and a per-site breakdown only makes
+    # sense district-wide — both super-admin-only.
+    orphan_count = None
+    site_breakdown = None
+    unassigned_devices = None
+    if site_ids is None:
+        orphan_count = Asset.query.filter_by(is_valid=False).count()
+        site_breakdown = [{
+            'name': site.name,
+            'registry_count': AssetRegistry.query.filter_by(site_id=site.id).count(),
+            'people_count': Person.query.filter_by(site_id=site.id).count(),
+        } for site in Site.query.order_by(Site.name).all()]
+        unassigned_devices = AssetRegistry.query.filter(AssetRegistry.site_id.is_(None)).count()
+
+    google_loaner_autodisable_active = (
+        GOOGLE_SYNC_ENABLED and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
+        and Site.query.filter_by(google_loaner_autodisable_enabled=True).first() is not None
+    )
 
     return render_template('admin_panel.html',
                            registry_count=registry_count,
@@ -685,16 +1002,22 @@ def admin_panel():
                            people_count=people_count,
                            status_counts=status_counts,
                            overdue_count=overdue_count,
+                           warranty_expiring_count=warranty_expiring_count,
+                           site_breakdown=site_breakdown,
+                           unassigned_devices=unassigned_devices,
                            email_enabled=EMAIL_ENABLED,
-                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED,
+                           google_loaner_autodisable_active=google_loaner_autodisable_active)
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
-@require_permission('admin')
+@require_super_admin
 def upload_csv():
     """
     Accepts a CSV with columns: asset_tag, serial_number (optional), description (optional).
-    Completely replaces the registry. Heals any orphaned Asset records afterwards.
+    Completely replaces the registry (every site's devices, not just one) — so
+    this is super-admin only. Site-scoped admins use /admin/registry/set_sites
+    or the People-import-style upsert instead. Heals any orphaned Asset records afterwards.
     """
     if 'csv_file' not in request.files:
         flash('No file part in request', 'error')
@@ -727,11 +1050,17 @@ def upload_csv():
         SERIAL_COLS = ('serial_number',)
         DESC_COLS   = ('description',)
         TYPE_COLS   = ('device_type', 'type')
+        PURCHASE_DATE_COLS = ('purchase_date',)
+        PURCHASE_COST_COLS = ('purchase_cost', 'cost')
+        WARRANTY_COLS      = ('warranty_expiration', 'warranty')
 
         tag_col    = next((c for c in TAG_COLS    if c in normalized_headers), None)
         serial_col = next((c for c in SERIAL_COLS if c in normalized_headers), None)
         desc_col   = next((c for c in DESC_COLS   if c in normalized_headers), None)
         type_col   = next((c for c in TYPE_COLS   if c in normalized_headers), None)
+        purchase_date_col = next((c for c in PURCHASE_DATE_COLS if c in normalized_headers), None)
+        purchase_cost_col = next((c for c in PURCHASE_COST_COLS if c in normalized_headers), None)
+        warranty_col       = next((c for c in WARRANTY_COLS if c in normalized_headers), None)
 
         if not any((tag_col, serial_col, desc_col, type_col)):
             flash(f'CSV must have at least one recognized column (asset_tag, serial_number, '
@@ -761,6 +1090,9 @@ def upload_csv():
             desc   = clean(row.get(desc_col, ''))   if desc_col   else None
             dtype  = clean(row.get(type_col, ''))   if type_col   else None
             dtype  = dtype.lower() if dtype and dtype.lower() in DEVICE_TYPES else 'chromebook'
+            purchase_date = _parse_date(row.get(purchase_date_col, '')) if purchase_date_col else None
+            purchase_cost = _parse_money(row.get(purchase_cost_col, '')) if purchase_cost_col else None
+            warranty_expiration = _parse_date(row.get(warranty_col, '')) if warranty_col else None
 
             # If asset_id is missing but serial exists, use serial as the tag
             if not tag and serial:
@@ -794,9 +1126,13 @@ def upload_csv():
                 serial_number=serial,
                 description=desc,
                 device_type=dtype,
+                purchase_date=purchase_date,
+                purchase_cost=purchase_cost,
+                warranty_expiration=warranty_expiration,
             ))
             imported += 1
 
+        _log_activity('registry_csv_import', f'Replaced the asset registry via CSV upload: {imported} row(s) imported, {skipped} skipped.')
         db.session.commit()
         healed = heal_orphans()
 
@@ -816,6 +1152,51 @@ def upload_csv():
     return redirect(url_for('admin_panel'))
 
 
+def _scope_registry(query, site_ids):
+    """Applies the current session's site scope to an AssetRegistry query. None = unrestricted."""
+    if site_ids is None:
+        return query
+    return query.filter(AssetRegistry.site_id.in_(site_ids))
+
+
+def _parse_date(value):
+    """Parses a 'YYYY-MM-DD' form field into a date, or None if blank/invalid."""
+    value = (value or '').strip()
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _parse_money(value):
+    """Parses a dollar-amount form field into a Decimal, or None if blank/invalid/negative."""
+    value = (value or '').strip().lstrip('$')
+    if not value:
+        return None
+    try:
+        amount = Decimal(value)
+    except InvalidOperation:
+        return None
+    return amount if amount >= 0 else None
+
+
+WARRANTY_WARNING_DAYS = 60
+
+
+def _filter_registry_by_warranty(query, mode):
+    """mode='expiring': warranty runs out within WARRANTY_WARNING_DAYS. mode='expired': already past."""
+    today = datetime.utcnow().date()
+    if mode == 'expired':
+        return query.filter(AssetRegistry.warranty_expiration.isnot(None),
+                             AssetRegistry.warranty_expiration < today)
+    horizon = today + timedelta(days=WARRANTY_WARNING_DAYS)
+    return query.filter(AssetRegistry.warranty_expiration.isnot(None),
+                         AssetRegistry.warranty_expiration >= today,
+                         AssetRegistry.warranty_expiration <= horizon)
+
+
 def _filter_registry_by_status(query, status_filter):
     """Filters an AssetRegistry query by live Asset.status. Assets with no Asset
     row yet are implicitly 'available' (the default), so that case is handled
@@ -828,23 +1209,33 @@ def _filter_registry_by_status(query, status_filter):
 
 
 @app.route('/admin/registry/new', methods=['GET', 'POST'])
-@require_permission('devices')
+@require_permission('devices_manage')
 def admin_registry_new():
     """Manually adds a single device. Leave asset_tag blank to self-assign a random 6-digit one."""
+    site_ids = _current_site_ids()
+    sites = _sites_for_actor(site_ids)
     if request.method == 'POST':
         tag = request.form.get('asset_tag', '').strip()
         serial = request.form.get('serial_number', '').strip() or None
         description = request.form.get('description', '').strip() or None
         device_type = request.form.get('device_type', 'chromebook').strip()
         device_type = device_type if device_type in DEVICE_TYPES else 'chromebook'
+        site_id = request.form.get('site_id', type=int)
+        purchase_date = _parse_date(request.form.get('purchase_date'))
+        purchase_cost = _parse_money(request.form.get('purchase_cost'))
+        warranty_expiration = _parse_date(request.form.get('warranty_expiration'))
+
+        if site_ids is not None and (not site_id or site_id not in site_ids):
+            flash('Choose one of your own sites.', 'error')
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
 
         if tag and AssetRegistry.query.filter_by(asset_tag=tag).first():
             flash(f'Asset tag "{tag}" already exists.', 'error')
-            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
 
         if serial and AssetRegistry.query.filter_by(serial_number=serial).first():
             flash(f'A device with serial number "{serial}" already exists.', 'error')
-            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
 
         if not tag:
             existing_tags = {t for (t,) in db.session.query(AssetRegistry.asset_tag).all()}
@@ -853,21 +1244,182 @@ def admin_registry_new():
         try:
             db.session.add(AssetRegistry(
                 asset_tag=tag, serial_number=serial,
-                description=description, device_type=device_type,
+                description=description, device_type=device_type, site_id=site_id,
+                purchase_date=purchase_date, purchase_cost=purchase_cost,
+                warranty_expiration=warranty_expiration,
             ))
+            _log_activity('device_add', f'Added device {tag} to the registry.', site_id=site_id)
             db.session.commit()
             flash(f'Added device {tag} to the registry.', 'success')
             return redirect(url_for('admin_asset_assign', asset_tag=tag))
         except IntegrityError as e:
             db.session.rollback()
             flash('Could not add device: that asset tag or serial number is already in use.', 'error')
-            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
         except Exception as e:
             db.session.rollback()
             flash(f'Could not add device: {e}', 'error')
-            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
 
-    return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=None)
+    return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=None, sites=sites)
+
+
+@app.route('/admin/registry/<string:asset_tag>/edit', methods=['GET', 'POST'])
+@require_permission('devices_manage')
+def admin_registry_edit(asset_tag):
+    """Edits a device's attributes (serial, description, type, site). The
+    asset_tag itself isn't editable here — it's the key used everywhere
+    else (assignments, history, events), so renaming it is out of scope."""
+    site_ids = _current_site_ids()
+    registry_row = _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=asset_tag).first_or_404()
+    sites = _sites_for_actor(site_ids)
+
+    if request.method == 'POST':
+        serial = request.form.get('serial_number', '').strip() or None
+        description = request.form.get('description', '').strip() or None
+        device_type = request.form.get('device_type', 'chromebook').strip()
+        device_type = device_type if device_type in DEVICE_TYPES else 'chromebook'
+        site_id = request.form.get('site_id', type=int)
+        purchase_date = _parse_date(request.form.get('purchase_date'))
+        purchase_cost = _parse_money(request.form.get('purchase_cost'))
+        warranty_expiration = _parse_date(request.form.get('warranty_expiration'))
+
+        if site_ids is not None and (not site_id or site_id not in site_ids):
+            flash('Choose one of your own sites.', 'error')
+            return render_template('admin_registry_edit.html', registry_row=registry_row, device_types=DEVICE_TYPES, sites=sites)
+
+        if serial and AssetRegistry.query.filter(AssetRegistry.serial_number == serial,
+                                                   AssetRegistry.asset_tag != asset_tag).first():
+            flash(f'A device with serial number "{serial}" already exists.', 'error')
+            return render_template('admin_registry_edit.html', registry_row=registry_row, device_types=DEVICE_TYPES, sites=sites)
+
+        try:
+            registry_row.serial_number = serial
+            registry_row.description = description
+            registry_row.device_type = device_type
+            registry_row.site_id = site_id
+            registry_row.purchase_date = purchase_date
+            registry_row.purchase_cost = purchase_cost
+            registry_row.warranty_expiration = warranty_expiration
+            _log_activity('device_edit', f'Edited device {asset_tag}.', site_id=site_id)
+            db.session.commit()
+            flash(f'Updated {asset_tag}.', 'success')
+            return redirect(url_for('admin_registry'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not update device: {e}', 'error')
+
+    return render_template('admin_registry_edit.html', registry_row=registry_row, device_types=DEVICE_TYPES, sites=sites)
+
+
+@app.route('/admin/registry/<string:asset_tag>/delete', methods=['POST'])
+@require_permission('devices_manage')
+def admin_registry_delete(asset_tag):
+    """
+    Permanently removes a device from the registry. Any current assignment is
+    closed out first (same pattern as deleting a Person), and an open loaner
+    checkout is auto-closed rather than left dangling. AssignmentHistory/Event/
+    Incident/LoanerCheckout rows are untouched — they reference asset_tag as a
+    plain string, not a foreign key, so history stays intact and readable.
+    """
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+    try:
+        open_loaner = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
+        if open_loaner:
+            open_loaner.checked_in_at = datetime.utcnow()
+            open_loaner.condition_notes = ((open_loaner.condition_notes + ' ') if open_loaner.condition_notes else '') + '[auto-closed: device deleted]'
+
+        asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+        if asset:
+            _close_open_assignment(asset_tag, condition_in='Device deleted')
+            db.session.delete(asset)
+
+        registry_site_id = registry_row.site_id
+        db.session.delete(registry_row)
+        _log_activity('device_delete', f'Deleted device {asset_tag} from the registry.', site_id=registry_site_id)
+        db.session.commit()
+        flash(f'Deleted {asset_tag} from the registry.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not delete device: {e}', 'error')
+    return redirect(url_for('admin_registry'))
+
+
+@app.route('/admin/registry/set_sites', methods=['GET', 'POST'])
+@require_permission('devices_manage')
+def admin_registry_set_sites():
+    """
+    Non-destructive way to fill in devices' sites via CSV (upsert-by-asset_tag,
+    same pattern as the People import) — for cleaning up whatever the one-time
+    backfill couldn't infer, without needing the super-admin-only full replace.
+    Columns: asset_tag, site.
+    """
+    results = None
+    site_ids = _current_site_ids()
+
+    if request.method == 'POST':
+        if 'csv_file' not in request.files or not request.files['csv_file'].filename:
+            flash('Choose a CSV file to upload.', 'error')
+            return redirect(url_for('admin_registry_set_sites'))
+
+        file = request.files['csv_file']
+        if not file.filename.lower().endswith('.csv'):
+            flash('File must be a .csv', 'error')
+            return redirect(url_for('admin_registry_set_sites'))
+
+        results = []
+        try:
+            content = file.stream.read().decode('utf-8-sig')
+            reader = csv.DictReader(io.StringIO(content))
+            fieldnames = [(f or '').strip().lower().replace(' ', '_') for f in (reader.fieldnames or [])]
+            reader.fieldnames = fieldnames
+
+            if 'asset_tag' not in fieldnames or 'site' not in fieldnames:
+                flash(f'CSV must have "asset_tag" and "site" columns. Found: {", ".join(fieldnames)}', 'error')
+                return redirect(url_for('admin_registry_set_sites'))
+
+            updated = skipped = 0
+            for row in reader:
+                tag = (row.get('asset_tag') or '').strip()
+                site_name = (row.get('site') or '').strip()
+                if not tag or not site_name:
+                    skipped += 1
+                    results.append({'row': tag or '(blank)', 'ok': False, 'message': 'Missing asset_tag or site.'})
+                    continue
+
+                registry_row = AssetRegistry.query.filter_by(asset_tag=tag).first()
+                if not registry_row:
+                    skipped += 1
+                    results.append({'row': tag, 'ok': False, 'message': 'No device with that asset_tag.'})
+                    continue
+                if site_ids is not None and registry_row.site_id not in (site_ids + [None]):
+                    skipped += 1
+                    results.append({'row': tag, 'ok': False, 'message': 'That device belongs to a different site.'})
+                    continue
+
+                site_row = Site.query.filter(db.func.lower(Site.name) == site_name.lower()).first()
+                if not site_row:
+                    skipped += 1
+                    results.append({'row': tag, 'ok': False, 'message': f'Unknown site "{site_name}".'})
+                    continue
+                if site_ids is not None and site_row.id not in site_ids:
+                    skipped += 1
+                    results.append({'row': tag, 'ok': False, 'message': f'"{site_name}" isn\'t one of your sites.'})
+                    continue
+
+                registry_row.site_id = site_row.id
+                updated += 1
+                results.append({'row': tag, 'ok': True, 'message': f'Set {tag} to {site_row.name}.'})
+
+            _log_activity('registry_set_sites', f'Set sites via CSV for {updated} device(s), skipped {skipped}.')
+            db.session.commit()
+            flash(f'Updated {updated}, skipped {skipped} row(s).', 'success' if not skipped else 'info')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Import failed: {e}', 'error')
+            return redirect(url_for('admin_registry_set_sites'))
+
+    return render_template('admin_registry_set_sites.html', results=results)
 
 
 @app.route('/admin/registry')
@@ -875,11 +1427,13 @@ def admin_registry_new():
 def admin_registry():
     page          = request.args.get('page', 1, type=int)
     per_page      = 50
-    query         = AssetRegistry.query.order_by(AssetRegistry.asset_tag)
+    site_ids      = _current_site_ids()
+    query         = _scope_registry(AssetRegistry.query, site_ids).order_by(AssetRegistry.asset_tag)
     search        = request.args.get('q', '').strip()
     status_filter = request.args.get('status', '').strip()
     type_filter   = request.args.get('device_type', '').strip()
     person_filter = request.args.get('person_id', '').strip()
+    warranty_filter = request.args.get('warranty', '').strip()
 
     if search:
         like = f'%{search}%'
@@ -898,10 +1452,14 @@ def admin_registry():
         query = query.filter(AssetRegistry.device_type == type_filter)
     else:
         type_filter = ''
+    if warranty_filter in ('expiring', 'expired'):
+        query = _filter_registry_by_warranty(query, warranty_filter)
+    else:
+        warranty_filter = ''
 
     person_filter_name = None
     if person_filter.isdigit():
-        person = Person.query.get(int(person_filter))
+        person = _scope_people(Person.query, site_ids).filter_by(id=int(person_filter)).first()
         if person:
             person_filter_name = person.full_name
             owned_tags = db.session.query(Asset.asset_tag).filter(Asset.assigned_to_id == person.id)
@@ -922,6 +1480,7 @@ def admin_registry():
                            status_filter=status_filter, asset_statuses=ASSET_STATUSES,
                            type_filter=type_filter, device_types=DEVICE_TYPES,
                            person_filter=person_filter, person_filter_name=person_filter_name,
+                           warranty_filter=warranty_filter, today=datetime.utcnow().date(),
                            assets_by_tag=assets_by_tag)
 
 
@@ -930,12 +1489,13 @@ def admin_registry():
 def admin_registry_export():
     """Exports the full asset list (not just the current page) as CSV, including
     live status and assignment — useful as a backup/reporting snapshot."""
-    rows = AssetRegistry.query.order_by(AssetRegistry.asset_tag).all()
+    rows = _scope_registry(AssetRegistry.query, _current_site_ids()).order_by(AssetRegistry.asset_tag).all()
     assets_by_tag = {a.asset_tag: a for a in Asset.query.all()}
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(['asset_tag', 'serial_number', 'description', 'device_type', 'status', 'assigned_to', 'assigned_to_email'])
+    writer.writerow(['asset_tag', 'serial_number', 'description', 'device_type', 'status', 'assigned_to', 'assigned_to_email',
+                      'purchase_date', 'purchase_cost', 'warranty_expiration'])
     for row in rows:
         asset = assets_by_tag.get(row.asset_tag)
         status = asset.status if asset else 'available'
@@ -943,6 +1503,9 @@ def admin_registry_export():
         writer.writerow([
             row.asset_tag, row.serial_number or '', row.description or '', row.device_type,
             status, person.full_name if person else '', person.email if person else '',
+            row.purchase_date.isoformat() if row.purchase_date else '',
+            str(row.purchase_cost) if row.purchase_cost is not None else '',
+            row.warranty_expiration.isoformat() if row.warranty_expiration else '',
         ])
 
     response = app.response_class(buffer.getvalue(), mimetype='text/csv')
@@ -963,6 +1526,11 @@ def admin_scan_lookup():
         return redirect(url_for('admin_registry'))
 
     asset_tag, _ = resolve_scan(value)
+    site_ids = _current_site_ids()
+    if asset_tag and site_ids is not None:
+        row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        if not row or row.site_id not in site_ids:
+            asset_tag = None
     if not asset_tag:
         flash(f'No asset found matching "{value}".', 'error')
         return redirect(url_for('admin_registry'))
@@ -980,13 +1548,14 @@ def admin_search():
     """
     q = request.args.get('q', '').strip()
     people, assets = [], []
+    site_ids = _current_site_ids()
 
     if len(q) >= 2:
-        people = Person.query.filter(_person_search_filter(q)) \
+        people = _scope_people(Person.query, site_ids).filter(_person_search_filter(q)) \
             .order_by(Person.last_name, Person.first_name).limit(25).all()
 
         like = f'%{q}%'
-        registry_rows = AssetRegistry.query.filter(
+        registry_rows = _scope_registry(AssetRegistry.query, site_ids).filter(
             db.or_(
                 AssetRegistry.asset_tag.ilike(like),
                 AssetRegistry.serial_number.ilike(like),
@@ -1006,8 +1575,10 @@ def admin_search():
 
 
 @app.route('/admin/orphans')
-@require_permission('devices')
+@require_super_admin
 def admin_orphans():
+    """Orphan scans have no matching AssetRegistry row, so there's nothing to
+    attribute a site to — kept super-admin-only rather than guessing."""
     orphans = Asset.query.filter_by(is_valid=False).order_by(Asset.asset_tag).all()
     return render_template('admin_orphans.html', orphans=orphans)
 
@@ -1027,10 +1598,17 @@ def _person_search_filter(q):
             Person.first_name.ilike(like),
             Person.last_name.ilike(like),
             Person.email.ilike(like),
-            Person.site.ilike(like),
+            Person.site.has(Site.name.ilike(like)),
             Person.external_id.ilike(like),
         ))
     return db.and_(*conditions)
+
+
+def _scope_people(query, site_ids):
+    """Applies the current session's site scope to a Person query. None = unrestricted."""
+    if site_ids is None:
+        return query
+    return query.filter(Person.site_id.in_(site_ids))
 
 
 @app.route('/admin/people')
@@ -1039,7 +1617,7 @@ def admin_people():
     page     = request.args.get('page', 1, type=int)
     per_page = 50
     show     = request.args.get('show', 'active')  # 'active' | 'inactive' | 'all'
-    query    = Person.query.order_by(Person.last_name, Person.first_name)
+    query    = _scope_people(Person.query, _current_site_ids()).order_by(Person.last_name, Person.first_name)
     if show == 'active':
         query = query.filter(Person.is_active.is_(True))
     elif show == 'inactive':
@@ -1052,7 +1630,7 @@ def admin_people():
 
 
 @app.route('/admin/people/search')
-@api_login_required
+@kiosk_or_api_login_required
 def admin_people_search():
     """
     Live search for the person-picker widget (e.g. on the assign page) — returns
@@ -1064,13 +1642,14 @@ def admin_people_search():
     if len(q) < 2:
         return jsonify([])
 
-    matches = Person.query.filter(
+    matches = _scope_people(Person.query, _current_site_ids()).filter(
         Person.is_active.is_(True),
         _person_search_filter(q),
     ).order_by(Person.last_name, Person.first_name).limit(20).all()
 
     return jsonify([{
-        'id': p.id, 'full_name': p.full_name, 'email': p.email, 'site': p.site,
+        'id': p.id, 'full_name': p.full_name, 'email': p.email,
+        'site': p.site.name if p.site else None,
     } for p in matches])
 
 
@@ -1083,14 +1662,16 @@ def _person_form_values():
         'email':       request.form.get('email', '').strip().lower(),
         'role':        request.form.get('role', 'staff').strip(),
         'department':  request.form.get('department', '').strip() or None,
-        'site':        request.form.get('site', '').strip() or None,
+        'site_id':     request.form.get('site_id', type=int),
         'external_id': request.form.get('external_id', '').strip() or None,
         'grad_year':   int(grad_year_raw) if grad_year_raw.isdigit() else None,
     }
 
 
-def _validate_person_form(values, person_id=None):
-    """Returns an error message string, or None if the form values are valid."""
+def _validate_person_form(values, person_id=None, allowed_site_ids=None):
+    """Returns an error message string, or None if the form values are valid.
+    allowed_site_ids: None means unrestricted (super admin); otherwise the
+    actor must pick one of their own sites — no blank/unassigned option."""
     if not values['first_name'] or not values['last_name'] or not values['email']:
         return 'First name, last name, and email are required.'
     if '@' not in values['email'] or '.' not in values['email'].split('@')[-1]:
@@ -1101,57 +1682,77 @@ def _validate_person_form(values, person_id=None):
             dupe = dupe.filter(Person.id != person_id)
         if dupe.first():
             return f'ID number "{values["external_id"]}" is already assigned to another person.'
+    if allowed_site_ids is not None:
+        if not values['site_id']:
+            return 'Choose a site.'
+        if values['site_id'] not in allowed_site_ids:
+            return 'You can only assign people to your own site(s).'
     return None
+
+
+def _sites_for_actor(site_ids):
+    """Sites the current session may pick from. None (super admin) = every site."""
+    if site_ids is None:
+        return Site.query.order_by(Site.name).all()
+    return Site.query.filter(Site.id.in_(site_ids)).order_by(Site.name).all()
 
 
 @app.route('/admin/people/new', methods=['GET', 'POST'])
 @require_permission('people')
 def admin_person_new():
+    site_ids = _current_site_ids()
     if request.method == 'POST':
         values = _person_form_values()
-        error = _validate_person_form(values)
+        error = _validate_person_form(values, allowed_site_ids=site_ids)
         if error:
             flash(error, 'error')
-            return render_template('admin_person_form.html', person=None, form=values)
+            return render_template('admin_person_form.html', person=None, form=values,
+                                    sites=_sites_for_actor(site_ids))
 
         try:
             person = Person(**values)
             db.session.add(person)
+            _log_activity('person_add', f'Added {person.full_name}.', site_id=values.get('site_id'))
             db.session.commit()
             flash(f'Added {person.full_name}.', 'success')
             return redirect(url_for('admin_people'))
         except Exception as e:
             db.session.rollback()
             flash(f'Could not add person: {e}', 'error')
-            return render_template('admin_person_form.html', person=None, form=values)
+            return render_template('admin_person_form.html', person=None, form=values,
+                                    sites=_sites_for_actor(site_ids))
 
-    return render_template('admin_person_form.html', person=None, form=None)
+    return render_template('admin_person_form.html', person=None, form=None, sites=_sites_for_actor(site_ids))
 
 
 @app.route('/admin/people/<int:person_id>/edit', methods=['GET', 'POST'])
 @require_permission('people')
 def admin_person_edit(person_id):
-    person = Person.query.get_or_404(person_id)
+    site_ids = _current_site_ids()
+    person = _scope_people(Person.query, site_ids).filter_by(id=person_id).first_or_404()
 
     if request.method == 'POST':
         values = _person_form_values()
-        error = _validate_person_form(values, person_id=person_id)
+        error = _validate_person_form(values, person_id=person_id, allowed_site_ids=site_ids)
         if error:
             flash(error, 'error')
-            return render_template('admin_person_form.html', person=person, form=values)
+            return render_template('admin_person_form.html', person=person, form=values,
+                                    sites=_sites_for_actor(site_ids))
 
         try:
             for field, value in values.items():
                 setattr(person, field, value)
+            _log_activity('person_edit', f'Edited {person.full_name}.', site_id=person.site_id)
             db.session.commit()
             flash(f'Updated {person.full_name}.', 'success')
             return redirect(url_for('admin_people'))
         except Exception as e:
             db.session.rollback()
             flash(f'Could not update person: {e}', 'error')
-            return render_template('admin_person_form.html', person=person, form=values)
+            return render_template('admin_person_form.html', person=person, form=values,
+                                    sites=_sites_for_actor(site_ids))
 
-    return render_template('admin_person_form.html', person=person, form=None)
+    return render_template('admin_person_form.html', person=person, form=None, sites=_sites_for_actor(site_ids))
 
 
 def _release_person_assets(person, condition_in):
@@ -1178,16 +1779,21 @@ def admin_person_delete(person_id):
     it archives (is_active=False) rather than deleting, so history/incidents
     stay fully linked. Use this route for genuine data-entry mistakes.
     """
-    person = Person.query.get_or_404(person_id)
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+    unpaid_total = _person_unpaid_fee_total(person.id)
+    person_name, person_site_id = person.full_name, person.site_id
     try:
         unassigned = _release_person_assets(person, condition_in='Person deleted')
         AssignmentHistory.query.filter_by(person_id=person.id).update({'person_id': None})
         Incident.query.filter_by(person_id=person.id).update({'person_id': None})
         db.session.delete(person)
+        _log_activity('person_delete', f'Deleted {person_name}.', site_id=person_site_id)
         db.session.commit()
         msg = f'Deleted {person.full_name}.'
         if unassigned:
             msg += f' Unassigned {unassigned} asset{"s" if unassigned != 1 else ""}.'
+        if unpaid_total:
+            msg += f' Note: they had ${unpaid_total:.2f} in unpaid fees on file.'
         flash(msg, 'success')
     except Exception as e:
         db.session.rollback()
@@ -1199,8 +1805,9 @@ def admin_person_delete(person_id):
 @require_permission('people')
 def admin_person_reactivate(person_id):
     """Undoes an accidental graduate/archive — marks a person active again."""
-    person = Person.query.get_or_404(person_id)
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
     person.is_active = True
+    _log_activity('person_reactivate', f'Reactivated {person.full_name}.', site_id=person.site_id)
     db.session.commit()
     flash(f'Reactivated {person.full_name}.', 'success')
     return redirect(url_for('admin_people', show='inactive'))
@@ -1229,6 +1836,7 @@ def admin_people_import():
             return redirect(url_for('admin_people_import'))
 
         results = []
+        site_ids = _current_site_ids()
         try:
             content = file.stream.read().decode('utf-8-sig')
             reader = csv.DictReader(io.StringIO(content))
@@ -1254,7 +1862,7 @@ def admin_people_import():
                 role       = clean(row.get('role'))
                 role       = role.lower() if role and role.lower() in ('staff', 'student') else None
                 department = clean(row.get('department'))
-                site       = clean(row.get('site'))
+                site_name  = clean(row.get('site'))
                 grad_year_raw = clean(row.get('grad_year') or row.get('graduation_year'))
                 grad_year  = int(grad_year_raw) if grad_year_raw and grad_year_raw.isdigit() else None
 
@@ -1263,6 +1871,21 @@ def admin_people_import():
                     results.append({'row': email or external_id or '(blank)', 'ok': False,
                                     'message': 'Missing first_name, last_name, or email.'})
                     continue
+
+                site_id = None
+                if site_name:
+                    site_row = Site.query.filter(db.func.lower(Site.name) == site_name.lower()).first()
+                    if not site_row:
+                        skipped += 1
+                        results.append({'row': email, 'ok': False,
+                                        'message': f'Unknown site "{site_name}" — add it under Sites first.'})
+                        continue
+                    site_id = site_row.id
+                    if site_ids is not None and site_id not in site_ids:
+                        skipped += 1
+                        results.append({'row': email, 'ok': False,
+                                        'message': f'"{site_name}" isn\'t one of your sites.'})
+                        continue
 
                 person = None
                 if external_id:
@@ -1276,6 +1899,18 @@ def admin_people_import():
                                     'message': f'ID number conflict: {email} already has ID {person.external_id}.'})
                     continue
 
+                if person and site_ids is not None and person.site_id not in site_ids:
+                    skipped += 1
+                    results.append({'row': email, 'ok': False,
+                                    'message': f'{email} belongs to a different site — not yours to update.'})
+                    continue
+
+                if not person and site_ids is not None and site_id is None:
+                    skipped += 1
+                    results.append({'row': email, 'ok': False,
+                                    'message': 'New person needs a "site" column value (one of your own sites).'})
+                    continue
+
                 if person:
                     person.first_name = first_name
                     person.last_name  = last_name
@@ -1283,7 +1918,7 @@ def admin_people_import():
                     if external_id:  person.external_id = external_id
                     if role:         person.role = role
                     if department:   person.department = department
-                    if site:         person.site = site
+                    if site_id:      person.site_id = site_id
                     if grad_year:    person.grad_year = grad_year
                     updated += 1
                     results.append({'row': email, 'ok': True, 'message': f'Updated {person.full_name}.'})
@@ -1291,12 +1926,13 @@ def admin_people_import():
                     person = Person(
                         first_name=first_name, last_name=last_name, email=email,
                         external_id=external_id, role=role or 'staff',
-                        department=department, site=site, grad_year=grad_year,
+                        department=department, site_id=site_id, grad_year=grad_year,
                     )
                     db.session.add(person)
                     created += 1
                     results.append({'row': email, 'ok': True, 'message': f'Created {first_name} {last_name}.'})
 
+            _log_activity('people_csv_import', f'Imported people via CSV: {created} created, {updated} updated, {skipped} skipped.')
             db.session.commit()
             flash(f'Created {created}, updated {updated}, skipped {skipped} row(s). See details below.',
                   'success' if not skipped else 'info')
@@ -1325,27 +1961,35 @@ def admin_people_graduate():
             return redirect(url_for('admin_people_graduate'))
         grad_year = int(grad_year_raw)
 
-        students = Person.query.filter_by(role='student', grad_year=grad_year, is_active=True).all()
+        students = _scope_people(Person.query, _current_site_ids()) \
+            .filter_by(role='student', grad_year=grad_year, is_active=True).all()
         if not students:
             flash(f'No active students found with graduation year {grad_year}.', 'info')
             return redirect(url_for('admin_people_graduate'))
 
         unassigned_total = 0
+        fees_total = Decimal('0')
         for student in students:
             unassigned_total += _release_person_assets(student, condition_in='Graduated')
+            fees_total += _person_unpaid_fee_total(student.id)
             student.is_active = False
+        _log_activity('people_graduate', f'Graduated {len(students)} student(s), class of {grad_year}.')
         db.session.commit()
 
-        flash(f'Graduated {len(students)} student{"s" if len(students) != 1 else ""} '
-              f'(class of {grad_year}). Unassigned {unassigned_total} device'
-              f'{"s" if unassigned_total != 1 else ""}.', 'success')
+        msg = (f'Graduated {len(students)} student{"s" if len(students) != 1 else ""} '
+               f'(class of {grad_year}). Unassigned {unassigned_total} device'
+               f'{"s" if unassigned_total != 1 else ""}.')
+        if fees_total:
+            msg += f' Note: ${fees_total:.2f} in unpaid fees across this class.'
+        flash(msg, 'success')
         return redirect(url_for('admin_people', show='inactive'))
 
-    grad_year_counts = dict(
-        db.session.query(Person.grad_year, db.func.count(Person.id))
+    site_ids = _current_site_ids()
+    counts_query = db.session.query(Person.grad_year, db.func.count(Person.id)) \
         .filter(Person.role == 'student', Person.is_active.is_(True), Person.grad_year.isnot(None))
-        .group_by(Person.grad_year).order_by(Person.grad_year).all()
-    )
+    if site_ids is not None:
+        counts_query = counts_query.filter(Person.site_id.in_(site_ids))
+    grad_year_counts = dict(counts_query.group_by(Person.grad_year).order_by(Person.grad_year).all())
     return render_template('admin_people_graduate.html', grad_year_counts=grad_year_counts)
 
 
@@ -1383,6 +2027,9 @@ def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None
         ))
         asset.assigned_to_id = person.id
         asset.status = 'assigned'
+        registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        _log_activity('device_assign', f'Assigned {asset_tag} to {person.full_name}.',
+                       site_id=registry_row.site_id if registry_row else None)
         db.session.commit()
         return 'assigned', f'Assigned {asset_tag} to {person.full_name}.'
     except Exception as e:
@@ -1399,7 +2046,8 @@ def admin_asset_assign(asset_tag):
     Reassigning to someone new closes out the prior AssignmentHistory row and opens
     a new one; reassigning to the same person is a no-op.
     """
-    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    site_ids = _current_site_ids()
+    registry_row = _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=asset_tag).first_or_404()
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
 
     if request.method == 'POST':
@@ -1418,8 +2066,10 @@ def admin_asset_assign(asset_tag):
                 flash('Invalid due date.', 'error')
                 return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
-        person = Person.query.get_or_404(person_id)
+        person = _scope_people(Person.query, site_ids).filter_by(id=person_id).first_or_404()
         status, message = _assign_asset_to_person(asset_tag, person, condition_out, due_date)
+        if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
+            message += ' Note: this device and person are at different sites.'
         flash(message, 'info' if status == 'already' else ('success' if status == 'assigned' else 'error'))
         return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
@@ -1435,15 +2085,20 @@ def admin_asset_assign(asset_tag):
     if asset and asset.assigned_to_id:
         current_person_incident_count = Incident.query.filter_by(person_id=asset.assigned_to_id).count()
 
+    open_repair = Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).first()
+    closed_repairs = Repair.query.filter(Repair.asset_tag == asset_tag, Repair.returned_at.isnot(None)) \
+        .order_by(Repair.returned_at.desc()).all()
+
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
                            history=history, events=events, incidents=incidents,
                            current_person_incident_count=current_person_incident_count,
+                           open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
                            asset_statuses=ASSET_STATUSES,
                            now=datetime.utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
 @app.route('/admin/bulk_assign', methods=['GET', 'POST'])
-@require_permission('admin')
+@require_permission('devices')
 def admin_bulk_assign():
     """
     Bulk-assigns a whole roster in one upload — the start-of-year "hand out
@@ -1452,6 +2107,7 @@ def admin_bulk_assign():
     intentionally does not auto-create people from a typo'd email.
     """
     results = None
+    site_ids = _current_site_ids()
 
     if request.method == 'POST':
         if 'csv_file' not in request.files or not request.files['csv_file'].filename:
@@ -1484,9 +2140,14 @@ def admin_bulk_assign():
                                     'message': 'Missing asset_tag or email.'})
                     continue
 
-                if not AssetRegistry.query.filter_by(asset_tag=asset_tag).first():
+                registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+                if not registry_row:
                     results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
                                     'message': 'Asset tag not found in registry.'})
+                    continue
+                if site_ids is not None and registry_row.site_id not in site_ids:
+                    results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
+                                    'message': 'That device belongs to a different site.'})
                     continue
 
                 person = Person.query.filter(db.func.lower(Person.email) == email).first()
@@ -1497,6 +2158,10 @@ def admin_bulk_assign():
                 if not person.is_active:
                     results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
                                     'message': f'{person.full_name} is graduated/inactive — reactivate first.'})
+                    continue
+                if site_ids is not None and person.site_id not in site_ids:
+                    results.append({'asset_tag': asset_tag, 'email': email, 'ok': False,
+                                    'message': f'{person.full_name} belongs to a different site.'})
                     continue
 
                 due_date = None
@@ -1509,6 +2174,8 @@ def admin_bulk_assign():
                         continue
 
                 status, message = _assign_asset_to_person(asset_tag, person, due_date=due_date)
+                if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
+                    message += ' (different sites)'
                 results.append({'asset_tag': asset_tag, 'email': email, 'ok': status != 'error', 'message': message})
 
         except Exception as e:
@@ -1557,6 +2224,8 @@ def admin_bulk_print():
     if status_filter not in ASSET_STATUSES:
         status_filter = ''
 
+    site_ids = _current_site_ids()
+
     if order_mode == 'scan':
         # First-scan time per tag today (or since the given date) gives the
         # exact physical walk order; re-scanning a tag doesn't move it later.
@@ -1566,14 +2235,14 @@ def admin_bulk_print():
                       .order_by(db.func.min(AuditScan.scanned_at))
                       .all())
         ordered_tags = [tag for tag, _ in scan_times]
-        registry_by_tag = {r.asset_tag: r for r in AssetRegistry.query.filter(
+        registry_by_tag = {r.asset_tag: r for r in _scope_registry(AssetRegistry.query, site_ids).filter(
             AssetRegistry.asset_tag.in_(ordered_tags)
         )}
         rows = [registry_by_tag[t] for t in ordered_tags if t in registry_by_tag]
         if type_filter:
             rows = [r for r in rows if r.device_type == type_filter]
     else:
-        query = AssetRegistry.query.order_by(AssetRegistry.asset_tag)
+        query = _scope_registry(AssetRegistry.query, site_ids).order_by(AssetRegistry.asset_tag)
         if type_filter:
             query = query.filter(AssetRegistry.device_type == type_filter)
         rows = query.all()
@@ -1604,12 +2273,14 @@ def admin_bulk_print():
 @app.route('/admin/assets/<string:asset_tag>/unassign', methods=['POST'])
 @require_permission('devices')
 def admin_asset_unassign(asset_tag):
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
     asset = Asset.query.filter_by(asset_tag=asset_tag).first_or_404()
     condition_in = request.form.get('condition_in', '').strip() or None
     try:
         _close_open_assignment(asset_tag, condition_in=condition_in)
         asset.assigned_to_id = None
         asset.status = 'available'
+        _log_activity('device_unassign', f'Unassigned {asset_tag}.', site_id=registry_row.site_id)
         db.session.commit()
         flash(f'Unassigned {asset_tag}.', 'success')
     except Exception as e:
@@ -1621,11 +2292,18 @@ def admin_asset_unassign(asset_tag):
 @app.route('/admin/assets/<string:asset_tag>/status', methods=['POST'])
 @require_permission('devices')
 def admin_asset_status(asset_tag):
-    """Manual status override, independent of assignment (e.g. marking a device 'repair')."""
-    AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    """Manual status override, independent of assignment. 'repair' can't be set
+    directly here — use Send to Repair below, which also creates the tracking
+    record. If a status change here bypasses an open Repair some other way,
+    that Repair is auto-closed rather than left dangling (same precedent as
+    admin_registry_delete auto-closing an open LoanerCheckout)."""
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
     new_status = request.form.get('status', '')
     if new_status not in ASSET_STATUSES:
         flash('Invalid status.', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+    if new_status == 'repair':
+        flash('Use "Send to Repair" below to mark a device as in repair — it keeps a tracking record.', 'error')
         return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
@@ -1634,6 +2312,11 @@ def admin_asset_status(asset_tag):
             asset = Asset(asset_tag=asset_tag, is_valid=True)
             db.session.add(asset)
         asset.status = new_status
+        open_repair = Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).first()
+        if open_repair:
+            open_repair.returned_at = datetime.utcnow()
+            open_repair.notes = ((open_repair.notes + ' ') if open_repair.notes else '') + '[auto-closed: status changed manually]'
+        _log_activity('device_status', f'Set {asset_tag} status to {new_status}.', site_id=registry_row.site_id)
         db.session.commit()
         flash(f'{asset_tag} status set to {new_status}.', 'success')
     except Exception as e:
@@ -1646,7 +2329,7 @@ def admin_asset_status(asset_tag):
 @require_permission('devices')
 def admin_asset_google_sync(asset_tag):
     """Pulls model/org-unit/recent-user from Google Workspace for one asset, by serial number."""
-    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
 
     if not GOOGLE_SYNC_ENABLED:
         flash('Google Workspace sync isn\'t configured yet. Set GOOGLE_SERVICE_ACCOUNT_FILE '
@@ -1683,10 +2366,15 @@ def admin_asset_google_sync(asset_tag):
 @app.route('/admin/kiosk')
 @require_permission('admin')
 def admin_kiosk():
-    devices = KioskDevice.query.order_by(KioskDevice.created_at.desc()).all()
+    site_ids = _current_site_ids()
+    query = KioskDevice.query
+    if site_ids is not None:
+        query = query.filter(KioskDevice.site_id.in_(site_ids))
+    devices = query.order_by(KioskDevice.created_at.desc()).all()
     token = request.cookies.get('kiosk_token')
     current_device = KioskDevice.query.filter_by(token=token).first() if token else None
-    return render_template('admin_kiosk.html', devices=devices, current_device=current_device)
+    return render_template('admin_kiosk.html', devices=devices, current_device=current_device,
+                           sites=_sites_for_actor(site_ids))
 
 
 @app.route('/admin/kiosk/enable', methods=['POST'])
@@ -1694,9 +2382,18 @@ def admin_kiosk():
 def admin_kiosk_enable():
     """Enrolls the device making this request (i.e. the kiosk itself) via a long-lived cookie."""
     label = request.form.get('label', '').strip() or None
+    site_id = request.form.get('site_id', type=int)
+    site_ids = _current_site_ids()
+    if site_ids is not None and (not site_id or site_id not in site_ids):
+        flash('Choose one of your own sites for this kiosk.', 'error')
+        return redirect(url_for('admin_kiosk'))
+    if site_ids is None and not site_id:
+        flash('Choose a site for this kiosk.', 'error')
+        return redirect(url_for('admin_kiosk'))
     token = secrets.token_urlsafe(32)
     try:
-        db.session.add(KioskDevice(token=token, label=label))
+        db.session.add(KioskDevice(token=token, label=label, site_id=site_id))
+        _log_activity('kiosk_enroll', f'Enrolled kiosk device "{label or token[:8]}".', site_id=site_id)
         db.session.commit()
         resp = redirect(url_for('admin_kiosk'))
         resp.set_cookie('kiosk_token', token, max_age=60 * 60 * 24 * 365 * 5,
@@ -1713,10 +2410,16 @@ def admin_kiosk_enable():
 @require_permission('admin')
 def admin_kiosk_revoke(device_id):
     """Revocable from any admin session — doesn't require physical access to the kiosk."""
-    device = KioskDevice.query.get_or_404(device_id)
+    site_ids = _current_site_ids()
+    query = KioskDevice.query
+    if site_ids is not None:
+        query = query.filter(KioskDevice.site_id.in_(site_ids))
+    device = query.filter_by(id=device_id).first_or_404()
     try:
         label = device.label or 'that device'
+        device_site_id = device.site_id
         db.session.delete(device)
+        _log_activity('kiosk_revoke', f'Revoked kiosk access for {label}.', site_id=device_site_id)
         db.session.commit()
         flash(f'Revoked kiosk access for {label}.', 'success')
     except Exception as e:
@@ -1727,91 +2430,219 @@ def admin_kiosk_revoke(device_id):
 
 # ─── Users & Permissions ──────────────────────────────────────────────────────
 
-def _user_form_permissions():
-    return {
-        'is_admin':    bool(request.form.get('is_admin')),
+def _user_form_permissions(actor_is_admin):
+    """
+    Reads permission checkboxes from the form. is_admin is only included (and
+    therefore only ever settable) when the acting session is itself is_admin —
+    otherwise a manage_users-only actor could create/edit a user into a proxy
+    full-admin account. Omitting the key leaves the target's existing is_admin
+    value untouched on edit, and defaults to False on create.
+    """
+    perms = {
         'can_people':  bool(request.form.get('can_people')),
         'can_devices': bool(request.form.get('can_devices')),
+        'can_devices_manage': bool(request.form.get('can_devices_manage')),
         'can_loaners': bool(request.form.get('can_loaners')),
+        'can_loaner_checkinout': bool(request.form.get('can_loaner_checkinout')),
+        'can_checkinout': bool(request.form.get('can_checkinout')),
         'can_repairs': bool(request.form.get('can_repairs')),
+        'can_manage_users': bool(request.form.get('can_manage_users')),
     }
+    if actor_is_admin:
+        perms['is_admin'] = bool(request.form.get('is_admin'))
+    return perms
+
+
+def _scope_users(query, site_ids):
+    """A site-scoped admin only sees/manages users who share at least one of their sites."""
+    if site_ids is None:
+        return query
+    return query.filter(User.sites.any(Site.id.in_(site_ids)))
 
 
 @app.route('/admin/users')
-@require_permission('admin')
+@require_permission('manage_users')
 def admin_users():
-    users = User.query.order_by(User.username).all()
+    users = _scope_users(User.query, _current_site_ids()).order_by(User.username).all()
     return render_template('admin_users.html', users=users)
 
 
 @app.route('/admin/users/new', methods=['GET', 'POST'])
-@require_permission('admin')
+@require_permission('manage_users')
 def admin_user_new():
+    site_ids = _current_site_ids()
+    sites = _sites_for_actor(site_ids)
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         if not username or not password:
             flash('Username and password are required.', 'error')
-            return render_template('admin_user_form.html', user=None)
+            return render_template('admin_user_form.html', user=None, sites=sites)
         if User.query.filter(db.func.lower(User.username) == username.lower()).first():
             flash(f'Username "{username}" is already taken.', 'error')
-            return render_template('admin_user_form.html', user=None)
+            return render_template('admin_user_form.html', user=None, sites=sites)
+
+        # A site-scoped admin can only grant their own sites, and only a super
+        # admin can create another super admin — never trust the posted flag alone.
+        wants_super_admin = site_ids is None and bool(request.form.get('is_super_admin'))
+        selected_site_ids = request.form.getlist('site_ids', type=int)
+        if site_ids is not None:
+            selected_site_ids = [s for s in selected_site_ids if s in site_ids]
 
         user = User(username=username, password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
-                     **_user_form_permissions())
+                     is_super_admin=wants_super_admin, **_user_form_permissions(bool(session.get('is_admin'))))
+        if not wants_super_admin:
+            user.sites = Site.query.filter(Site.id.in_(selected_site_ids)).all()
         db.session.add(user)
+        _log_activity('user_add', f'Created user "{username}".')
         db.session.commit()
         flash(f'Created user "{username}".', 'success')
         return redirect(url_for('admin_users'))
 
-    return render_template('admin_user_form.html', user=None)
+    return render_template('admin_user_form.html', user=None, sites=sites)
 
 
 @app.route('/admin/users/<int:user_id>/edit', methods=['GET', 'POST'])
-@require_permission('admin')
+@require_permission('manage_users')
 def admin_user_edit(user_id):
-    user = User.query.get_or_404(user_id)
+    site_ids = _current_site_ids()
+    sites = _sites_for_actor(site_ids)
+    user = _scope_users(User.query, site_ids).filter_by(id=user_id).first_or_404()
     if request.method == 'POST':
         new_password = request.form.get('password', '')
-        for field, value in _user_form_permissions().items():
+        for field, value in _user_form_permissions(bool(session.get('is_admin'))).items():
             setattr(user, field, value)
         user.is_active = bool(request.form.get('is_active'))
+
+        if site_ids is None:  # only a super admin can change super-admin status
+            user.is_super_admin = bool(request.form.get('is_super_admin'))
+
+        if not user.is_super_admin:
+            selected_site_ids = request.form.getlist('site_ids', type=int)
+            if site_ids is not None:
+                selected_site_ids = [s for s in selected_site_ids if s in site_ids]
+            user.sites = Site.query.filter(Site.id.in_(selected_site_ids)).all()
+
         if new_password:
             user.password_hash = generate_password_hash(new_password, method='pbkdf2:sha256')
+        _log_activity('user_edit', f'Edited user "{user.username}".')
         db.session.commit()
         flash(f'Updated user "{user.username}".', 'success')
         return redirect(url_for('admin_users'))
 
-    return render_template('admin_user_form.html', user=user)
+    return render_template('admin_user_form.html', user=user, sites=sites)
 
 
 @app.route('/admin/users/<int:user_id>/delete', methods=['POST'])
-@require_permission('admin')
+@require_permission('manage_users')
 def admin_user_delete(user_id):
-    user = User.query.get_or_404(user_id)
+    user = _scope_users(User.query, _current_site_ids()).filter_by(id=user_id).first_or_404()
     username = user.username
     db.session.delete(user)
+    _log_activity('user_delete', f'Deleted user "{username}".')
     db.session.commit()
     flash(f'Deleted user "{username}".', 'success')
     return redirect(url_for('admin_users'))
 
 
+# ─── Sites ────────────────────────────────────────────────────────────────────
+
+@app.route('/admin/sites')
+@require_super_admin
+def admin_sites():
+    sites = Site.query.order_by(Site.name).all()
+    return render_template('admin_sites.html', sites=sites)
+
+
+@app.route('/admin/sites/new', methods=['GET', 'POST'])
+@require_super_admin
+def admin_site_new():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            flash('Site name is required.', 'error')
+            return render_template('admin_site_form.html', site=None, form=request.form)
+        if Site.query.filter(db.func.lower(Site.name) == name.lower()).first():
+            flash(f'A site named "{name}" already exists.', 'error')
+            return render_template('admin_site_form.html', site=None, form=request.form)
+        db.session.add(Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled'))))
+        _log_activity('site_add', f'Added site "{name}".')
+        db.session.commit()
+        flash(f'Added site "{name}".', 'success')
+        return redirect(url_for('admin_sites'))
+
+    return render_template('admin_site_form.html', site=None, form=None)
+
+
+@app.route('/admin/sites/<int:site_id>/edit', methods=['GET', 'POST'])
+@require_super_admin
+def admin_site_edit(site_id):
+    site = Site.query.get_or_404(site_id)
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            flash('Site name is required.', 'error')
+            return render_template('admin_site_form.html', site=site, form=request.form)
+        dupe = Site.query.filter(db.func.lower(Site.name) == name.lower(), Site.id != site_id).first()
+        if dupe:
+            flash(f'A site named "{name}" already exists.', 'error')
+            return render_template('admin_site_form.html', site=site, form=request.form)
+        site.name = name
+        site.google_loaner_autodisable_enabled = bool(request.form.get('google_loaner_autodisable_enabled'))
+        _log_activity('site_edit', f'Edited site "{name}".', site_id=site.id)
+        db.session.commit()
+        flash(f'Updated site "{name}".', 'success')
+        return redirect(url_for('admin_sites'))
+
+    return render_template('admin_site_form.html', site=site, form=None)
+
+
+@app.route('/admin/sites/<int:site_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_site_delete(site_id):
+    site = Site.query.get_or_404(site_id)
+    in_use = (
+        Person.query.filter_by(site_id=site.id).first()
+        or AssetRegistry.query.filter_by(site_id=site.id).first()
+        or KioskDevice.query.filter_by(site_id=site.id).first()
+    )
+    if in_use:
+        flash(f'Can\'t delete "{site.name}" — it still has people, devices, or kiosks assigned to it.', 'error')
+        return redirect(url_for('admin_sites'))
+    try:
+        site_name = site.name
+        UserSite.query.filter_by(site_id=site.id).delete()
+        db.session.delete(site)
+        _log_activity('site_delete', f'Deleted site "{site_name}".')
+        db.session.commit()
+        flash(f'Deleted site "{site.name}".', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not delete site: {e}', 'error')
+    return redirect(url_for('admin_sites'))
+
+
 # ─── Overdue Reminders ────────────────────────────────────────────────────────
 
-def _overdue_assignments():
-    """Open assignments (not yet returned) whose due_date has passed."""
+def _overdue_assignments(site_ids=None):
+    """Open assignments (not yet returned) whose due_date has passed.
+    site_ids=None means unrestricted (e.g. the background job)."""
     today = datetime.utcnow().date()
-    return AssignmentHistory.query.filter(
+    query = AssignmentHistory.query.filter(
         AssignmentHistory.unassigned_at.is_(None),
         AssignmentHistory.due_date.isnot(None),
         AssignmentHistory.due_date < today,
-    ).order_by(AssignmentHistory.due_date).all()
+    )
+    if site_ids is not None:
+        query = query.join(AssetRegistry, AssetRegistry.asset_tag == AssignmentHistory.asset_tag) \
+            .filter(AssetRegistry.site_id.in_(site_ids))
+    return query.order_by(AssignmentHistory.due_date).all()
 
 
 @app.route('/admin/reminders')
 @require_permission('admin')
 def admin_reminders():
-    overdue = _overdue_assignments()
+    overdue = _overdue_assignments(_current_site_ids())
     today = datetime.utcnow().date()
     return render_template('admin_reminders.html', overdue=overdue, today=today,
                            email_enabled=EMAIL_ENABLED)
@@ -1824,7 +2655,7 @@ def admin_reminders_send():
         flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
         return redirect(url_for('admin_reminders'))
 
-    overdue = _overdue_assignments()
+    overdue = _overdue_assignments(_current_site_ids())
     sent, failed, skipped = 0, 0, 0
 
     for row in overdue:
@@ -1849,6 +2680,8 @@ def admin_reminders_send():
             failed += 1
             logger.error('Reminder email failed for %s -> %s: %s', row.asset_tag, person.email, e)
 
+    if sent:
+        _log_activity('reminders_send', f'Manually sent {sent} overdue-assignment reminder(s).')
     db.session.commit()
 
     msg = f'Sent {sent} reminder{"s" if sent != 1 else ""}.'
@@ -1867,30 +2700,37 @@ LOANER_DEFAULT_LOAN_DAYS = 7
 
 
 @app.route('/admin/assets/<string:asset_tag>/toggle_loaner', methods=['POST'])
-@require_permission('devices')
+@require_permission('devices_manage')
 def admin_toggle_loaner(asset_tag):
-    row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
     row.is_loaner = not row.is_loaner
+    _log_activity('loaner_toggle', f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.', site_id=row.site_id)
     db.session.commit()
     flash(f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.', 'success')
     return redirect(request.referrer or url_for('admin_loaners'))
 
 
-def _overdue_loaners():
-    """Open loaner checkouts (not yet returned) whose due_date has passed."""
+def _overdue_loaners(site_ids=None):
+    """Open loaner checkouts (not yet returned) whose due_date has passed.
+    site_ids=None means unrestricted (e.g. the background job)."""
     today = datetime.utcnow().date()
-    return LoanerCheckout.query.filter(
+    query = LoanerCheckout.query.filter(
         LoanerCheckout.checked_in_at.is_(None),
         LoanerCheckout.due_date.isnot(None),
         LoanerCheckout.due_date < today,
-    ).order_by(LoanerCheckout.due_date).all()
+    )
+    if site_ids is not None:
+        query = query.join(AssetRegistry, AssetRegistry.asset_tag == LoanerCheckout.asset_tag) \
+            .filter(AssetRegistry.site_id.in_(site_ids))
+    return query.order_by(LoanerCheckout.due_date).all()
 
 
-def _send_overdue_loaner_reminders():
+def _send_overdue_loaner_reminders(site_ids=None):
     """
     Emails anyone with an overdue loaner. Safe to call repeatedly (e.g. from a
     background loop) — reminder_sent_at gates re-sending to once per
     LOANER_REMINDER_RESEND_HOURS, so it won't spam the same student hourly.
+    site_ids=None (the background loop's case) means every site.
     Returns (sent, failed, skipped) counts.
     """
     if not EMAIL_ENABLED:
@@ -1898,7 +2738,7 @@ def _send_overdue_loaner_reminders():
 
     sent = failed = skipped = 0
     now = datetime.utcnow()
-    for row in _overdue_loaners():
+    for row in _overdue_loaners(site_ids):
         if row.reminder_sent_at and (now - row.reminder_sent_at).total_seconds() < LOANER_REMINDER_RESEND_HOURS * 3600:
             continue
         person = Person.query.get(row.person_id) if row.person_id else None
@@ -1922,6 +2762,8 @@ def _send_overdue_loaner_reminders():
             failed += 1
             logger.error('Loaner reminder email failed for %s -> %s: %s', row.asset_tag, person.email, e)
 
+    if sent:
+        _log_activity('reminders_send', f'Sent {sent} overdue-loaner reminder(s).')
     db.session.commit()
     return sent, failed, skipped
 
@@ -1948,14 +2790,16 @@ if EMAIL_ENABLED:
 @app.route('/admin/loaners')
 @require_permission('loaners')
 def admin_loaners():
-    loaner_rows = AssetRegistry.query.filter_by(is_loaner=True).order_by(AssetRegistry.asset_tag).all()
+    site_ids = _current_site_ids()
+    loaner_rows = _scope_registry(AssetRegistry.query, site_ids).filter_by(is_loaner=True) \
+        .order_by(AssetRegistry.asset_tag).all()
     tags = [r.asset_tag for r in loaner_rows]
     open_checkouts = {
         c.asset_tag: c for c in LoanerCheckout.query.filter(
             LoanerCheckout.asset_tag.in_(tags), LoanerCheckout.checked_in_at.is_(None)
         )
     }
-    overdue_count = len(_overdue_loaners())
+    overdue_count = len(_overdue_loaners(site_ids))
     return render_template('admin_loaners.html', loaner_rows=loaner_rows, open_checkouts=open_checkouts,
                            overdue_count=overdue_count, email_enabled=EMAIL_ENABLED,
                            today=datetime.utcnow().date())
@@ -1967,7 +2811,7 @@ def admin_loaners_send_reminders():
     if not EMAIL_ENABLED:
         flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
         return redirect(url_for('admin_loaners'))
-    sent, failed, skipped = _send_overdue_loaner_reminders()
+    sent, failed, skipped = _send_overdue_loaner_reminders(_current_site_ids())
     msg = f'Sent {sent} reminder{"s" if sent != 1 else ""}.'
     if failed:
         msg += f' {failed} failed to send.'
@@ -1977,11 +2821,13 @@ def admin_loaners_send_reminders():
     return redirect(url_for('admin_loaners'))
 
 
-def _checkout_loaner(asset_tag, person, due_date=None):
+def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None):
     """Shared checkout logic used by both the admin page and student self-service."""
     row = AssetRegistry.query.filter_by(asset_tag=asset_tag, is_loaner=True).first()
     if not row:
         return 'error', f'{asset_tag} is not a loaner device.'
+    if site_ids is not None and row.site_id not in site_ids:
+        return 'error', f'{asset_tag} is not one of your site\'s loaners.'
     already_out = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
     if already_out:
         return 'error', f'{asset_tag} is already checked out to {already_out.person_name}.'
@@ -1989,29 +2835,44 @@ def _checkout_loaner(asset_tag, person, due_date=None):
         asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
         due_date=due_date or (datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)),
     ))
+    _log_activity('loaner_checkout', f'Checked out loaner {asset_tag} to {person.full_name}.', site_id=row.site_id)
     db.session.commit()
-    return 'ok', f'Checked out {asset_tag} to {person.full_name}.'
+    _sync_loaner_google_state(row, enabled=True)
+    message = f'Checked out {asset_tag} to {person.full_name}.'
+    if row.site_id and person.site_id and row.site_id != person.site_id:
+        message += ' Note: this loaner and person are at different sites.'
+    return 'ok', message
 
 
-def _checkin_loaner(asset_tag, condition_notes=None):
+def _checkin_loaner(asset_tag, condition_notes=None, site_ids=None):
     """Shared checkin logic used by both the admin page and student self-service."""
     open_row = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
     if not open_row:
         return 'error', f'{asset_tag} is not currently checked out as a loaner.'
+    if site_ids is not None:
+        row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        if not row or row.site_id not in site_ids:
+            return 'error', f'{asset_tag} is not one of your site\'s loaners.'
     open_row.checked_in_at = datetime.utcnow()
     if condition_notes:
         open_row.condition_notes = condition_notes
+    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+    _log_activity('loaner_checkin', f'Checked in loaner {asset_tag} (was with {open_row.person_name}).',
+                   site_id=registry_row.site_id if registry_row else None)
     db.session.commit()
+    if registry_row:
+        _sync_loaner_google_state(registry_row, enabled=False)
     return 'ok', f'Checked in {asset_tag} (was with {open_row.person_name}).'
 
 
 @app.route('/admin/loaners/checkout', methods=['POST'])
 @require_permission('loaners')
 def admin_loaners_checkout():
+    site_ids = _current_site_ids()
     asset_tag = request.form.get('asset_tag', '').strip()
     person_id = request.form.get('person_id', '').strip()
     due_date_str = request.form.get('due_date', '').strip()
-    person = Person.query.get(int(person_id)) if person_id.isdigit() else None
+    person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
     if not asset_tag or not person:
         flash('Choose both a person and a loaner asset tag.', 'error')
         return redirect(url_for('admin_loaners'))
@@ -2022,7 +2883,7 @@ def admin_loaners_checkout():
         except ValueError:
             flash('Invalid due date.', 'error')
             return redirect(url_for('admin_loaners'))
-    status, message = _checkout_loaner(asset_tag, person, due_date)
+    status, message = _checkout_loaner(asset_tag, person, due_date, site_ids)
     flash(message, 'success' if status == 'ok' else 'error')
     return redirect(url_for('admin_loaners'))
 
@@ -2031,18 +2892,19 @@ def admin_loaners_checkout():
 @require_permission('loaners')
 def admin_loaners_checkin():
     asset_tag = request.form.get('asset_tag', '').strip()
-    status, message = _checkin_loaner(asset_tag)
+    status, message = _checkin_loaner(asset_tag, site_ids=_current_site_ids())
     flash(message, 'success' if status == 'ok' else 'error')
     return redirect(url_for('admin_loaners'))
 
 
 @app.route('/loaner_checkout', methods=['GET', 'POST'])
-@kiosk_or_login_required
+@kiosk_or_permission_required('loaner_checkinout')
 def loaner_checkout_page():
+    site_ids = _current_site_ids()
     if request.method == 'POST':
         person_id = request.form.get('person_id', '').strip()
         scan_value = request.form.get('scan_value', '').strip()
-        person = Person.query.get(int(person_id)) if person_id.isdigit() else None
+        person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
         if not person or not person.is_active:
             flash('Search for your name and select yourself from the list first.', 'error')
             return redirect(url_for('loaner_checkout_page'))
@@ -2053,7 +2915,7 @@ def loaner_checkout_page():
         if not asset_tag:
             flash(f'"{scan_value}" was not found in the asset registry.', 'error')
             return redirect(url_for('loaner_checkout_page'))
-        status, message = _checkout_loaner(asset_tag, person)
+        status, message = _checkout_loaner(asset_tag, person, site_ids=site_ids)
         flash(message, 'success' if status == 'ok' else 'error')
         return redirect(url_for('loaner_checkout_page'))
 
@@ -2061,7 +2923,7 @@ def loaner_checkout_page():
 
 
 @app.route('/loaner_checkin', methods=['GET', 'POST'])
-@kiosk_or_login_required
+@kiosk_or_permission_required('loaner_checkinout')
 def loaner_checkin_page():
     if request.method == 'POST':
         scan_value = request.form.get('scan_value', '').strip()
@@ -2071,7 +2933,7 @@ def loaner_checkin_page():
         asset_tag, _ = resolve_scan(scan_value)
         if not asset_tag:
             asset_tag = scan_value  # fall back to raw value so a direct tag match on LoanerCheckout still works
-        status, message = _checkin_loaner(asset_tag)
+        status, message = _checkin_loaner(asset_tag, site_ids=_current_site_ids())
         flash(message, 'success' if status == 'ok' else 'error')
         return redirect(url_for('loaner_checkin_page'))
 
@@ -2100,7 +2962,7 @@ def admin_audit():
     status_filter = request.args.get('status', '').strip()
     type_filter = request.args.get('device_type', '').strip()
 
-    query = AssetRegistry.query.order_by(AssetRegistry.asset_tag)
+    query = _scope_registry(AssetRegistry.query, _current_site_ids()).order_by(AssetRegistry.asset_tag)
     if status_filter in ASSET_STATUSES:
         query = _filter_registry_by_status(query, status_filter)
     else:
@@ -2130,6 +2992,11 @@ def admin_audit_scan():
         return redirect(url_for('admin_audit', **redirect_args))
 
     asset_tag, _ = resolve_scan(value)
+    site_ids = _current_site_ids()
+    if asset_tag and site_ids is not None:
+        row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        if not row or row.site_id not in site_ids:
+            asset_tag = None
     if not asset_tag:
         flash(f'No asset found matching "{value}".', 'error')
         return redirect(url_for('admin_audit', **redirect_args))
@@ -2140,15 +3007,45 @@ def admin_audit_scan():
     return redirect(url_for('admin_audit', **redirect_args))
 
 
-# ─── Incident / Damage Reports ────────────────────────────────────────────────
+# ─── Incident / Damage Reports / Fees ─────────────────────────────────────────
+
+def _person_unpaid_fee_total(person_id):
+    """Sum of fee_amount across this person's charged-but-unpaid incidents.
+    Used to warn (not block) on delete/graduate."""
+    total = db.session.query(db.func.coalesce(db.func.sum(Incident.fee_amount), 0)).filter(
+        Incident.person_id == person_id, Incident.fee_charged.is_(True), Incident.paid_at.is_(None),
+    ).scalar()
+    return Decimal(total)
+
+
+def _create_incident(asset_tag, person, description, fee_charged=False, fee_amount=None):
+    """Shared incident-logging logic used by both the admin page and the
+    student self-service Report a Problem page. Does not commit — caller's
+    responsibility, matching _assign_asset_to_person/_checkout_loaner."""
+    incident = Incident(
+        asset_tag=asset_tag, person_id=person.id if person else None,
+        person_name=person.full_name if person else None,
+        description=description, fee_charged=fee_charged, fee_amount=fee_amount,
+    )
+    db.session.add(incident)
+    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+    _log_activity('incident_add', f'Logged incident on {asset_tag}: {description}',
+                   site_id=registry_row.site_id if registry_row else None)
+    return incident
+
 
 @app.route('/admin/assets/<string:asset_tag>/incidents', methods=['POST'])
 @require_permission('devices')
 def admin_incident_add(asset_tag):
-    """Logs a damage/loss report against an asset, snapshotting the currently assigned person."""
-    AssetRegistry.query.filter_by(asset_tag=asset_tag).first_or_404()
+    """Logs a damage/loss report against an asset, snapshotting the currently
+    assigned person. A fee_amount greater than zero forces fee_charged=True
+    regardless of the checkbox — an amount implies a charge."""
+    _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
     description = request.form.get('description', '').strip()
     fee_charged = request.form.get('fee_charged') == 'on'
+    fee_amount = _parse_money(request.form.get('fee_amount'))
+    if fee_amount:
+        fee_charged = True
     if not description:
         flash('Enter a description of the incident.', 'error')
         return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
@@ -2156,11 +3053,7 @@ def admin_incident_add(asset_tag):
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
     person = asset.assigned_to if asset else None
     try:
-        db.session.add(Incident(
-            asset_tag=asset_tag, person_id=person.id if person else None,
-            person_name=person.full_name if person else None,
-            description=description, fee_charged=fee_charged,
-        ))
+        _create_incident(asset_tag, person, description, fee_charged=fee_charged, fee_amount=fee_amount)
         db.session.commit()
         flash('Incident logged.', 'success')
     except Exception as e:
@@ -2169,10 +3062,259 @@ def admin_incident_add(asset_tag):
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
+@app.route('/report_problem', methods=['GET', 'POST'])
+@kiosk_or_permission_required('checkinout')
+def report_problem_page():
+    """
+    Student/staff self-service "something's wrong with my device" page — no
+    fee fields exposed here, that's an office decision made later from the
+    device's assign page. Mirrors loaner_checkout_page's shape: person-search
+    + scan input, resolve_scan() with a raw-value fallback, site-check when scoped.
+    """
+    site_ids = _current_site_ids()
+    if request.method == 'POST':
+        person_id = request.form.get('person_id', '').strip()
+        scan_value = request.form.get('scan_value', '').strip()
+        description = request.form.get('description', '').strip()
+        person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
+        if not person or not person.is_active:
+            flash('Search for your name and select yourself from the list first.', 'error')
+            return redirect(url_for('report_problem_page'))
+        if not scan_value:
+            flash('Scan or type the device asset tag/serial.', 'error')
+            return redirect(url_for('report_problem_page'))
+        if not description:
+            flash('Describe the problem.', 'error')
+            return redirect(url_for('report_problem_page'))
+
+        asset_tag, _ = resolve_scan(scan_value)
+        if not asset_tag:
+            asset_tag = scan_value  # fall back to raw value, same as loaner_checkin_page
+        if site_ids is not None:
+            row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+            if not row or row.site_id not in site_ids:
+                flash(f'"{scan_value}" was not found in the asset registry.', 'error')
+                return redirect(url_for('report_problem_page'))
+
+        try:
+            _create_incident(asset_tag, person, description)
+            db.session.commit()
+            flash('Thanks — your report has been logged.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not log report: {e}', 'error')
+        return redirect(url_for('report_problem_page'))
+
+    return render_template('report_problem.html')
+
+
+@app.route('/admin/incidents/<int:incident_id>/mark_paid', methods=['POST'])
+@require_permission('devices')
+def admin_incident_mark_paid(incident_id):
+    incident = Incident.query.get_or_404(incident_id)
+    incident.paid_at = datetime.utcnow()
+    registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
+    _log_activity('fee_paid', f'Marked fee paid for {incident.asset_tag} ({incident.person_name or "unknown"}).',
+                   site_id=registry_row.site_id if registry_row else None)
+    db.session.commit()
+    flash('Marked paid.', 'success')
+    return redirect(request.referrer or url_for('admin_asset_assign', asset_tag=incident.asset_tag))
+
+
+@app.route('/admin/incidents/<int:incident_id>/fee', methods=['POST'])
+@require_permission('devices')
+def admin_incident_fee(incident_id):
+    """Corrects an incident's fee amount after the fact (e.g. the office
+    negotiated a lower repair cost than first estimated)."""
+    incident = Incident.query.get_or_404(incident_id)
+    fee_amount = _parse_money(request.form.get('fee_amount'))
+    incident.fee_amount = fee_amount
+    incident.fee_charged = bool(fee_amount)
+    registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
+    _log_activity('fee_edit', f'Updated fee for {incident.asset_tag} to {fee_amount if fee_amount else "none"}.',
+                   site_id=registry_row.site_id if registry_row else None)
+    db.session.commit()
+    flash('Updated fee.', 'success')
+    return redirect(request.referrer or url_for('admin_asset_assign', asset_tag=incident.asset_tag))
+
+
+@app.route('/admin/fees')
+@require_permission('devices')
+def admin_fees():
+    """Who owes money — unpaid, charged incidents grouped by person."""
+    site_ids = _current_site_ids()
+    query = Incident.query.filter(Incident.fee_charged.is_(True), Incident.paid_at.is_(None))
+    if site_ids is not None:
+        query = query.join(AssetRegistry, AssetRegistry.asset_tag == Incident.asset_tag) \
+            .filter(AssetRegistry.site_id.in_(site_ids))
+    unpaid = query.order_by(Incident.person_name, Incident.created_at).all()
+
+    by_person = OrderedDict()
+    grand_total = Decimal('0')
+    for inc in unpaid:
+        key = inc.person_name or '(no person on file)'
+        by_person.setdefault(key, {'incidents': [], 'subtotal': Decimal('0')})
+        amount = inc.fee_amount or Decimal('0')
+        by_person[key]['incidents'].append(inc)
+        by_person[key]['subtotal'] += amount
+        grand_total += amount
+
+    return render_template('admin_fees.html', by_person=by_person, grand_total=grand_total)
+
+
+# ─── Repairs ──────────────────────────────────────────────────────────────────
+
+def _scope_repairs(query, site_ids):
+    """Repair has no site_id of its own — scope via a join through AssetRegistry,
+    same pattern _overdue_assignments/_overdue_loaners use."""
+    if site_ids is None:
+        return query
+    return query.join(AssetRegistry, AssetRegistry.asset_tag == Repair.asset_tag) \
+        .filter(AssetRegistry.site_id.in_(site_ids))
+
+
+@app.route('/admin/assets/<string:asset_tag>/repairs/send', methods=['POST'])
+@require_permission('repairs')
+def admin_repair_send(asset_tag):
+    """Sends a device out for repair — creates the tracking record and sets
+    the asset status to 'repair' together, in one transaction."""
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+    if Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).first():
+        flash(f'{asset_tag} already has an open repair.', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+    vendor = request.form.get('vendor', '').strip() or None
+    ticket_number = request.form.get('ticket_number', '').strip() or None
+    issue_description = request.form.get('issue_description', '').strip() or None
+    expected_return_at = _parse_date(request.form.get('expected_return_at'))
+
+    asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+    person = asset.assigned_to if asset else None
+    try:
+        db.session.add(Repair(
+            asset_tag=asset_tag, vendor=vendor, ticket_number=ticket_number,
+            issue_description=issue_description, expected_return_at=expected_return_at,
+            person_name_snapshot=person.full_name if person else None,
+        ))
+        if not asset:
+            asset = Asset(asset_tag=asset_tag, is_valid=True)
+            db.session.add(asset)
+        asset.status = 'repair'
+        _log_activity('repair_send', f'Sent {asset_tag} to repair{" via " + vendor if vendor else ""}.', site_id=registry_row.site_id)
+        db.session.commit()
+        flash(f'{asset_tag} sent to repair.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not send device to repair: {e}', 'error')
+    return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+
+@app.route('/admin/repairs/<int:repair_id>/return', methods=['POST'])
+@require_permission('repairs')
+def admin_repair_return(repair_id):
+    """Marks an open repair returned. The outcome drives what happens to the
+    device's status next: Fixed goes back into service, Could Not Repair and
+    Replaced both retire this physical unit (a Replaced device's replacement
+    is added separately as an ordinary new device, not automated here)."""
+    site_ids = _current_site_ids()
+    repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
+    outcome = request.form.get('outcome', '')
+    if outcome not in REPAIR_OUTCOMES:
+        flash('Choose a valid outcome.', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=repair.asset_tag))
+
+    notes = request.form.get('notes', '').strip() or None
+    asset = Asset.query.filter_by(asset_tag=repair.asset_tag).first()
+    registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
+    try:
+        repair.returned_at = datetime.utcnow()
+        repair.outcome = outcome
+        repair.notes = notes
+        if asset:
+            if outcome == 'fixed':
+                asset.status = 'assigned' if asset.assigned_to_id else 'available'
+            else:
+                asset.status = 'retired'
+        _log_activity('repair_return', f'{repair.asset_tag} returned from repair ({REPAIR_OUTCOMES[outcome]}).',
+                       site_id=registry_row.site_id if registry_row else None)
+        db.session.commit()
+        flash(f'{repair.asset_tag} marked returned ({REPAIR_OUTCOMES[outcome]}).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not update repair: {e}', 'error')
+    return redirect(url_for('admin_asset_assign', asset_tag=repair.asset_tag))
+
+
+@app.route('/admin/repairs')
+@require_permission('repairs')
+def admin_repairs():
+    """Fleet-wide open + recent-closed repair list."""
+    site_ids = _current_site_ids()
+    open_repairs = _scope_repairs(Repair.query, site_ids).filter(Repair.returned_at.is_(None)) \
+        .order_by(Repair.sent_at.desc()).all()
+    closed_repairs = _scope_repairs(Repair.query, site_ids).filter(Repair.returned_at.isnot(None)) \
+        .order_by(Repair.returned_at.desc()).limit(50).all()
+    return render_template('admin_repairs.html', open_repairs=open_repairs, closed_repairs=closed_repairs,
+                           repair_outcomes=REPAIR_OUTCOMES, today=datetime.utcnow().date())
+
+
+# ─── Activity Log ─────────────────────────────────────────────────────────────
+
+ACTIVITY_LOG_ACTIONS = [
+    'device_add', 'device_edit', 'device_delete', 'device_assign', 'device_unassign', 'device_status',
+    'registry_csv_import', 'registry_set_sites',
+    'person_add', 'person_edit', 'person_delete', 'person_reactivate', 'people_csv_import', 'people_graduate',
+    'loaner_toggle', 'loaner_checkout', 'loaner_checkin', 'reminders_send',
+    'incident_add', 'fee_paid', 'fee_edit',
+    'repair_send', 'repair_return',
+    'kiosk_enroll', 'kiosk_revoke',
+    'user_add', 'user_edit', 'user_delete',
+    'site_add', 'site_edit', 'site_delete',
+]
+
+
+def _scope_activity_log(query, site_ids):
+    """A site-scoped admin only sees rows with a matching site_id; rows with
+    no site (Users/Sites CRUD, a multi-site bulk import) are super-admin-only,
+    since a None site_id can't be attributed to any one of their sites."""
+    if site_ids is None:
+        return query
+    return query.filter(ActivityLog.site_id.in_(site_ids))
+
+
+@app.route('/admin/activity')
+@require_permission('admin')
+def admin_activity():
+    page = request.args.get('page', 1, type=int)
+    actor_filter = request.args.get('actor', '').strip()
+    action_filter = request.args.get('action', '').strip()
+    since_str = request.args.get('since', '').strip()
+    until_str = request.args.get('until', '').strip()
+
+    query = _scope_activity_log(ActivityLog.query, _current_site_ids()).order_by(ActivityLog.timestamp.desc())
+    if actor_filter:
+        query = query.filter(ActivityLog.actor_label.ilike(f'%{actor_filter}%'))
+    if action_filter in ACTIVITY_LOG_ACTIONS:
+        query = query.filter(ActivityLog.action == action_filter)
+    else:
+        action_filter = ''
+    since = _parse_date(since_str)
+    if since:
+        query = query.filter(ActivityLog.timestamp >= since)
+    until = _parse_date(until_str)
+    if until:
+        query = query.filter(ActivityLog.timestamp < until + timedelta(days=1))
+
+    pagination = query.paginate(page=page, per_page=50, error_out=False)
+    return render_template('admin_activity.html', pagination=pagination, actions=ACTIVITY_LOG_ACTIONS,
+                           actor_filter=actor_filter, action_filter=action_filter,
+                           since=since_str, until=until_str)
+
+
 # ─── Scan / Check-in / Check-out API ─────────────────────────────────────────
 
 @app.route('/api/scan', methods=['POST'])
-@kiosk_or_api_login_required
+@kiosk_or_api_permission_required('checkinout')
 def scan_asset():
     """
     Unified scan endpoint.
@@ -2206,6 +3348,13 @@ def scan_asset():
     try:
         asset_tag, scan_type = resolve_scan(scan_value)
         unknown = asset_tag is None
+
+        if not unknown:
+            site_ids = _current_site_ids()
+            if site_ids is not None:
+                row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+                if not row or row.site_id not in site_ids:
+                    return jsonify({'error': f'"{scan_value}" was not found.'}), 404
 
         if unknown:
             # Store using the raw scan value as the asset_tag placeholder
@@ -2259,7 +3408,12 @@ def scan_asset():
 @api_login_required
 def get_assets():
     try:
-        assets = Asset.query.order_by(Asset.asset_tag).all()
+        site_ids = _current_site_ids()
+        query = Asset.query
+        if site_ids is not None:
+            query = query.join(AssetRegistry, AssetRegistry.asset_tag == Asset.asset_tag) \
+                .filter(AssetRegistry.site_id.in_(site_ids))
+        assets = query.order_by(Asset.asset_tag).all()
         return jsonify([a.to_dict() for a in assets])
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2268,6 +3422,11 @@ def get_assets():
 @app.route('/api/assets/<string:asset_tag>/history', methods=['GET'])
 @api_login_required
 def get_asset_history(asset_tag):
+    site_ids = _current_site_ids()
+    if site_ids is not None:
+        row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        if not row or row.site_id not in site_ids:
+            return jsonify({'message': f'No history found for {asset_tag}'}), 404
     events = Event.query.filter_by(asset_tag=asset_tag).order_by(Event.timestamp.desc()).all()
     if not events:
         return jsonify({'message': f'No history found for {asset_tag}'}), 404
@@ -2283,14 +3442,14 @@ def index():
 
 
 @app.route('/checkin')
-@kiosk_or_login_required
+@kiosk_or_permission_required('checkinout')
 def checkin_page():
     recent = Event.query.filter_by(action='checkin').order_by(Event.timestamp.desc()).limit(10).all()
     return render_template('scan.html', action='checkin', title='Check In', recent_events=recent)
 
 
 @app.route('/checkout')
-@kiosk_or_login_required
+@kiosk_or_permission_required('checkinout')
 def checkout_page():
     recent = Event.query.filter_by(action='checkout').order_by(Event.timestamp.desc()).limit(10).all()
     return render_template('scan.html', action='checkout', title='Check Out', recent_events=recent)
@@ -2304,10 +3463,19 @@ def asset_history():
         return render_template('asset_history.html', query=None, resolved_tag=None, events=[])
 
     # Try to resolve via registry (asset tag or serial number)
+    site_ids = _current_site_ids()
     asset_tag, _ = resolve_scan(query)
 
-    # If not in registry, fall back to searching events directly
+    if asset_tag and site_ids is not None:
+        row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+        if not row or row.site_id not in site_ids:
+            asset_tag = None  # out of scope — treat as not found
+
     if not asset_tag:
+        if site_ids is not None:
+            # Unresolved/orphan tags have no site to attribute — super-admin-only, same as /admin/orphans
+            return render_template('asset_history.html', query=query, resolved_tag=None, events=[])
+        # If not in registry, fall back to searching events directly
         asset_tag = query
 
     events = Event.query.filter_by(asset_tag=asset_tag).order_by(Event.timestamp.desc()).all()

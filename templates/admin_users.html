@@ -14,15 +14,21 @@
   blank at login) always has full access, regardless of what's set here.
 </p>
 
-<div class="card" style="padding:0;overflow:hidden;">
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
         <th>Username</th>
+        <th>Sites</th>
         <th>Admin</th>
+        <th>Super Admin</th>
+        <th>Manage Users</th>
         <th>People</th>
         <th>Devices</th>
+        <th>Manage Devices</th>
         <th>Loaners</th>
+        <th>Loaner Check-In/Out</th>
+        <th>Check-In/Out</th>
         <th>Repairs</th>
         <th>Status</th>
         <th></th>
@@ -32,10 +38,18 @@
       {% for user in users %}
       <tr>
         <td>{{ user.username }}</td>
+        <td style="color:var(--muted);">
+          {% if user.is_super_admin %}All sites{% elif user.sites %}{{ user.sites|map(attribute='name')|join(', ') }}{% else %}—{% endif %}
+        </td>
         <td>{{ '✓' if user.is_admin else '—' }}</td>
+        <td>{{ '✓' if user.is_super_admin else '—' }}</td>
+        <td>{{ '✓' if user.can_manage_users else '—' }}</td>
         <td>{{ '✓' if user.can_people else '—' }}</td>
         <td>{{ '✓' if user.can_devices else '—' }}</td>
+        <td>{{ '✓' if user.can_devices_manage else '—' }}</td>
         <td>{{ '✓' if user.can_loaners else '—' }}</td>
+        <td>{{ '✓' if user.can_loaner_checkinout else '—' }}</td>
+        <td>{{ '✓' if user.can_checkinout else '—' }}</td>
         <td>{{ '✓' if user.can_repairs else '—' }}</td>
         <td>
           {% if user.is_active %}
@@ -54,7 +68,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No users yet.</td></tr>
+      <tr><td colspan="14" style="text-align:center;color:var(--muted);padding:2rem;">No users yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

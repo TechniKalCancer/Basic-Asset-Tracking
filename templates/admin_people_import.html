@@ -21,11 +21,13 @@
     <strong style="color:var(--text);">Required columns:</strong> <code>first_name</code>, <code>last_name</code>, <code>email</code><br>
     <strong style="color:var(--text);">Optional columns:</strong> <code>external_id</code> (also accepts <code>staff_id</code>/<code>student_id</code>),
     <code>role</code> (staff/student), <code>department</code>, <code>site</code>,
-    <code>grad_year</code> (also accepts <code>graduation_year</code>)<br><br>
+    <code>grad_year</code> (also accepts <code>graduation_year</code>)<br>
+    <code>site</code> must exactly match an existing site's name (see Sites) — required for a new person if
+    you only manage one site or more; an unrecognized name skips that row rather than guessing.<br><br>
     <strong style="color:var(--text);">Example:</strong><br>
     <code>first_name,last_name,email,external_id,role,site,grad_year</code><br>
-    <code>Alex,Rivera,alex.rivera@example.edu,100482,student,North Elementary,2031</code><br>
-    <code>Jordan,Lee,jordan.lee@example.edu,100483,student,North Elementary,2031</code>
+    <code>Alex,Rivera,alex.rivera@example.edu,100482,student,Fox Creek Middle School,2031</code><br>
+    <code>Jordan,Lee,jordan.lee@example.edu,100483,student,Fox Creek Middle School,2031</code>
   </div>
 
   <form method="POST" enctype="multipart/form-data">

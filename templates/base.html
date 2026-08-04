@@ -33,11 +33,12 @@
     nav {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 0 1.5rem;
+      padding: .6rem 1.5rem;
       display: flex;
       align-items: center;
-      gap: 2rem;
-      height: 56px;
+      gap: 1.6rem;
+      flex-wrap: wrap;
+      min-height: 56px;
     }
     nav .brand { font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: .5px; }
     nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
@@ -46,6 +47,29 @@
     nav .logout { color: var(--danger) !important; border: 1px solid var(--danger); border-radius: 6px; padding: .25rem .7rem; font-size: .82rem; }
     nav .logout:hover { background: var(--danger); color: #fff !important; }
     nav .nav-search { display: flex; }
+    .nav-dropdown { position: relative; }
+    .nav-dropdown > button {
+      background: none; border: none; font-family: inherit; cursor: pointer;
+      color: var(--muted); font-size: .9rem; padding: 0; display: flex; align-items: center; gap: .3rem;
+      transition: color .15s;
+    }
+    .nav-dropdown > button:hover, .nav-dropdown.open > button { color: var(--text); }
+    .nav-dropdown-badge {
+      background: var(--danger); color: #fff; border-radius: 999px; font-size: .68rem;
+      font-weight: 700; padding: 0 .4rem; line-height: 1.4;
+    }
+    .nav-dropdown-menu {
+      display: none; position: absolute; top: 100%; left: 0; margin-top: .7rem;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      min-width: 210px; padding: .4rem; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .nav-dropdown.open .nav-dropdown-menu { display: block; }
+    .nav-dropdown-menu a {
+      display: flex; justify-content: space-between; gap: .5rem; align-items: center;
+      padding: .5rem .7rem; border-radius: 6px; font-size: .88rem; color: var(--text);
+    }
+    .nav-dropdown-menu a:hover { background: var(--surface); color: var(--accent); }
+    .nav-dropdown-menu .nav-divider { height: 1px; background: var(--border); margin: .4rem .2rem; }
     nav .nav-search input {
       width: 220px;
       padding: .35rem .7rem;
@@ -114,18 +138,19 @@
     .btn:disabled { opacity: .4; cursor: not-allowed; }
     .btn:disabled:hover { opacity: .4; }
 
-    input, select {
+    input, select, textarea {
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 7px;
       color: var(--text);
       padding: .55rem .9rem;
       font-size: 1rem;
+      font-family: inherit;
       width: 100%;
       outline: none;
       transition: border-color .15s;
     }
-    input:focus, select:focus { border-color: var(--accent); }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 
     .flash-messages { margin-bottom: 1.2rem; }
     .flash {
@@ -168,21 +193,86 @@
     <a href="/">Home</a>
     <a href="/checkin">Check In</a>
     <a href="/checkout">Check Out</a>
-    {% if session.get('admin_logged_in') %}
-      <a href="/asset_history">History</a>
-    {% endif %}
+    <a href="/report_problem">Report a Problem</a>
     <span class="spacer"></span>
     {% if session.get('admin_logged_in') %}
       <form class="nav-search" method="GET" action="/admin/search">
         <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
         <button type="submit" title="Search">🔎</button>
       </form>
-      <a href="/admin">Admin</a>
-      {% if can('people') %}<a href="/admin/people">People</a>{% endif %}
-      {% if can('loaners') %}<a href="/admin/loaners">Loaners</a>{% endif %}
-      {% if session.get('is_admin') %}
-        <a href="/admin/users">Users</a>
+
+      {% if can('devices') %}
+      <div class="nav-dropdown">
+        <button type="button">Devices ▾</button>
+        <div class="nav-dropdown-menu">
+          <a href="/admin/registry">Registry</a>
+          <a href="/admin/bulk_assign">Bulk Assign</a>
+          <a href="/admin/bulk_print">Bulk Print Labels</a>
+          <a href="/admin/audit">Asset Audit</a>
+          <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
+          <a href="/admin/fees">Fees / Who Owes</a>
+          <a href="/admin/registry/export">Export CSV</a>
+          <a href="/asset_history">Asset History</a>
+          <a href="/api/assets" target="_blank">Assets API</a>
+          {% if can('devices_manage') %}
+          <div class="nav-divider"></div>
+          <a href="/admin/registry/new">Add Device</a>
+          <a href="/admin/registry/set_sites">Set Device Sites</a>
+          {% endif %}
+          {% if is_super_admin() %}
+          <div class="nav-divider"></div>
+          <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-dropdown-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
+          {% endif %}
+        </div>
+      </div>
       {% endif %}
+
+      {% if can('people') %}
+      <div class="nav-dropdown">
+        <button type="button">People ▾</button>
+        <div class="nav-dropdown-menu">
+          <a href="/admin/people">People</a>
+          <a href="/admin/people/new">Add Person</a>
+          <a href="/admin/people/import">Import People CSV</a>
+          <a href="/admin/people/graduate">Graduate Students</a>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if can('loaners') %}
+      <div class="nav-dropdown">
+        <button type="button">Loaners ▾</button>
+        <div class="nav-dropdown-menu">
+          <a href="/admin/loaners">Loaner Pool</a>
+          <a href="/loaner_checkout" target="_blank">Student Checkout Page</a>
+          <a href="/loaner_checkin" target="_blank">Student Checkin Page</a>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if can('repairs') %}<a href="/admin/repairs">Repairs</a>{% endif %}
+
+      {% if can('admin') or can('manage_users') or is_super_admin() %}
+      <div class="nav-dropdown">
+        <button type="button">Admin ▾</button>
+        <div class="nav-dropdown-menu">
+          <a href="/admin">Dashboard</a>
+          {% if can('admin') %}
+          <a href="/admin/kiosk">Kiosk Devices</a>
+          <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-dropdown-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
+          <a href="/admin/activity">Activity Log</a>
+          {% endif %}
+          {% if can('manage_users') %}
+          <div class="nav-divider"></div>
+          <a href="/admin/users">Users</a>
+          {% endif %}
+          {% if is_super_admin() %}
+          <a href="/admin/sites">Sites</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
       <a href="/admin/logout" class="logout">Logout</a>
     {% else %}
       <a href="/admin/login">Admin</a>
@@ -211,6 +301,20 @@
     {% block content %}{% endblock %}
   </div>
 <script>
+// Click-toggle nav dropdowns (not hover-only — kiosks are plausibly touchscreens).
+document.querySelectorAll('.nav-dropdown > button').forEach(function (toggle) {
+  toggle.addEventListener('click', function (e) {
+    e.stopPropagation();
+    const dropdown = toggle.parentElement;
+    const wasOpen = dropdown.classList.contains('open');
+    document.querySelectorAll('.nav-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
+    if (!wasOpen) dropdown.classList.add('open');
+  });
+});
+document.addEventListener('click', function () {
+  document.querySelectorAll('.nav-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
+});
+
 // Only run session polling on admin pages
 const isAdmin = window.location.pathname.startsWith('/admin');
 if (isAdmin) {

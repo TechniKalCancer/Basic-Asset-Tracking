@@ -57,13 +57,14 @@
   </script>
 </div>
 
-<div class="card" style="padding:0;overflow:hidden;">
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
         <th>Asset Tag</th>
         <th>Serial</th>
         <th>Description</th>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th>Site</th>{% endif %}
         <th>Status</th>
         <th>Checked Out To</th>
         <th>Due</th>
@@ -77,6 +78,9 @@
         <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}
+        <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
+        {% endif %}
         <td>
           {% if checkout %}
             <span class="badge {{ 'badge-red' if checkout.due_date and checkout.due_date < today else 'badge-blue' }}">Checked Out</span>
@@ -96,14 +100,16 @@
             <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Check In</button>
           </form>
           {% endif %}
+          {% if can('devices_manage') %}
           <form method="POST" action="/admin/assets/{{ row.asset_tag }}/toggle_loaner" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Remove from Pool</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">
+      <tr><td colspan="{{ 8 if (current_site_ids() is none or current_site_ids()|length > 1) else 7 }}" style="text-align:center;color:var(--muted);padding:2rem;">
         No devices are marked as loaners yet. Mark one from the <a href="/admin/registry">Asset Registry</a>.
       </td></tr>
       {% endfor %}

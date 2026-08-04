@@ -25,11 +25,33 @@
       <input type="password" name="password" autocomplete="new-password" {{ 'required' if not user }} />
     </div>
 
+    {% set user_site_ids = user.sites|map(attribute='id')|list if user else [] %}
+    {% if is_super_admin() %}
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;cursor:pointer;">
+      <input type="checkbox" name="is_super_admin" style="width:auto;" {{ 'checked' if user and user.is_super_admin }} />
+      Super Admin (sees and manages every site)
+    </label>
+    {% endif %}
+
+    <label style="display:block;margin-bottom:.6rem;color:var(--muted);font-size:.85rem;">
+      Sites {{ '(ignored for a Super Admin)' if is_super_admin() }}
+    </label>
+    <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem;">
+      {% for site in sites %}
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="site_ids" value="{{ site.id }}" style="width:auto;" {{ 'checked' if site.id in user_site_ids }} />
+        {{ site.name }}
+      </label>
+      {% else %}
+      <span style="color:var(--muted);font-size:.85rem;">No sites yet — add one under Sites first.</span>
+      {% endfor %}
+    </div>
+
     <label style="display:block;margin-bottom:.6rem;color:var(--muted);font-size:.85rem;">Permissions</label>
     <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem;">
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
-        <input type="checkbox" name="is_admin" style="width:auto;" {{ 'checked' if user and user.is_admin }} />
-        Admin (full access, incl. managing users)
+        <input type="checkbox" name="can_checkinout" style="width:auto;" {{ 'checked' if user and user.can_checkinout }} />
+        Check devices in / out (just the Check In / Check Out pages)
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
         <input type="checkbox" name="can_people" style="width:auto;" {{ 'checked' if user and user.can_people }} />
@@ -37,16 +59,34 @@
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
         <input type="checkbox" name="can_devices" style="width:auto;" {{ 'checked' if user and user.can_devices }} />
-        Devices / Asset Registry
+        Devices (view registry, assign/unassign, bulk ops, audit)
+      </label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="can_devices_manage" style="width:auto;" {{ 'checked' if user and user.can_devices_manage }} />
+        Manage devices (add, edit, remove, set sites — includes everything above)
+      </label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="can_loaner_checkinout" style="width:auto;" {{ 'checked' if user and user.can_loaner_checkinout }} />
+        Check loaners in / out
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
         <input type="checkbox" name="can_loaners" style="width:auto;" {{ 'checked' if user and user.can_loaners }} />
-        Loaners
+        Manage loaners (full Loaners page — includes checking in/out)
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
         <input type="checkbox" name="can_repairs" style="width:auto;" {{ 'checked' if user and user.can_repairs }} />
         Repairs
       </label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="can_manage_users" style="width:auto;" {{ 'checked' if user and user.can_manage_users }} />
+        Add / edit / delete users (can't grant Admin or Super Admin)
+      </label>
+      {% if session.get('is_admin') %}
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="is_admin" style="width:auto;" {{ 'checked' if user and user.is_admin }} />
+        Admin (full access within their sites, incl. managing users and kiosks)
+      </label>
+      {% endif %}
     </div>
 
     {% if user %}

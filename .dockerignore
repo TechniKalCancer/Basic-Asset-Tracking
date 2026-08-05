@@ -9,6 +9,7 @@ env/
 # Extremely important: Don't bake your secrets or live DB into the image
 .env
 assets.db
+google-credentials/
 
 Dockerfile
 .dockerignore

@@ -24,6 +24,13 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-asset_tracker}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-asset_tracker}
+    volumes:
+      # Drop a Google service account JSON key here and point
+      # GOOGLE_SERVICE_ACCOUNT_FILE at /app/instance/google-credentials/<file>
+      # — see /admin/google_setup for the guided walkthrough. Read-only, and
+      # the local google-credentials/ folder is gitignored — never commit a
+      # real key.
+      - ./google-credentials:/app/instance/google-credentials:ro
     depends_on:
       db:
         condition: service_healthy

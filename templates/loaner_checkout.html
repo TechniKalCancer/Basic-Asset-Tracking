@@ -18,9 +18,13 @@
            background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
            max-height:260px;overflow-y:auto;"></div>
     </div>
-    <div style="margin-bottom:1.5rem;">
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Asset Tag / Serial</label>
       <input type="text" name="scan_value" id="scanInput" autocomplete="off" placeholder="Scan or type…" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Type your full name to acknowledge you're responsible for this device</label>
+      <input type="text" name="acknowledged_by" autocomplete="off" placeholder="Your full name" required />
     </div>
     <button type="submit" class="btn btn-primary">Check Out</button>
   </form>

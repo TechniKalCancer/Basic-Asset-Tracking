@@ -53,9 +53,13 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Condition Notes (optional)</label>
       <input name="condition_out" placeholder="e.g. Minor scratch on lid" />
     </div>
-    <div style="margin-bottom:1.5rem;">
+    <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Due Date (optional)</label>
       <input type="date" name="due_date" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Acknowledged By (optional)</label>
+      <input name="acknowledged_by" placeholder="Student/staff types their name to acknowledge responsibility" />
     </div>
     <button type="submit" class="btn btn-primary">Assign</button>
   </form>
@@ -80,35 +84,32 @@
 </div>
 
 <div class="card" style="max-width:480px;">
-  <h2>📜 Assignment History</h2>
-  {% if history %}
+  <h2>📜 Assignment &amp; Loaner History</h2>
+  {% if combined_history %}
   <table>
     <thead>
-      <tr><th>Person</th><th>Assigned</th><th>Due</th><th>Returned</th><th>Notes</th></tr>
+      <tr><th></th><th>Person</th><th>Started</th><th>Due</th><th>Returned</th><th>Acknowledged By</th><th>Notes</th></tr>
     </thead>
     <tbody>
-      {% for h in history %}
+      {% for h in combined_history %}
       <tr>
+        <td><span class="badge {{ 'badge-blue' if h.kind == 'assign' else 'badge-yellow' }}" style="font-size:.65rem;">{{ 'Assign' if h.kind == 'assign' else 'Loaner' }}</span></td>
         <td>{{ h.person_name }}</td>
-        <td style="color:var(--muted);">{{ h.assigned_at.strftime('%Y-%m-%d') }}</td>
-        <td style="color:{{ 'var(--danger)' if (h.due_date and not h.unassigned_at and h.due_date < now) else 'var(--muted)' }};">
+        <td style="color:var(--muted);">{{ h.started_at.strftime('%Y-%m-%d') }}</td>
+        <td style="color:{{ 'var(--danger)' if (h.due_date and not h.ended_at and h.due_date < now) else 'var(--muted)' }};">
           {{ h.due_date.strftime('%Y-%m-%d') if h.due_date else '—' }}
         </td>
         <td style="color:var(--muted);">
-          {% if h.unassigned_at %}{{ h.unassigned_at.strftime('%Y-%m-%d') }}{% else %}<span class="badge badge-blue" style="font-size:.7rem;">Current</span>{% endif %}
+          {% if h.ended_at %}{{ h.ended_at.strftime('%Y-%m-%d') }}{% else %}<span class="badge badge-blue" style="font-size:.7rem;">Current</span>{% endif %}
         </td>
-        <td style="color:var(--muted);font-size:.8rem;">
-          {% if h.condition_out %}Out: {{ h.condition_out }}{% endif %}
-          {% if h.condition_out and h.condition_in %}<br>{% endif %}
-          {% if h.condition_in %}In: {{ h.condition_in }}{% endif %}
-          {% if not h.condition_out and not h.condition_in %}—{% endif %}
-        </td>
+        <td style="color:var(--muted);font-size:.8rem;">{{ h.acknowledged_by or '—' }}</td>
+        <td style="color:var(--muted);font-size:.8rem;">{{ h.notes or '—' }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p style="color:var(--muted);font-size:.88rem;">No assignment history yet.</p>
+  <p style="color:var(--muted);font-size:.88rem;">No assignment or loaner history yet.</p>
   {% endif %}
 </div>
 
@@ -144,6 +145,11 @@
     <p style="color:var(--warning);font-size:.85rem;margin-bottom:1rem;">
       This will be incident #{{ current_person_incident_count + 1 }} for {{ asset.assigned_to.full_name }}
       (across all assets, all time).
+    </p>
+  {% endif %}
+  {% if asset and asset.assigned_to and asset.assigned_to.insurance_opted_in %}
+    <p style="margin-bottom:1rem;">
+      <span class="badge badge-blue">🛡️ {{ asset.assigned_to.full_name }} has the device protection plan — check before charging a fee.</span>
     </p>
   {% endif %}
   <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" style="margin-bottom:1rem;">

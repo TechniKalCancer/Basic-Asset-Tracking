@@ -3,9 +3,17 @@
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">⚙️ Admin Panel</h1>
+  {% if is_super_admin() %}
+  <a href="/admin/google_setup" style="text-decoration:none;">
+    <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+      🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+    </span>
+  </a>
+  {% else %}
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
+  {% endif %}
   {% if google_loaner_autodisable_active %}
   <span class="badge badge-blue">🔒 Loaner Auto-Disable: Active</span>
   {% endif %}
@@ -13,6 +21,20 @@
     ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>
 </div>
+
+{% if is_super_admin() and fresh_install %}
+<div class="card" style="display:flex;align-items:center;gap:1rem;background:var(--surface2);">
+  <span>👋 Welcome! This looks like a brand-new install — create your first site to get started.</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/sites/new" class="btn btn-primary">🏫 Create Site</a>
+</div>
+{% endif %}
+
+{% if is_super_admin() and dev_secrets_in_use %}
+<div class="card" style="display:flex;align-items:center;gap:1rem;">
+  <span style="color:var(--danger);">⚠️ Still running on the default dev <code>SECRET_KEY</code> and/or <code>ADMIN_PASSWORD</code>. Set both to real values in <code>.env</code> and restart before this is reachable outside your own network.</span>
+</div>
+{% endif %}
 
 {% if can('admin') and overdue_count %}
 <div class="card" style="display:flex;align-items:center;gap:1rem;">

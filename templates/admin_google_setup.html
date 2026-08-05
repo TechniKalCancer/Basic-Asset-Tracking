@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}Google Sync Setup{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔗 Google Workspace Sync Setup</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <p style="color:var(--muted);font-size:.9rem;margin-bottom:0;">
+    Google requires a human Workspace super admin to manually authorize this app's service account
+    in the Domain-wide Delegation console — there's no API for that step, so this page can't do it
+    for you. What it <em>can</em> do: give you the exact links in the right order, and a real
+    connectivity test at the end so you know it actually worked instead of guessing.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Setup Checklist</h2>
+  <ol style="line-height:2;padding-left:1.2rem;">
+    <li>
+      <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Create (or select) a Google Cloud project ↗</a>
+      — any project works, it just needs to belong to your organization.
+    </li>
+    <li>
+      <a href="https://console.cloud.google.com/apis/library/admin.googleapis.com" target="_blank" rel="noopener">Enable the Admin SDK API ↗</a>
+      on that project (click "Enable" if it isn't already).
+    </li>
+    <li>
+      <a href="https://console.cloud.google.com/iam-admin/serviceaccounts/create" target="_blank" rel="noopener">Create a service account ↗</a>
+      — any name/description is fine, no roles need to be granted on the Cloud project itself.
+    </li>
+    <li>
+      On that service account's page, open the <strong>Keys</strong> tab → <strong>Add Key</strong> →
+      <strong>Create new key</strong> → JSON, and download it. Then open the <strong>Details</strong> tab
+      and copy the <strong>Unique ID</strong> (a long number) — that's the Client ID you'll need next.
+    </li>
+    <li>
+      <a href="https://admin.google.com/ac/owl/domainwidedelegation" target="_blank" rel="noopener">Authorize Domain-wide Delegation ↗</a>
+      in the Workspace Admin console → <strong>Add new</strong> → paste the Client ID, and for
+      OAuth scopes paste (comma-separated, on the <strong>same</strong> entry — not two separate ones):
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.8rem 1rem;margin:.5rem 0;font-family:monospace;font-size:.82rem;word-break:break-all;">
+        https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly
+        {% if google_loaner_autodisable_enabled %}<br>https://www.googleapis.com/auth/admin.directory.device.chromeos{% endif %}
+      </div>
+      Always include the <code>.readonly</code> scope. Only add the second (non-readonly) scope if you
+      want the <a href="/admin/sites">loaner auto-disable</a> feature — it's a bigger blast radius
+      (it can remotely disable a live device), so only add it if you're actually going to use it.
+    </li>
+    <li>
+      Get the downloaded JSON key file onto the server where this app runs, and point
+      <code>GOOGLE_SERVICE_ACCOUNT_FILE</code> at it in <code>.env</code>. If you're running via
+      Docker Compose, drop the file into a <code>google-credentials/</code> folder next to your
+      <code>docker-compose.yml</code> (already mounted read-only into the container at
+      <code>/app/instance/google-credentials/</code>) and set:
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.8rem 1rem;margin:.5rem 0;font-family:monospace;font-size:.82rem;">
+        GOOGLE_SERVICE_ACCOUNT_FILE=/app/instance/google-credentials/&lt;your-key-filename&gt;.json<br>
+        GOOGLE_ADMIN_IMPERSONATE_EMAIL=&lt;a real super admin's email on your domain&gt;
+      </div>
+      Then restart the container (<code>docker compose up -d --force-recreate web</code>).
+    </li>
+    <li>Click <strong>Test Connection</strong> below.</li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>Current Status</h2>
+  <table style="margin-bottom:1rem;">
+    <tr><td style="color:var(--muted);">GOOGLE_SERVICE_ACCOUNT_FILE</td><td>{{ service_account_file or '(not set)' }}</td></tr>
+    <tr><td style="color:var(--muted);">GOOGLE_ADMIN_IMPERSONATE_EMAIL</td><td>{{ impersonate_email or '(not set)' }}</td></tr>
+    <tr><td style="color:var(--muted);">Loaner auto-disable env var</td><td>{{ 'Enabled' if google_loaner_autodisable_enabled else 'Disabled' }}</td></tr>
+  </table>
+  <form method="POST" action="/admin/google_setup/test">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not google_sync_enabled }}>
+      Test Connection{{ '' if google_sync_enabled else ' (set the env vars above first)' }}
+    </button>
+  </form>
+</div>
+{% endblock %}

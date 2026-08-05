@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -94,10 +95,16 @@ ADMIN_PASSWORD_HASH = generate_password_hash(
     os.environ.get('ADMIN_PASSWORD', 'admin123'), method='pbkdf2:sha256'
 )
 
-# ─── Google Workspace sync config (Stage 2 — framework only, not yet implemented) ──
+# ─── Google Workspace sync config ──────────────────────────────────────────────
+# One service account handles both the read-only info sync and (if opted into
+# separately below) the loaner auto-disable write path — its Domain-wide
+# Delegation entry in the Workspace Admin console just needs both scopes
+# authorized on the same Client ID, not two separate service accounts.
 GOOGLE_SERVICE_ACCOUNT_FILE    = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')
 GOOGLE_ADMIN_IMPERSONATE_EMAIL = os.environ.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')
 GOOGLE_SYNC_ENABLED = bool(GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSONATE_EMAIL)
+GOOGLE_SCOPE_READONLY = 'https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly'
+GOOGLE_SCOPE_MANAGE   = 'https://www.googleapis.com/auth/admin.directory.device.chromeos'
 
 # Remotely disabling a live device is a much bigger blast radius than the
 # read-only sync above, so it gets its own separate opt-in on top of
@@ -244,6 +251,7 @@ class Person(db.Model):
     external_id = db.Column(db.String(40), unique=True, nullable=True, index=True)  # district staff/student ID — bulk-import upsert key
     grad_year  = db.Column(db.Integer, nullable=True, index=True)  # expected graduation year (students); blank for staff
     is_active  = db.Column(db.Boolean, nullable=False, default=True, index=True)  # False once graduated/withdrawn — keeps history/incidents intact instead of deleting
+    insurance_opted_in = db.Column(db.Boolean, nullable=False, default=False)  # family paid for the device protection plan this year
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     site = db.relationship('Site')
@@ -285,6 +293,7 @@ class AssignmentHistory(db.Model):
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
     condition_out  = db.Column(db.String(255), nullable=True)
     condition_in   = db.Column(db.String(255), nullable=True)
+    acknowledged_by = db.Column(db.String(160), nullable=True)  # typed name acknowledging responsibility at assign time
 
 
 class Event(db.Model):
@@ -457,6 +466,7 @@ class LoanerCheckout(db.Model):
     checked_in_at    = db.Column(db.DateTime, nullable=True)
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
     condition_notes  = db.Column(db.String(255), nullable=True)
+    acknowledged_by  = db.Column(db.String(160), nullable=True)  # typed name acknowledging responsibility at checkout
 
 
 # Schema creation/upgrades are handled by Flask-Migrate (`flask db upgrade`),
@@ -513,15 +523,53 @@ def heal_orphans():
     return healed
 
 
+def _google_directory_service(scopes):
+    """
+    Builds an authenticated Admin SDK Directory API client using domain-wide
+    delegation — the service account impersonates GOOGLE_ADMIN_IMPERSONATE_EMAIL
+    (a real Workspace super admin) so its calls act with that admin's authority.
+    Raises FileNotFoundError/ValueError from the google-auth library itself if
+    GOOGLE_SERVICE_ACCOUNT_FILE doesn't point at a valid key file — callers
+    don't need to catch that separately, the routes already flash str(e).
+    """
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    credentials = service_account.Credentials.from_service_account_file(
+        GOOGLE_SERVICE_ACCOUNT_FILE, scopes=scopes,
+    ).with_subject(GOOGLE_ADMIN_IMPERSONATE_EMAIL)
+    return build('admin', 'directory_v1', credentials=credentials, cache_discovery=False)
+
+
+def _find_chromeos_device_by_serial(service, serial_number):
+    """
+    Paginates the domain's Chrome device list looking for a serial number
+    match. Filters client-side rather than using the API's `query` parameter —
+    serial-number search via `query` isn't reliably documented/stable, while
+    paging through `list()` (100 devices/page) is guaranteed-correct at
+    typical K-12 fleet sizes. Returns the device dict, or None if not found.
+    """
+    page_token = None
+    while True:
+        response = service.chromeosdevices().list(
+            customerId='my_customer', maxResults=100, pageToken=page_token, projection='FULL',
+        ).execute()
+        for device in response.get('chromeosdevices', []):
+            if device.get('serialNumber') == serial_number:
+                return device
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            return None
+
+
 def sync_chromeos_device_from_google(serial_number):
     """
     Looks up a Chromebook by serial number via the Google Admin SDK Directory API
-    and returns its model, org unit, and most recently synced user.
-
-    Stage 2 work — not implemented yet. Requires a Google Cloud service account
-    with domain-wide delegation authorized (in the Workspace Admin console) for
-    the https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly
-    scope, impersonating a super admin (GOOGLE_ADMIN_IMPERSONATE_EMAIL).
+    and returns its model, org unit, and most recently synced user. Requires a
+    Google Cloud service account with domain-wide delegation authorized (in the
+    Workspace Admin console) for the
+    https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly
+    scope, impersonating a super admin (GOOGLE_ADMIN_IMPERSONATE_EMAIL). See
+    /admin/google_setup for a step-by-step walkthrough of that setup.
 
     Args:
         serial_number: The device's manufacturer serial number.
@@ -530,11 +578,18 @@ def sync_chromeos_device_from_google(serial_number):
         A dict with keys 'model', 'org_unit', 'recent_user'.
 
     Raises:
-        NotImplementedError: Always, until Stage 2 is built out.
+        LookupError: No Chrome device with this serial number exists in the domain.
     """
-    from google.oauth2 import service_account  # noqa: F401 (Stage 2 wiring)
-    from googleapiclient.discovery import build  # noqa: F401 (Stage 2 wiring)
-    raise NotImplementedError('Google Workspace sync is configured but not implemented yet.')
+    service = _google_directory_service([GOOGLE_SCOPE_READONLY])
+    device = _find_chromeos_device_by_serial(service, serial_number)
+    if not device:
+        raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
+    recent_users = device.get('recentUsers') or []
+    return {
+        'model': device.get('model'),
+        'org_unit': device.get('orgUnitPath'),
+        'recent_user': recent_users[0].get('email') if recent_users else None,
+    }
 
 
 def set_chromeos_device_enabled(serial_number, enabled):
@@ -543,21 +598,27 @@ def set_chromeos_device_enabled(serial_number, enabled):
     resolves the device ID, then calls the Admin SDK's chromeosdevices().action()
     with action='reenable' (enabled=True) or 'disable' (enabled=False).
 
-    Needs a write-scope service account (https://www.googleapis.com/auth/admin.directory.device.chromeos,
-    not the .readonly scope sync_chromeos_device_from_google() above uses) with
-    domain-wide delegation authorized in the Workspace Admin console — same
-    manual prerequisite as the read-only sync, not yet set up.
+    Needs the SAME service account as sync_chromeos_device_from_google() above,
+    but with the additional (non-readonly) write scope
+    https://www.googleapis.com/auth/admin.directory.device.chromeos authorized
+    on its Domain-wide Delegation entry too — not a separate service account,
+    just an extra scope on the same Client ID.
 
     Args:
         serial_number: The device's manufacturer serial number.
         enabled: True to re-enable, False to disable.
 
     Raises:
-        NotImplementedError: Always, until the write-scope service account is configured.
+        LookupError: No Chrome device with this serial number exists in the domain.
     """
-    from google.oauth2 import service_account  # noqa: F401 (write-scope wiring)
-    from googleapiclient.discovery import build  # noqa: F401 (write-scope wiring)
-    raise NotImplementedError('Google Workspace loaner auto-disable is enabled but not implemented yet.')
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    device = _find_chromeos_device_by_serial(service, serial_number)
+    if not device:
+        raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
+    service.chromeosdevices().action(
+        customerId='my_customer', resourceId=device['deviceId'],
+        body={'action': 'reenable' if enabled else 'disable'},
+    ).execute()
 
 
 def _sync_loaner_google_state(registry_row, enabled):
@@ -975,10 +1036,13 @@ def admin_panel():
         _scope_registry(AssetRegistry.query, site_ids), 'expiring').count()
 
     # Orphans have no site to attribute, and a per-site breakdown only makes
-    # sense district-wide — both super-admin-only.
+    # sense district-wide — both super-admin-only, along with the onboarding
+    # banners below (a scoped site admin can't act on either anyway).
     orphan_count = None
     site_breakdown = None
     unassigned_devices = None
+    fresh_install = None
+    dev_secrets_in_use = None
     if site_ids is None:
         orphan_count = Asset.query.filter_by(is_valid=False).count()
         site_breakdown = [{
@@ -987,6 +1051,16 @@ def admin_panel():
             'people_count': Person.query.filter_by(site_id=site.id).count(),
         } for site in Site.query.order_by(Site.name).all()]
         unassigned_devices = AssetRegistry.query.filter(AssetRegistry.site_id.is_(None)).count()
+        fresh_install = Site.query.first() is None
+        # Same check that already logs a SECURITY WARNING to stdout at startup
+        # (see the IS_PRODUCTION block above) — surfaced here too since that
+        # log line is invisible unless someone is tailing container logs, and
+        # a reused volume could already have a Site while still running on
+        # dev-fallback secrets.
+        dev_secrets_in_use = (
+            app.secret_key == 'dev-secret-change-in-prod'
+            or os.environ.get('ADMIN_PASSWORD') is None
+        )
 
     google_loaner_autodisable_active = (
         GOOGLE_SYNC_ENABLED and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
@@ -1002,6 +1076,8 @@ def admin_panel():
                            warranty_expiring_count=warranty_expiring_count,
                            site_breakdown=site_breakdown,
                            unassigned_devices=unassigned_devices,
+                           fresh_install=fresh_install,
+                           dev_secrets_in_use=dev_secrets_in_use,
                            email_enabled=EMAIL_ENABLED,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED,
                            google_loaner_autodisable_active=google_loaner_autodisable_active)
@@ -1247,6 +1323,14 @@ def admin_registry_new():
             ))
             _log_activity('device_add', f'Added device {tag} to the registry.', site_id=site_id)
             db.session.commit()
+            # Heals a matching orphan scan record immediately, same effect as
+            # upload_csv's heal_orphans() but without waiting for the next
+            # bulk import — matters for the "Add to Registry" flow from the
+            # Orphaned Records page.
+            orphan = Asset.query.filter_by(asset_tag=tag, is_valid=False).first()
+            if orphan:
+                orphan.is_valid = True
+                db.session.commit()
             flash(f'Added device {tag} to the registry.', 'success')
             return redirect(url_for('admin_asset_assign', asset_tag=tag))
         except IntegrityError as e:
@@ -1258,7 +1342,9 @@ def admin_registry_new():
             flash(f'Could not add device: {e}', 'error')
             return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=request.form, sites=sites)
 
-    return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=None, sites=sites)
+    prefill_tag = request.args.get('asset_tag', '').strip()
+    prefill_form = {'asset_tag': prefill_tag} if prefill_tag else None
+    return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, form=prefill_form, sites=sites)
 
 
 @app.route('/admin/registry/<string:asset_tag>/edit', methods=['GET', 'POST'])
@@ -1580,6 +1666,24 @@ def admin_orphans():
     return render_template('admin_orphans.html', orphans=orphans)
 
 
+@app.route('/admin/orphans/<string:asset_tag>/delete', methods=['POST'])
+@require_super_admin
+def admin_orphan_delete(asset_tag):
+    """Permanently removes an orphan scan record — for a typo'd/mis-scanned
+    tag that will never be a real device. A tag that IS a real device should
+    go through 'Add to Registry' instead, which heals it rather than deleting it."""
+    orphan = Asset.query.filter_by(asset_tag=asset_tag, is_valid=False).first_or_404()
+    try:
+        db.session.delete(orphan)
+        _log_activity('orphan_delete', f'Deleted orphaned scan record {asset_tag}.')
+        db.session.commit()
+        flash(f'Deleted orphaned record {asset_tag}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not delete orphan: {e}', 'error')
+    return redirect(url_for('admin_orphans'))
+
+
 # ─── People ───────────────────────────────────────────────────────────────────
 
 def _person_search_filter(q):
@@ -1622,8 +1726,12 @@ def admin_people():
     search   = request.args.get('q', '').strip()
     if search:
         query = query.filter(_person_search_filter(search))
+    insurance_filter = request.args.get('insurance', '').strip()
+    if insurance_filter == '1':
+        query = query.filter(Person.insurance_opted_in.is_(True))
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    return render_template('admin_people.html', pagination=pagination, search=search, show=show)
+    return render_template('admin_people.html', pagination=pagination, search=search, show=show,
+                           insurance_filter=insurance_filter)
 
 
 @app.route('/admin/people/search')
@@ -1662,6 +1770,7 @@ def _person_form_values():
         'site_id':     request.form.get('site_id', type=int),
         'external_id': request.form.get('external_id', '').strip() or None,
         'grad_year':   int(grad_year_raw) if grad_year_raw.isdigit() else None,
+        'insurance_opted_in': bool(request.form.get('insurance_opted_in')),
     }
 
 
@@ -1763,14 +1872,47 @@ def _release_person_assets(person, condition_in):
     return len(affected_assets)
 
 
+@app.route('/admin/people/<int:person_id>/history')
+@require_permission('people')
+def admin_person_history(person_id):
+    """
+    Full chronological history for one person — every AssignmentHistory,
+    LoanerCheckout, and Incident row they're linked to, newest first. The
+    reverse direction of the combined Assignment & Loaner History card on
+    the asset assign page (that page answers "who's had this device";
+    this one answers "what has this person had").
+    """
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+
+    assignments = AssignmentHistory.query.filter_by(person_id=person.id) \
+        .order_by(AssignmentHistory.assigned_at.desc()).all()
+    loaner_checkouts = LoanerCheckout.query.filter_by(person_id=person.id) \
+        .order_by(LoanerCheckout.checked_out_at.desc()).all()
+    incidents = Incident.query.filter_by(person_id=person.id) \
+        .order_by(Incident.created_at.desc()).all()
+
+    combined_history = sorted(
+        [{'kind': 'assign', 'asset_tag': h.asset_tag, 'timestamp': h.assigned_at,
+          'ended_at': h.unassigned_at, 'acknowledged_by': h.acknowledged_by} for h in assignments] +
+        [{'kind': 'loaner', 'asset_tag': l.asset_tag, 'timestamp': l.checked_out_at,
+          'ended_at': l.checked_in_at, 'acknowledged_by': l.acknowledged_by} for l in loaner_checkouts] +
+        [{'kind': 'incident', 'asset_tag': i.asset_tag, 'timestamp': i.created_at,
+          'description': i.description, 'fee_charged': i.fee_charged,
+          'fee_amount': i.fee_amount, 'paid_at': i.paid_at} for i in incidents],
+        key=lambda row: row['timestamp'], reverse=True,
+    )
+
+    return render_template('admin_person_history.html', person=person, combined_history=combined_history)
+
+
 @app.route('/admin/people/<int:person_id>/delete', methods=['POST'])
 @require_permission('people')
 def admin_person_delete(person_id):
     """
     Permanently deletes a person record. Any assets currently assigned to them
-    are unassigned first, not blocked. AssignmentHistory/Incident rows are kept
-    (person_name is a snapshot) but their person_id link is cleared so the
-    foreign key doesn't block the delete.
+    are unassigned first, not blocked. AssignmentHistory/Incident/LoanerCheckout
+    rows are kept (person_name is a snapshot) but their person_id link is
+    cleared so the foreign key doesn't block the delete.
 
     For students leaving at graduation, prefer /admin/people/graduate instead —
     it archives (is_active=False) rather than deleting, so history/incidents
@@ -1783,6 +1925,7 @@ def admin_person_delete(person_id):
         unassigned = _release_person_assets(person, condition_in='Person deleted')
         AssignmentHistory.query.filter_by(person_id=person.id).update({'person_id': None})
         Incident.query.filter_by(person_id=person.id).update({'person_id': None})
+        LoanerCheckout.query.filter_by(person_id=person.id).update({'person_id': None})
         db.session.delete(person)
         _log_activity('person_delete', f'Deleted {person_name}.', site_id=person_site_id)
         db.session.commit()
@@ -1812,6 +1955,16 @@ def admin_person_reactivate(person_id):
 
 @app.route('/admin/people/import', methods=['GET', 'POST'])
 @require_permission('people')
+def _parse_bool_csv(value):
+    """Parses a lenient boolean CSV cell. Returns True/False, or None if the
+    cell is blank/missing — None means 'leave the existing value alone' on an
+    upsert, distinct from an explicit false which clears a previously-true flag."""
+    value = (value or '').strip().lower()
+    if not value:
+        return None
+    return value in ('true', 'yes', 'y', '1')
+
+
 def admin_people_import():
     """
     Bulk create-or-update people from a district roster CSV — the "everyone
@@ -1862,6 +2015,7 @@ def admin_people_import():
                 site_name  = clean(row.get('site'))
                 grad_year_raw = clean(row.get('grad_year') or row.get('graduation_year'))
                 grad_year  = int(grad_year_raw) if grad_year_raw and grad_year_raw.isdigit() else None
+                insurance_opted_in = _parse_bool_csv(row.get('insurance') or row.get('insurance_opted_in'))
 
                 if not first_name or not last_name or not email:
                     skipped += 1
@@ -1917,6 +2071,7 @@ def admin_people_import():
                     if department:   person.department = department
                     if site_id:      person.site_id = site_id
                     if grad_year:    person.grad_year = grad_year
+                    if insurance_opted_in is not None: person.insurance_opted_in = insurance_opted_in
                     updated += 1
                     results.append({'row': email, 'ok': True, 'message': f'Updated {person.full_name}.'})
                 else:
@@ -1924,6 +2079,7 @@ def admin_people_import():
                         first_name=first_name, last_name=last_name, email=email,
                         external_id=external_id, role=role or 'staff',
                         department=department, site_id=site_id, grad_year=grad_year,
+                        insurance_opted_in=bool(insurance_opted_in),
                     )
                     db.session.add(person)
                     created += 1
@@ -2000,11 +2156,15 @@ def _close_open_assignment(asset_tag, condition_in=None):
         open_row.condition_in = condition_in
 
 
-def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None):
+def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None, acknowledged_by=None):
     """
     Shared assign logic used by both the single assign form and bulk assign.
     The asset_tag must already exist in the registry (caller's responsibility
     to check) — the live Asset row is created here if scanning hasn't made one yet.
+
+    acknowledged_by MUST stay the last parameter — both callers below invoke
+    this positionally, so inserting a new param earlier would silently shift
+    due_date into the wrong argument with no error.
 
     Returns:
         (status, message) where status is 'assigned', 'already', or 'error'.
@@ -2020,7 +2180,7 @@ def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None
         _close_open_assignment(asset_tag, condition_in='Reassigned')
         db.session.add(AssignmentHistory(
             asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
-            condition_out=condition_out, due_date=due_date,
+            condition_out=condition_out, due_date=due_date, acknowledged_by=acknowledged_by,
         ))
         asset.assigned_to_id = person.id
         asset.status = 'assigned'
@@ -2051,6 +2211,7 @@ def admin_asset_assign(asset_tag):
         person_id = request.form.get('person_id', type=int)
         condition_out = request.form.get('condition_out', '').strip() or None
         due_date_str = request.form.get('due_date', '').strip()
+        acknowledged_by = request.form.get('acknowledged_by', '').strip() or None
         if not person_id:
             flash('Select a person to assign.', 'error')
             return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
@@ -2064,7 +2225,8 @@ def admin_asset_assign(asset_tag):
                 return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
         person = _scope_people(Person.query, site_ids).filter_by(id=person_id).first_or_404()
-        status, message = _assign_asset_to_person(asset_tag, person, condition_out, due_date)
+        status, message = _assign_asset_to_person(asset_tag, person, condition_out, due_date,
+                                                    acknowledged_by=acknowledged_by)
         if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
             message += ' Note: this device and person are at different sites.'
         flash(message, 'info' if status == 'already' else ('success' if status == 'assigned' else 'error'))
@@ -2073,6 +2235,28 @@ def admin_asset_assign(asset_tag):
     has_people = Person.query.first() is not None
     history = AssignmentHistory.query.filter_by(asset_tag=asset_tag) \
         .order_by(AssignmentHistory.assigned_at.desc()).all()
+    loaner_checkouts = LoanerCheckout.query.filter_by(asset_tag=asset_tag) \
+        .order_by(LoanerCheckout.checked_out_at.desc()).all()
+    # Normalized into a common shape and interleaved chronologically — an
+    # asset that's ever spent time in the loaner pool otherwise had an
+    # incomplete history here (assign-only), even though its loaner checkouts
+    # are tracked in a separate table.
+    combined_history = sorted(
+        [{
+            'kind': 'assign', 'person_name': h.person_name, 'started_at': h.assigned_at,
+            'ended_at': h.unassigned_at, 'due_date': h.due_date, 'acknowledged_by': h.acknowledged_by,
+            'notes': ' '.join(filter(None, [
+                f'Out: {h.condition_out}' if h.condition_out else None,
+                f'In: {h.condition_in}' if h.condition_in else None,
+            ])) or None,
+        } for h in history] +
+        [{
+            'kind': 'loaner', 'person_name': l.person_name, 'started_at': l.checked_out_at,
+            'ended_at': l.checked_in_at, 'due_date': l.due_date, 'acknowledged_by': l.acknowledged_by,
+            'notes': l.condition_notes,
+        } for l in loaner_checkouts],
+        key=lambda row: row['started_at'], reverse=True,
+    )
     events = Event.query.filter_by(asset_tag=asset_tag) \
         .order_by(Event.timestamp.desc()).limit(20).all()
     incidents = Incident.query.filter_by(asset_tag=asset_tag) \
@@ -2087,7 +2271,7 @@ def admin_asset_assign(asset_tag):
         .order_by(Repair.returned_at.desc()).all()
 
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
-                           history=history, events=events, incidents=incidents,
+                           history=history, combined_history=combined_history, events=events, incidents=incidents,
                            current_person_incident_count=current_person_incident_count,
                            open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
                            asset_statuses=ASSET_STATUSES,
@@ -2349,13 +2533,56 @@ def admin_asset_google_sync(asset_tag):
         asset.google_last_sync_at = datetime.utcnow()
         db.session.commit()
         flash(f'Synced {asset_tag} from Google.', 'success')
-    except NotImplementedError as e:
+    except LookupError as e:
         flash(str(e), 'info')
     except Exception as e:
         db.session.rollback()
         flash(f'Google sync failed: {e}', 'error')
 
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+
+@app.route('/admin/google_setup')
+@require_super_admin
+def admin_google_setup():
+    """
+    Guided setup checklist for Google Workspace sync. The Google Cloud
+    Console / Workspace Admin steps genuinely can't be automated from here —
+    Google requires a human super admin to authorize Domain-wide Delegation
+    in the Admin console, and no API exists for that step (GAM can't
+    automate it either) — so this is a checklist with direct links plus a
+    live connectivity test at the end, not a wizard that does the work for you.
+    """
+    return render_template('admin_google_setup.html',
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED,
+                           google_loaner_autodisable_enabled=GOOGLE_LOANER_AUTO_DISABLE_ENABLED,
+                           service_account_file=GOOGLE_SERVICE_ACCOUNT_FILE,
+                           impersonate_email=GOOGLE_ADMIN_IMPERSONATE_EMAIL)
+
+
+@app.route('/admin/google_setup/test', methods=['POST'])
+@require_super_admin
+def admin_google_setup_test():
+    """
+    A live round-trip against the Admin SDK Directory API — the only way to
+    actually confirm the Google Cloud Console + Workspace Admin steps worked.
+    GOOGLE_SYNC_ENABLED (used everywhere else) is just an env-var-presence
+    check, not proof the credentials/delegation are actually valid.
+    """
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Set GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSONATE_EMAIL in .env and restart before testing.', 'error')
+        return redirect(url_for('admin_google_setup'))
+    try:
+        service = _google_directory_service([GOOGLE_SCOPE_READONLY])
+        response = service.chromeosdevices().list(customerId='my_customer', maxResults=1).execute()
+        if response.get('chromeosdevices'):
+            flash('Connected to Google Workspace successfully — found at least one Chrome device on file.', 'success')
+        else:
+            flash('Connected to Google Workspace successfully, but no Chrome devices were found — '
+                  'double-check GOOGLE_ADMIN_IMPERSONATE_EMAIL is a real super admin on this domain.', 'info')
+    except Exception as e:
+        flash(f'Connection failed: {e}', 'error')
+    return redirect(url_for('admin_google_setup'))
 
 
 # ─── Kiosk Devices ──────────────────────────────────────────────────────────────
@@ -2802,6 +3029,46 @@ def admin_loaners():
                            today=datetime.utcnow().date())
 
 
+@app.route('/admin/collection')
+@login_required
+def admin_collection():
+    """
+    "Who still has what" — currently-assigned devices unioned with currently-
+    checked-out loaners, site-scoped, in one combined view. Useful for
+    end-of-year collection: instead of cross-referencing the registry and
+    loaner pages separately, see the whole outstanding list at once.
+
+    Gated like admin_panel.html's dashboard cards — each half only shows for
+    a session with that specific permission, rather than requiring both
+    'devices' and 'loaners' just to see either one.
+    """
+    if not (_has_permission('devices') or _has_permission('loaners')):
+        flash('Your account doesn\'t have permission to access that page.', 'error')
+        return redirect(url_for('admin_panel'))
+
+    site_ids = _current_site_ids()
+
+    assigned_rows = []
+    if _has_permission('devices'):
+        registry_rows = _filter_registry_by_status(
+            _scope_registry(AssetRegistry.query, site_ids), 'assigned'
+        ).order_by(AssetRegistry.asset_tag).all()
+        tags = [r.asset_tag for r in registry_rows]
+        assets_by_tag = {a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(tags))}
+        assigned_rows = [(r, assets_by_tag.get(r.asset_tag)) for r in registry_rows]
+
+    open_loaners = []
+    if _has_permission('loaners'):
+        loaner_query = LoanerCheckout.query.filter(LoanerCheckout.checked_in_at.is_(None))
+        if site_ids is not None:
+            loaner_query = loaner_query.join(AssetRegistry, AssetRegistry.asset_tag == LoanerCheckout.asset_tag) \
+                .filter(AssetRegistry.site_id.in_(site_ids))
+        open_loaners = loaner_query.order_by(LoanerCheckout.checked_out_at).all()
+
+    return render_template('admin_collection.html', assigned_rows=assigned_rows, open_loaners=open_loaners,
+                           now=datetime.utcnow().date())
+
+
 @app.route('/admin/loaners/send_reminders', methods=['POST'])
 @require_permission('loaners')
 def admin_loaners_send_reminders():
@@ -2818,8 +3085,12 @@ def admin_loaners_send_reminders():
     return redirect(url_for('admin_loaners'))
 
 
-def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None):
-    """Shared checkout logic used by both the admin page and student self-service."""
+def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledged_by=None):
+    """Shared checkout logic used by both the admin page and student self-service.
+
+    acknowledged_by MUST stay the last parameter — callers invoke this
+    positionally, so inserting a new param earlier would silently shift
+    site_ids into the wrong argument with no error."""
     row = AssetRegistry.query.filter_by(asset_tag=asset_tag, is_loaner=True).first()
     if not row:
         return 'error', f'{asset_tag} is not a loaner device.'
@@ -2831,6 +3102,7 @@ def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None):
     db.session.add(LoanerCheckout(
         asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
         due_date=due_date or (datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)),
+        acknowledged_by=acknowledged_by,
     ))
     _log_activity('loaner_checkout', f'Checked out loaner {asset_tag} to {person.full_name}.', site_id=row.site_id)
     db.session.commit()
@@ -2869,6 +3141,7 @@ def admin_loaners_checkout():
     asset_tag = request.form.get('asset_tag', '').strip()
     person_id = request.form.get('person_id', '').strip()
     due_date_str = request.form.get('due_date', '').strip()
+    acknowledged_by = request.form.get('acknowledged_by', '').strip() or None
     person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
     if not asset_tag or not person:
         flash('Choose both a person and a loaner asset tag.', 'error')
@@ -2880,7 +3153,7 @@ def admin_loaners_checkout():
         except ValueError:
             flash('Invalid due date.', 'error')
             return redirect(url_for('admin_loaners'))
-    status, message = _checkout_loaner(asset_tag, person, due_date, site_ids)
+    status, message = _checkout_loaner(asset_tag, person, due_date, site_ids, acknowledged_by=acknowledged_by)
     flash(message, 'success' if status == 'ok' else 'error')
     return redirect(url_for('admin_loaners'))
 
@@ -2901,6 +3174,7 @@ def loaner_checkout_page():
     if request.method == 'POST':
         person_id = request.form.get('person_id', '').strip()
         scan_value = request.form.get('scan_value', '').strip()
+        acknowledged_by = request.form.get('acknowledged_by', '').strip() or None
         person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
         if not person or not person.is_active:
             flash('Search for your name and select yourself from the list first.', 'error')
@@ -2908,11 +3182,14 @@ def loaner_checkout_page():
         if not scan_value:
             flash('Scan or type the loaner asset tag/serial.', 'error')
             return redirect(url_for('loaner_checkout_page'))
+        if not acknowledged_by:
+            flash('Type your name to acknowledge responsibility for this device.', 'error')
+            return redirect(url_for('loaner_checkout_page'))
         asset_tag, _ = resolve_scan(scan_value)
         if not asset_tag:
             flash(f'"{scan_value}" was not found in the asset registry.', 'error')
             return redirect(url_for('loaner_checkout_page'))
-        status, message = _checkout_loaner(asset_tag, person, site_ids=site_ids)
+        status, message = _checkout_loaner(asset_tag, person, site_ids=site_ids, acknowledged_by=acknowledged_by)
         flash(message, 'success' if status == 'ok' else 'error')
         return redirect(url_for('loaner_checkout_page'))
 
@@ -3428,6 +3705,18 @@ def get_asset_history(asset_tag):
     if not events:
         return jsonify({'message': f'No history found for {asset_tag}'}), 404
     return jsonify([e.to_dict() for e in events])
+
+
+@app.route('/healthz')
+def healthz():
+    """Unauthenticated liveness/readiness check for orchestrators and uptime
+    monitoring — confirms the app can actually reach the database, not just
+    that the process is running."""
+    try:
+        db.session.execute(text('SELECT 1'))
+        return jsonify({'status': 'ok'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'detail': str(e)}), 503
 
 
 # ─── Pages ────────────────────────────────────────────────────────────────────

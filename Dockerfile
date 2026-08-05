@@ -25,6 +25,10 @@ USER appuser
 # Expose the port from app.py
 EXPOSE 8081
 
+# No curl/wget in python:3.9-slim, so the healthcheck hits /healthz with Python's stdlib instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz', timeout=4).status == 200 else 1)"
+
 # entrypoint.sh runs `flask db upgrade` once, then execs gunicorn (3 workers, 60s timeout,
 # access log to stdout) — see entrypoint.sh for why the migration runs there and not per-worker.
 ENTRYPOINT ["/app/entrypoint.sh"]

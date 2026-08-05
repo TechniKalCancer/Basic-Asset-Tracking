@@ -8,12 +8,14 @@
 
 <div class="card" style="background:#78350f22;border-color:var(--warning);">
   <p style="color:var(--warning);font-size:.9rem;">
-    These assets were scanned before they existed in the registry.
-    They will be automatically healed (marked valid) the next time you upload a CSV that includes their asset tag.
+    These assets were scanned before they existed in the registry. If a tag is a real device,
+    use <strong>Add to Registry</strong> to give it a description/site — it heals immediately,
+    same as if you'd uploaded a CSV that included the tag. If a tag was a scanning mistake
+    (typo, mis-scan) that will never be a real device, use <strong>Delete</strong> instead.
   </p>
 </div>
 
-<div class="card" style="padding:0;overflow:hidden;">
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
@@ -21,6 +23,7 @@
         <th>Last Check-In</th>
         <th>Last Check-Out</th>
         <th>Status</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -30,9 +33,17 @@
         <td>{{ asset.check_in.strftime('%Y-%m-%d %H:%M') if asset.check_in else '—' }}</td>
         <td>{{ asset.check_out.strftime('%Y-%m-%d %H:%M') if asset.check_out else '—' }}</td>
         <td><span class="badge badge-yellow">Unknown</span></td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/registry/new?asset_tag={{ asset.asset_tag }}" class="btn btn-ghost" style="padding:.3rem .7rem;">Add to Registry</a>
+          <form method="POST" action="/admin/orphans/{{ asset.asset_tag }}/delete" style="display:inline;"
+                onsubmit="return confirm('Permanently delete the orphaned record for {{ asset.asset_tag }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No orphaned records 🎉</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No orphaned records 🎉</td></tr>
       {% endfor %}
     </tbody>
   </table>

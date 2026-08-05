@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}History — {{ person.full_name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">📜 History — {{ person.full_name }}</h1>
+  {% if person.insurance_opted_in %}<span class="badge badge-blue">🛡️ Insured</span>{% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">✏️ Edit</a>
+  <a href="/admin/people" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Asset Tag</th>
+        <th>Date</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in combined_history %}
+      <tr>
+        <td>
+          {% if h.kind == 'assign' %}<span class="badge badge-blue" style="font-size:.65rem;">Assign</span>
+          {% elif h.kind == 'loaner' %}<span class="badge badge-yellow" style="font-size:.65rem;">Loaner</span>
+          {% else %}<span class="badge badge-red" style="font-size:.65rem;">Incident</span>{% endif %}
+        </td>
+        <td><a href="/admin/assets/{{ h.asset_tag }}/assign" style="text-decoration:none;"><code>{{ h.asset_tag }}</code></a></td>
+        <td style="color:var(--muted);white-space:nowrap;">{{ h.timestamp.strftime('%Y-%m-%d') }}</td>
+        <td style="color:var(--muted);font-size:.85rem;">
+          {% if h.kind in ('assign', 'loaner') %}
+            {% if h.ended_at %}Returned {{ h.ended_at.strftime('%Y-%m-%d') }}{% else %}<span class="badge badge-blue" style="font-size:.7rem;">Current</span>{% endif %}
+            {% if h.acknowledged_by %}<br>Acknowledged by: {{ h.acknowledged_by }}{% endif %}
+          {% else %}
+            {{ h.description }}
+            {% if h.fee_charged %}
+              <br>Fee: {% if h.fee_amount %}${{ '%.2f'|format(h.fee_amount) }}{% endif %}
+              {% if h.paid_at %}<span class="badge badge-green" style="font-size:.7rem;">Paid</span>{% else %}<span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>{% endif %}
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No history yet for {{ person.full_name }}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

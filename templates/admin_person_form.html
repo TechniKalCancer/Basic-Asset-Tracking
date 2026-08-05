@@ -51,6 +51,10 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year (optional, students)</label>
       <input type="number" name="grad_year" value="{{ (values.grad_year or '') if values else '' }}" placeholder="e.g. 2031" />
     </div>
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="insurance_opted_in" style="width:auto;" {{ 'checked' if values and values.insurance_opted_in }} />
+      Family opted into the device protection plan
+    </label>
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if person else 'Add Person' }}</button>
   </form>
 </div>

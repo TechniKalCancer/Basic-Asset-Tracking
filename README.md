@@ -2,6 +2,37 @@
 
 This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and JavaScript — think a lightweight, self-hosted alternative to IncidentIQ for a school's Chromebook fleet (and chargers, iPads, hotspots, etc). It checks devices in/out with a full history, keeps a student/staff directory, bulk-assigns a whole roster to their devices at once, prints Dymo labels (with an optional second charger label), sends overdue-return email reminders, supports physical inventory audits, and logs damage incidents per student.
 
+## Quickstart (5 minutes)
+
+The fastest way to run this — no build step, just the published image:
+
+```sh
+git clone https://github.com/TechniKalCancer/asset-tracking-plus.git
+cd asset-tracking-plus
+./setup.sh
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+`setup.sh` generates a `.env` with strong random secrets and prints your admin password once
+— save it. `docker-compose.deploy.yml` pulls `technikal/asset-tracking-plus:latest` from Docker
+Hub instead of building from source, so this comes up in under a minute on most connections.
+
+Once it's running:
+1. Open `http://localhost:8081` and log in at `/admin/login` with a **blank username** and the
+   admin password `setup.sh` printed.
+2. The dashboard will prompt you to create your first **Site** (a school/building) — do that
+   first, everything else (people, devices, users) is scoped to a site.
+3. From there: add devices (`/admin/registry/new` or a CSV import), add people, and start
+   assigning. See the feature sections below for everything else this can do.
+
+`GET /healthz` returns `200` once the app can reach its database — useful for load balancer or
+container-orchestrator health checks; the Docker image already has a `HEALTHCHECK` wired to it.
+
+This is the path to use for actually running the app. The `## Setup` section below is for
+**building from source** instead (contributing, or customizing before deploying) — don't run
+both against the same `.env`/database, they use different compose files (`docker-compose.yml`
+builds locally; `docker-compose.deploy.yml` pulls the published image).
+
 ## Prerequisites
 
 - Docker
@@ -9,16 +40,20 @@ This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and J
 
 ## Setup
 
+*This section builds the image from source — see Quickstart above if you just want to run the
+published image.*
+
 1. **Clone the repository:**
 
     ```sh
-    git clone https://github.com/yourusername/asset-tracking-system.git
-    cd asset-tracking-system
+    git clone https://github.com/TechniKalCancer/asset-tracking-plus.git
+    cd asset-tracking-plus
     ```
 
 2. **Create a `.env` file:**
 
-    Copy `.env.example` to `.env` and fill in real values:
+    Copy `.env.example` to `.env` and fill in real values (or just run `./setup.sh`, same as
+    Quickstart, to generate strong random secrets automatically):
 
     ```sh
     cp .env.example .env
@@ -30,8 +65,8 @@ This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and J
     docker compose up --build -d
     ```
 
-    This starts two containers: `db` (Postgres, the real database) and `web` (the app).
-    `web` waits for `db`'s healthcheck before starting.
+    This starts two containers: `db` (Postgres, the real database) and `web` (the app, built
+    from source rather than pulled). `web` waits for `db`'s healthcheck before starting.
 
 4. **Access the application:**
 
@@ -344,23 +379,26 @@ assignment whose due date has passed and lets you email each assigned person a r
   here) — the SMTP logic is standard `smtplib` STARTTLS + login, but do a real test send once
   you've set your credentials.
 
-## Google Workspace Sync (Stage 2 — framework only, not yet implemented)
+## Google Workspace Sync
 
-The scaffolding for syncing Chromebook info (model, org unit, recent user) from Google
-Workspace by serial number is in place, but the actual Admin SDK call is not implemented yet.
+Pulls a Chromebook's model, org unit, and most recent user from Google Workspace by serial
+number, via the Admin SDK Directory API.
 
-- `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_ADMIN_IMPERSONATE_EMAIL` (see `.env.example`) control
-  whether sync shows as "Configured" in the admin panel. Leaving them blank is fine — the rest
-  of the app works normally, the sync button just stays disabled.
-- `Asset.google_model`, `google_org_unit`, `google_recent_user`, `google_last_sync_at` columns
-  already exist to hold synced data once it's wired up.
-- `sync_chromeos_device_from_google(serial_number)` in `app.py` is the function to fill in —
-  it currently raises `NotImplementedError`. It needs a Google Cloud service account with
-  domain-wide delegation authorized (in the Workspace Admin console) for the
-  `admin.directory.device.chromeos.readonly` scope, calling the `chromeosdevices` resource
-  of the Admin SDK Directory API while impersonating a super admin.
-- `/admin/assets/<asset_tag>/google_sync` (POST) is already wired to call it and store the
-  result — no route/UI changes should be needed to activate Stage 2, just that one function.
+- **Setup**: log in as a super admin and go to Admin ▾ → **Google Sync Setup**
+  (`/admin/google_setup`) — a step-by-step checklist with direct links to every Google Cloud
+  Console / Workspace Admin page you need, plus a **Test Connection** button so you know it
+  actually worked instead of guessing. The short version: create a Google Cloud service account,
+  download its JSON key, authorize it for Domain-wide Delegation in the Workspace Admin console
+  (Google requires a human super admin to do that specific step — no API exists for it), then
+  set `GOOGLE_SERVICE_ACCOUNT_FILE` / `GOOGLE_ADMIN_IMPERSONATE_EMAIL` in `.env`.
+- One service account covers both this read-only sync and the loaner auto-disable feature below
+  — its Domain-wide Delegation entry just needs both OAuth scopes authorized on the same Client
+  ID, not two separate service accounts. See `.env.example` for the exact scope strings.
+- Leaving the env vars blank is fine — the rest of the app works normally, the sync button just
+  stays disabled and shows "Not Configured."
+- `Asset.google_model`, `google_org_unit`, `google_recent_user`, `google_last_sync_at` hold the
+  synced data. `/admin/assets/<asset_tag>/google_sync` (POST, from the assign page's Google
+  Workspace Info card) triggers a sync for one device.
 
 ## Purchase & Warranty Tracking
 
@@ -431,11 +469,12 @@ Building on the Google Workspace Sync scaffolding above, a loaner Chromebook can
 automatically **disabled in Google the moment it's checked in**, and **re-enabled the moment
 it's checked out** — so a student can't keep using a loaner after handing it back in.
 
-- This is a separate, bigger-blast-radius opt-in on top of the read-only sync: it needs its own
-  **write-scope** Google service account (`admin.directory.device.chromeos`, not `.readonly`)
-  with domain-wide delegation authorized, and the `GOOGLE_LOANER_AUTO_DISABLE_ENABLED=true` env
-  var set (see `.env.example`). Neither exists yet in this deployment — `set_chromeos_device_enabled()`
-  in `app.py` currently raises `NotImplementedError`, same pattern as the read-only sync stub.
+- This is a separate, bigger-blast-radius opt-in on top of the read-only sync: it needs the
+  **same** service account as above, but with the extra (non-readonly) `admin.directory.device.chromeos`
+  scope also authorized on its Domain-wide Delegation entry (see the Google Workspace Sync
+  section above and `.env.example` for the exact scope strings), plus
+  `GOOGLE_LOANER_AUTO_DISABLE_ENABLED=true` set. The guided setup page at `/admin/google_setup`
+  shows both scopes together.
 - Even with the env var and service account in place, it only runs for sites that have opted in
   via the **"Auto-disable loaner Chromebooks..."** checkbox on that site's Add/Edit form
   (Admin ▾ → Sites) — lets you pilot at one school before it's live everywhere.

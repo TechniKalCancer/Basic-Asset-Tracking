@@ -2,6 +2,7 @@
 .env
 venv/
 env/
+google-credentials/
 
 # Database (You don't want to push your live data to GitHub!)
 assets.db

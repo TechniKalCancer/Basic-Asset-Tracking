@@ -30,7 +30,7 @@
     <tbody>
       {% for row, asset in assigned_rows %}
       <tr>
-        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
+        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" class="tag-link"><code>{{ row.asset_tag }}</code></a></td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
         {% if current_site_ids() is none or current_site_ids()|length > 1 %}
         <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
@@ -63,7 +63,7 @@
     <tbody>
       {% for l in open_loaners %}
       <tr>
-        <td><a href="/admin/assets/{{ l.asset_tag }}/assign" style="text-decoration:none;"><code>{{ l.asset_tag }}</code></a></td>
+        <td><a href="/admin/assets/{{ l.asset_tag }}/assign" class="tag-link"><code>{{ l.asset_tag }}</code></a></td>
         <td>{{ l.person_name }}</td>
         <td style="color:var(--muted);">{{ l.checked_out_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:{{ 'var(--danger)' if l.due_date and l.due_date < now else 'var(--muted)' }};">

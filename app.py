@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 import os
+import re
 import csv
 import io
 import time
@@ -16,6 +17,7 @@ import secrets
 import smtplib
 import logging
 import sys
+import colorsys
 from email.message import EmailMessage
 from decimal import Decimal, InvalidOperation
 from collections import defaultdict, OrderedDict
@@ -112,12 +114,25 @@ GOOGLE_SCOPE_MANAGE   = 'https://www.googleapis.com/auth/admin.directory.device.
 GOOGLE_LOANER_AUTO_DISABLE_ENABLED = os.environ.get('GOOGLE_LOANER_AUTO_DISABLE_ENABLED', '').lower() in ('1', 'true', 'yes')
 
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──
+# SMTP_USERNAME/SMTP_PASSWORD are optional: a Google Workspace SMTP relay
+# (smtp-relay.gmail.com) is commonly set up IP-allowlisted with no login
+# required, in which case only SMTP_FROM_EMAIL needs to be set. send_email()
+# below only calls server.login() when both are present.
 SMTP_SERVER     = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
 SMTP_PORT       = int(os.environ.get('SMTP_PORT', '587'))
 SMTP_USERNAME   = os.environ.get('SMTP_USERNAME')
 SMTP_PASSWORD   = os.environ.get('SMTP_PASSWORD')
 SMTP_FROM_EMAIL = os.environ.get('SMTP_FROM_EMAIL') or SMTP_USERNAME
-EMAIL_ENABLED   = bool(SMTP_USERNAME and SMTP_PASSWORD)
+EMAIL_ENABLED   = bool(SMTP_FROM_EMAIL)
+
+# ─── Branding uploads (logos) ──────────────────────────────────────────────────
+# Lives under instance/ (not static/) because it needs to be a writable,
+# persistent volume — static/ is baked into the Docker image at build time
+# and would lose anything uploaded there on the next deploy. See the
+# branding-data volume in docker-compose.yml.
+BRANDING_UPLOAD_DIR = os.path.join(app.instance_path, 'branding')
+os.makedirs(BRANDING_UPLOAD_DIR, exist_ok=True)
+BRANDING_ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.svg', '.webp'}
 
 # ─── Simple in-memory login rate limiter ──────────────────────────────────────
 _login_attempts = defaultdict(list)  # ip -> [timestamp, ...]
@@ -148,7 +163,33 @@ class Site(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     name       = db.Column(db.String(120), unique=True, nullable=False, index=True)
     google_loaner_autodisable_enabled = db.Column(db.Boolean, nullable=False, default=False)  # per-site opt-in pilot gate, see _sync_loaner_google_state
+    logo_filename = db.Column(db.String(255), nullable=True)  # overrides BrandingSettings.logo_filename in the nav for this site's users; falls back when unset
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class BrandingSettings(db.Model):
+    """
+    Single-row (id=1) app-wide branding config, editable at /admin/branding.
+    primary_color_raw is exactly what the admin picked in the color input —
+    kept separate from the derived columns so re-opening the settings form
+    shows their actual choice, not a contrast-nudged value that would drift
+    further every time they saved. Every other *_color column is computed by
+    generate_palette() at save time (see the color engine above the routes)
+    and cached here so normal page loads never re-run the color math.
+    """
+    __tablename__ = 'branding_settings'
+    id                   = db.Column(db.Integer, primary_key=True)
+    app_name             = db.Column(db.String(120), nullable=True)
+    logo_filename        = db.Column(db.String(255), nullable=True)
+    primary_color_raw    = db.Column(db.String(7), nullable=True)
+    primary_color        = db.Column(db.String(7), nullable=True)  # = --accent (contrast-nudged for readability on the dark bg)
+    accent_dim_color     = db.Column(db.String(7), nullable=True)
+    accent_text_color    = db.Column(db.String(7), nullable=True)
+    secondary_color      = db.Column(db.String(7), nullable=True)
+    secondary_text_color = db.Column(db.String(7), nullable=True)
+    tertiary_color       = db.Column(db.String(7), nullable=True)
+    tertiary_text_color  = db.Column(db.String(7), nullable=True)
+    updated_at           = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class UserSite(db.Model):
@@ -492,6 +533,146 @@ def _generate_asset_tag(existing_tags):
     raise RuntimeError('Could not generate a unique asset tag after 50 attempts.')
 
 
+def _save_branding_logo(file_storage, prefix):
+    """
+    Validates and saves an uploaded logo, returning its on-disk filename (to
+    store on BrandingSettings.logo_filename or Site.logo_filename) or None if
+    no file was submitted. Raises ValueError on an invalid extension.
+
+    A random suffix busts browser/CDN caching when a logo is replaced — the
+    old URL (old filename) simply stops resolving rather than serving a
+    stale cached image at a now-reused path.
+    """
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in BRANDING_ALLOWED_EXTENSIONS:
+        raise ValueError(f'Unsupported file type "{ext}". Use PNG, JPG, SVG, or WebP.')
+    filename = f'{prefix}_{secrets.token_hex(4)}{ext}'
+    file_storage.save(os.path.join(BRANDING_UPLOAD_DIR, filename))
+    return filename
+
+
+def _delete_branding_logo(filename):
+    if not filename:
+        return
+    path = os.path.join(BRANDING_UPLOAD_DIR, filename)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+# ─── Branding color engine ──────────────────────────────────────────────────
+# Pure color math — no DB access. generate_palette() is the entry point,
+# called once from the /admin/branding save route (not on every page load).
+
+APP_BG_HEX = '#0f1117'  # must track :root's --bg in base.html — see generate_palette()
+_HEX_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def _hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb):
+    r, g, b = (max(0, min(255, round(c))) for c in rgb)
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def _relative_luminance(rgb):
+    """WCAG 2.x relative luminance (0=black, 1=white)."""
+    def channel(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast_ratio(rgb_a, rgb_b):
+    """WCAG contrast ratio, 1 (no contrast) to 21 (black vs white)."""
+    l1 = _relative_luminance(rgb_a) + 0.05
+    l2 = _relative_luminance(rgb_b) + 0.05
+    return max(l1, l2) / min(l1, l2)
+
+
+def _best_text_color(bg_hex):
+    """Whichever of black/white reads better on top of bg_hex."""
+    bg_rgb = _hex_to_rgb(bg_hex)
+    return '#000000' if _contrast_ratio((0, 0, 0), bg_rgb) >= _contrast_ratio((255, 255, 255), bg_rgb) else '#ffffff'
+
+
+def _ensure_min_contrast(hex_color, against_hex, min_ratio=4.5):
+    """
+    Nudges hex_color's HSL lightness toward whichever direction increases
+    contrast against against_hex, stepping until min_ratio is met or the
+    lightness bound (0/1) is hit. Preserves hue/saturation — a nudged brand
+    red stays recognizably that red, just legible against a near-black page.
+    """
+    rgb = _hex_to_rgb(hex_color)
+    against_rgb = _hex_to_rgb(against_hex)
+    if _contrast_ratio(rgb, against_rgb) >= min_ratio:
+        return hex_color
+
+    h, l, s = colorsys.rgb_to_hls(*(c / 255.0 for c in rgb))
+    direction = 1 if _relative_luminance(against_rgb) < 0.5 else -1
+    result_hex = hex_color
+    for _ in range(40):
+        l = min(1.0, max(0.0, l + direction * 0.02))
+        candidate_rgb = tuple(c * 255.0 for c in colorsys.hls_to_rgb(h, l, s))
+        result_hex = _rgb_to_hex(candidate_rgb)
+        if _contrast_ratio(candidate_rgb, against_rgb) >= min_ratio or l <= 0.0 or l >= 1.0:
+            break
+    return result_hex
+
+
+def _rotated_hue(hex_color, degrees):
+    rgb = _hex_to_rgb(hex_color)
+    h, l, s = colorsys.rgb_to_hls(*(c / 255.0 for c in rgb))
+    h = (h + degrees / 360.0) % 1.0
+    return _rgb_to_hex(tuple(c * 255.0 for c in colorsys.hls_to_rgb(h, l, min(1.0, s * 0.92))))
+
+
+def generate_palette(primary_hex, bg_hex=APP_BG_HEX):
+    """
+    Given one admin-picked brand color, derives a full contrast-safe palette
+    for this app's dark theme:
+      - accent: primary_hex, nudged (if needed) to >=4.5:1 against bg_hex —
+        used both as a solid fill (buttons/badges) and as standalone text/
+        links directly on the page background, matching how --accent is
+        already used throughout the existing CSS.
+      - accent_dim: a darker/desaturated variant for hover states.
+      - accent_text: best(black, white) for text drawn on top of accent.
+      - secondary/tertiary: +140/-140 degree hue rotations of accent (a
+        split-complementary-ish spread — distinct from primary without the
+        harsher clash of a true 180 degree complement), each independently
+        nudged for >=4.5:1 against bg_hex, with their own best-contrast text
+        color.
+    Returns a dict of hex strings, all direct CSS custom-property values.
+    """
+    accent = _ensure_min_contrast(primary_hex, bg_hex, min_ratio=4.5)
+    accent_rgb = _hex_to_rgb(accent)
+    h, l, s = colorsys.rgb_to_hls(*(c / 255.0 for c in accent_rgb))
+
+    dim_l = max(0.0, l * 0.55)
+    accent_dim = _rgb_to_hex(tuple(c * 255.0 for c in colorsys.hls_to_rgb(h, dim_l, s)))
+
+    secondary = _ensure_min_contrast(_rotated_hue(accent, 140), bg_hex, min_ratio=4.5)
+    tertiary = _ensure_min_contrast(_rotated_hue(accent, -140), bg_hex, min_ratio=4.5)
+
+    return {
+        'accent': accent,
+        'accent_dim': accent_dim,
+        'accent_text': _best_text_color(accent),
+        'secondary': secondary,
+        'secondary_text': _best_text_color(secondary),
+        'tertiary': tertiary,
+        'tertiary_text': _best_text_color(tertiary),
+    }
+
+
 def resolve_scan(scanned_value: str):
     """
     Given a raw scan value, return (asset_tag, scan_type) or (None, None).
@@ -654,6 +835,9 @@ def send_email(to_email, subject, body):
     """
     Sends a plain-text email via SMTP (Gmail by default: smtp.gmail.com:587 with
     an App Password — a regular account password will not work with 2FA enabled).
+    Also works against an IP-allowlisted Google Workspace SMTP relay
+    (smtp-relay.gmail.com) with no SMTP_USERNAME/SMTP_PASSWORD set at all —
+    login() is only attempted when both are present.
 
     Args:
         to_email: Recipient address.
@@ -661,11 +845,11 @@ def send_email(to_email, subject, body):
         body: Plain-text email body.
 
     Raises:
-        RuntimeError: If SMTP_USERNAME/SMTP_PASSWORD are not configured.
+        RuntimeError: If SMTP_FROM_EMAIL is not configured.
         smtplib.SMTPException, OSError: On connection/authentication/send failure.
     """
     if not EMAIL_ENABLED:
-        raise RuntimeError('Email is not configured (set SMTP_USERNAME and SMTP_PASSWORD).')
+        raise RuntimeError('Email is not configured (set SMTP_FROM_EMAIL in .env).')
 
     msg = EmailMessage()
     msg['Subject'] = subject
@@ -675,7 +859,8 @@ def send_email(to_email, subject, body):
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
         server.starttls()
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        if SMTP_USERNAME and SMTP_PASSWORD:
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
         server.send_message(msg)
 
 
@@ -920,6 +1105,52 @@ def kiosk_or_api_permission_required(perm):
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
+# Every value here is a literal match for what base.html's :root already
+# hardcoded before branding existed — an unconfigured install (or a
+# BrandingSettings field left blank) must look pixel-identical to today.
+_DEFAULT_BRANDING = {
+    'logo_url': None,
+    'app_name': None,
+    'accent': '#4f7ef8', 'accent_dim': '#2a4aaa', 'accent_text': '#ffffff',
+    'secondary': '#f15e56', 'secondary_text': '#000000',
+    'tertiary': '#b5f156', 'tertiary_text': '#000000',
+}
+
+
+def _current_branding():
+    """
+    Resolves the logo/colors for the current request: a site-specific logo
+    (from a single-site admin login or a kiosk device tied to a site) takes
+    priority over the district-wide default logo; colors are always the
+    single global palette (see admin_branding()/generate_palette()) since
+    real schools sharing a district brand generally share one color scheme
+    even when their logos differ — split further into per-site colors later
+    if that stops being true.
+    """
+    settings = BrandingSettings.query.get(1)
+    branding = dict(_DEFAULT_BRANDING)
+    if settings:
+        branding['app_name']       = settings.app_name or None
+        branding['accent']         = settings.primary_color or branding['accent']
+        branding['accent_dim']     = settings.accent_dim_color or branding['accent_dim']
+        branding['accent_text']    = settings.accent_text_color or branding['accent_text']
+        branding['secondary']      = settings.secondary_color or branding['secondary']
+        branding['secondary_text'] = settings.secondary_text_color or branding['secondary_text']
+        branding['tertiary']       = settings.tertiary_color or branding['tertiary']
+        branding['tertiary_text']  = settings.tertiary_text_color or branding['tertiary_text']
+
+    logo_filename = settings.logo_filename if settings else None
+    site_ids = _current_site_ids()
+    if site_ids and len(site_ids) == 1:
+        site = Site.query.get(site_ids[0])
+        if site and site.logo_filename:
+            logo_filename = site.logo_filename
+    if logo_filename:
+        branding['logo_url'] = url_for('branding_logo', filename=logo_filename)
+
+    return branding
+
+
 @app.context_processor
 def inject_permission_helper():
     """Exposes can('people'|'devices'|'loaners'|'repairs') to every template, so
@@ -945,6 +1176,7 @@ def inject_permission_helper():
         'current_site_ids': _current_site_ids,
         'nav_overdue_count': nav_overdue_count,
         'nav_orphan_count': nav_orphan_count,
+        'branding': _current_branding(),
     }
 
 
@@ -1004,13 +1236,30 @@ def admin_logout():
 
 @app.route('/api/admin/session_status')
 def session_status():
-    """Returns seconds remaining in session — used by the timeout warning UI."""
+    """
+    Returns seconds remaining in session — used by the timeout warning UI.
+    Deliberately read-only (does NOT refresh last_active): this is polled
+    every 15s just to render the countdown, and if polling itself extended
+    the session, an open-but-idle tab would keep the session alive forever.
+    """
     if not session.get('admin_logged_in'):
         return jsonify({'authenticated': False})
     last_active = session.get('last_active', 0)
     elapsed = datetime.now(timezone.utc).timestamp() - last_active
     remaining = max(0, SESSION_TIMEOUT_MINUTES * 60 - int(elapsed))
     return jsonify({'authenticated': True, 'seconds_remaining': remaining})
+
+
+@app.route('/api/admin/session_extend', methods=['POST'])
+def session_extend():
+    """
+    Explicitly resets the sliding timeout — called only by the "Stay logged
+    in" button. session_status() above intentionally can't do this (see its
+    docstring), so a real click needs its own mutating endpoint.
+    """
+    if not _admin_session_active():
+        return jsonify({'authenticated': False}), 401
+    return jsonify({'authenticated': True, 'seconds_remaining': SESSION_TIMEOUT_MINUTES * 60})
 
 
 # ─── Admin Panel ──────────────────────────────────────────────────────────────
@@ -1066,6 +1315,8 @@ def admin_panel():
         GOOGLE_SYNC_ENABLED and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
         and Site.query.filter_by(google_loaner_autodisable_enabled=True).first() is not None
     )
+    branding_settings = BrandingSettings.query.get(1)
+    branding_configured = bool(branding_settings and (branding_settings.primary_color_raw or branding_settings.logo_filename))
 
     return render_template('admin_panel.html',
                            registry_count=registry_count,
@@ -1080,7 +1331,8 @@ def admin_panel():
                            dev_secrets_in_use=dev_secrets_in_use,
                            email_enabled=EMAIL_ENABLED,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED,
-                           google_loaner_autodisable_active=google_loaner_autodisable_active)
+                           google_loaner_autodisable_active=google_loaner_autodisable_active,
+                           branding_configured=branding_configured)
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
@@ -2769,6 +3021,108 @@ def admin_user_delete(user_id):
     return redirect(url_for('admin_users'))
 
 
+# ─── Branding ─────────────────────────────────────────────────────────────────
+
+def _get_branding_settings():
+    """Get-or-create the single BrandingSettings row (always id=1)."""
+    settings = BrandingSettings.query.get(1)
+    if not settings:
+        settings = BrandingSettings(id=1)
+        db.session.add(settings)
+        db.session.commit()
+    return settings
+
+
+@app.route('/branding/logo/<path:filename>')
+def branding_logo(filename):
+    """
+    Unauthenticated on purpose: the login page and kiosk-facing pages need
+    to show a logo before any auth happens. filename is always one we
+    generated ourselves (see _save_branding_logo's random suffix) — never
+    user-supplied at save time — and send_from_directory guards against
+    path traversal regardless.
+    """
+    return send_from_directory(BRANDING_UPLOAD_DIR, filename, max_age=86400)
+
+
+@app.route('/admin/branding/preview')
+@require_super_admin
+def admin_branding_preview():
+    """Powers the live swatch preview on the settings page as the admin
+    moves the color picker — same generate_palette() the save route uses,
+    just not persisted, so what they see is exactly what they'll get."""
+    color = request.args.get('color', '')
+    if not _HEX_RE.match(color):
+        return jsonify({'error': 'invalid color'}), 400
+    return jsonify(generate_palette(color))
+
+
+@app.route('/admin/branding', methods=['GET', 'POST'])
+@require_super_admin
+def admin_branding():
+    settings = _get_branding_settings()
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'save')
+
+        if action == 'reset_color':
+            settings.primary_color_raw = None
+            settings.primary_color = None
+            settings.accent_dim_color = None
+            settings.accent_text_color = None
+            settings.secondary_color = None
+            settings.secondary_text_color = None
+            settings.tertiary_color = None
+            settings.tertiary_text_color = None
+            _log_activity('branding_edit', 'Reset branding colors to the built-in default.')
+            db.session.commit()
+            flash('Colors reset to the built-in default.', 'success')
+            return redirect(url_for('admin_branding'))
+
+        if action == 'remove_logo':
+            _delete_branding_logo(settings.logo_filename)
+            settings.logo_filename = None
+            _log_activity('branding_edit', 'Removed the district-wide default logo.')
+            db.session.commit()
+            flash('Logo removed.', 'success')
+            return redirect(url_for('admin_branding'))
+
+        app_name = request.form.get('app_name', '').strip()
+        primary_color = request.form.get('primary_color', '').strip()
+
+        if not _HEX_RE.match(primary_color):
+            flash('Primary color must be a valid hex color (e.g. #c8102e).', 'error')
+            return render_template('admin_branding.html', settings=settings)
+
+        try:
+            new_logo = _save_branding_logo(request.files.get('logo'), 'global')
+        except ValueError as e:
+            flash(str(e), 'error')
+            return render_template('admin_branding.html', settings=settings)
+
+        settings.app_name = app_name or None
+        if new_logo:
+            _delete_branding_logo(settings.logo_filename)
+            settings.logo_filename = new_logo
+
+        settings.primary_color_raw = primary_color
+        palette = generate_palette(primary_color)
+        settings.primary_color        = palette['accent']
+        settings.accent_dim_color     = palette['accent_dim']
+        settings.accent_text_color    = palette['accent_text']
+        settings.secondary_color      = palette['secondary']
+        settings.secondary_text_color = palette['secondary_text']
+        settings.tertiary_color       = palette['tertiary']
+        settings.tertiary_text_color  = palette['tertiary_text']
+
+        _log_activity('branding_edit', 'Updated app branding (logo/colors).')
+        db.session.commit()
+        flash('Branding updated.', 'success')
+        return redirect(url_for('admin_branding'))
+
+    return render_template('admin_branding.html', settings=settings)
+
+
 # ─── Sites ────────────────────────────────────────────────────────────────────
 
 @app.route('/admin/sites')
@@ -2789,7 +3143,20 @@ def admin_site_new():
         if Site.query.filter(db.func.lower(Site.name) == name.lower()).first():
             flash(f'A site named "{name}" already exists.', 'error')
             return render_template('admin_site_form.html', site=None, form=request.form)
-        db.session.add(Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled'))))
+
+        site = Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled')))
+        db.session.add(site)
+        db.session.flush()  # assigns site.id, used as the logo filename prefix below
+
+        try:
+            new_logo = _save_branding_logo(request.files.get('logo'), f'site{site.id}')
+        except ValueError as e:
+            db.session.rollback()
+            flash(str(e), 'error')
+            return render_template('admin_site_form.html', site=None, form=request.form)
+        if new_logo:
+            site.logo_filename = new_logo
+
         _log_activity('site_add', f'Added site "{name}".')
         db.session.commit()
         flash(f'Added site "{name}".', 'success')
@@ -2811,8 +3178,22 @@ def admin_site_edit(site_id):
         if dupe:
             flash(f'A site named "{name}" already exists.', 'error')
             return render_template('admin_site_form.html', site=site, form=request.form)
+
+        try:
+            new_logo = _save_branding_logo(request.files.get('logo'), f'site{site.id}')
+        except ValueError as e:
+            flash(str(e), 'error')
+            return render_template('admin_site_form.html', site=site, form=request.form)
+
         site.name = name
         site.google_loaner_autodisable_enabled = bool(request.form.get('google_loaner_autodisable_enabled'))
+        if new_logo:
+            _delete_branding_logo(site.logo_filename)
+            site.logo_filename = new_logo
+        elif request.form.get('remove_logo'):
+            _delete_branding_logo(site.logo_filename)
+            site.logo_filename = None
+
         _log_activity('site_edit', f'Edited site "{name}".', site_id=site.id)
         db.session.commit()
         flash(f'Updated site "{name}".', 'success')
@@ -2835,10 +3216,12 @@ def admin_site_delete(site_id):
         return redirect(url_for('admin_sites'))
     try:
         site_name = site.name
+        site_logo = site.logo_filename
         UserSite.query.filter_by(site_id=site.id).delete()
         db.session.delete(site)
         _log_activity('site_delete', f'Deleted site "{site_name}".')
         db.session.commit()
+        _delete_branding_logo(site_logo)
         flash(f'Deleted site "{site.name}".', 'success')
     except Exception as e:
         db.session.rollback()
@@ -2876,7 +3259,7 @@ def admin_reminders():
 @require_permission('admin')
 def admin_reminders_send():
     if not EMAIL_ENABLED:
-        flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
+        flash('Email isn\'t configured yet. Set SMTP_FROM_EMAIL (and SMTP_USERNAME/SMTP_PASSWORD if your relay requires auth) in .env to enable it.', 'info')
         return redirect(url_for('admin_reminders'))
 
     overdue = _overdue_assignments(_current_site_ids())
@@ -3073,7 +3456,7 @@ def admin_collection():
 @require_permission('loaners')
 def admin_loaners_send_reminders():
     if not EMAIL_ENABLED:
-        flash('Email isn\'t configured yet. Set SMTP_USERNAME and SMTP_PASSWORD in .env to enable it.', 'info')
+        flash('Email isn\'t configured yet. Set SMTP_FROM_EMAIL (and SMTP_USERNAME/SMTP_PASSWORD if your relay requires auth) in .env to enable it.', 'info')
         return redirect(url_for('admin_loaners'))
     sent, failed, skipped = _send_overdue_loaner_reminders(_current_site_ids())
     msg = f'Sent {sent} reminder{"s" if sent != 1 else ""}.'
@@ -3138,13 +3521,17 @@ def _checkin_loaner(asset_tag, condition_notes=None, site_ids=None):
 @require_permission('loaners')
 def admin_loaners_checkout():
     site_ids = _current_site_ids()
-    asset_tag = request.form.get('asset_tag', '').strip()
+    scan_value = request.form.get('asset_tag', '').strip()
     person_id = request.form.get('person_id', '').strip()
     due_date_str = request.form.get('due_date', '').strip()
     acknowledged_by = request.form.get('acknowledged_by', '').strip() or None
     person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
-    if not asset_tag or not person:
+    if not scan_value or not person:
         flash('Choose both a person and a loaner asset tag.', 'error')
+        return redirect(url_for('admin_loaners'))
+    asset_tag, _ = resolve_scan(scan_value)
+    if not asset_tag:
+        flash(f'"{scan_value}" was not found in the asset registry.', 'error')
         return redirect(url_for('admin_loaners'))
     due_date = None
     if due_date_str:

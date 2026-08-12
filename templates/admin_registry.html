@@ -71,7 +71,7 @@
       {% for row in pagination.items %}
       {% set asset = assets_by_tag.get(row.asset_tag) %}
       <tr>
-        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
+        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" class="tag-link"><code>{{ row.asset_tag }}</code></a></td>
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
         <td style="color:var(--muted);">{{ row.device_type|capitalize }}</td>

@@ -13,8 +13,17 @@
       --surface: #1a1d27;
       --surface2: #22263a;
       --border: #2e3352;
-      --accent: #4f7ef8;
-      --accent-dim: #2a4aaa;
+      /* Brand colors — auto-derived from one admin-picked primary color at
+         /admin/branding, see generate_palette() in app.py. Falls back to
+         these exact literals (matching the app's original look) until
+         branding is configured. */
+      --accent: {{ branding.accent }};
+      --accent-dim: {{ branding.accent_dim }};
+      --accent-text: {{ branding.accent_text }};
+      --secondary: {{ branding.secondary }};
+      --secondary-text: {{ branding.secondary_text }};
+      --tertiary: {{ branding.tertiary }};
+      --tertiary-text: {{ branding.tertiary_text }};
       --success: #22c55e;
       --warning: #f59e0b;
       --danger: #ef4444;
@@ -40,7 +49,8 @@
       flex-wrap: wrap;
       min-height: 56px;
     }
-    nav .brand { font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: .5px; }
+    nav .brand { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: .5px; }
+    nav .brand img { height: 28px; width: auto; display: block; }
     nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
     nav a:hover { color: var(--text); }
     nav .spacer { flex: 1; pointer-events: none; }
@@ -130,11 +140,12 @@
       transition: opacity .15s, transform .1s;
     }
     .btn:active { transform: scale(.97); }
-    .btn-primary  { background: var(--accent);   color: #fff; }
+    .btn-primary  { background: var(--accent);   color: var(--accent-text); }
     .btn-success  { background: var(--success);  color: #fff; }
     .btn-danger   { background: var(--danger);   color: #fff; }
     .btn-ghost    { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn:hover    { opacity: .88; }
+    .btn-primary:hover { background: var(--accent-dim); color: #fff; opacity: 1; }
     .btn:disabled { opacity: .4; cursor: not-allowed; }
     .btn:disabled:hover { opacity: .4; }
 
@@ -175,6 +186,18 @@
     .badge-red     { background: #7f1d1d55; color: var(--danger);  }
     .badge-blue    { background: #1e3a8a55; color: var(--accent);  }
 
+    /* Asset tag/serial links in tables — plain <a><code> has no explicit
+       color, so it falls back to the browser's default link color, which
+       reads very low-contrast against this app's dark background. Also
+       usable on a <button> (see admin_loaners.html) for tag/serial cells
+       that trigger a JS action instead of navigating. */
+    .tag-link {
+      background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+      color: var(--accent); text-decoration: none;
+    }
+    .tag-link:hover { text-decoration: underline; }
+    .tag-link code { color: inherit; }
+
     table { width: 100%; border-collapse: collapse; font-size: .88rem; }
     th { text-align: left; padding: .6rem .8rem; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600; }
     td { padding: .6rem .8rem; border-bottom: 1px solid var(--border); }
@@ -189,7 +212,10 @@
 </head>
 <body>
   <nav>
-    <span class="brand">📦 AssetTracker</span>
+    <span class="brand">
+      {% if branding.logo_url %}<img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}">{% else %}📦{% endif %}
+      {{ branding.app_name or 'AssetTracker' }}
+    </span>
     <a href="/">Home</a>
     <a href="/checkin">Check In</a>
     <a href="/checkout">Check Out</a>
@@ -270,6 +296,7 @@
           {% endif %}
           {% if is_super_admin() %}
           <a href="/admin/sites">Sites</a>
+          <a href="/admin/branding">Branding</a>
           <a href="/admin/google_setup">Google Sync Setup</a>
           {% endif %}
         </div>
@@ -322,6 +349,41 @@ document.addEventListener('click', function () {
 const isAdmin = window.location.pathname.startsWith('/admin');
 if (isAdmin) {
   let warningShown = false;
+  let secondsRemaining = null; // ticked down locally once per second; re-synced by the 15s poll
+
+  function renderCountdown() {
+    const warn = document.getElementById('session-warning');
+    const cd   = document.getElementById('session-countdown');
+    if (secondsRemaining === null) return;
+
+    if (secondsRemaining <= 120) {
+      warn.style.display = 'block';
+      const m = Math.floor(secondsRemaining / 60);
+      const s = secondsRemaining % 60;
+      cd.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+      if (!warningShown) {
+        warningShown = true;
+        // Play a soft warning tone
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const vol = ctx.createGain();
+          osc.connect(vol); vol.connect(ctx.destination);
+          osc.frequency.value = 440;
+          vol.gain.setValueAtTime(0.2, ctx.currentTime);
+          vol.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+          osc.start(); osc.stop(ctx.currentTime + 0.4);
+        } catch(e) {}
+      }
+    } else {
+      warn.style.display = 'none';
+      warningShown = false;
+    }
+
+    if (secondsRemaining <= 0) {
+      window.location.href = '/admin/login';
+    }
+  }
 
   async function checkSession() {
     try {
@@ -335,46 +397,36 @@ if (isAdmin) {
         return;
       }
 
-      const secs = data.seconds_remaining;
-      const warn = document.getElementById('session-warning');
-      const cd   = document.getElementById('session-countdown');
-
-      if (secs <= 120) {
-        warn.style.display = 'block';
-        const m = Math.floor(secs / 60);
-        const s = secs % 60;
-        cd.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
-        if (!warningShown) {
-          warningShown = true;
-          // Play a soft warning tone
-          try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const vol = ctx.createGain();
-            osc.connect(vol); vol.connect(ctx.destination);
-            osc.frequency.value = 440;
-            vol.gain.setValueAtTime(0.2, ctx.currentTime);
-            vol.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-            osc.start(); osc.stop(ctx.currentTime + 0.4);
-          } catch(e) {}
-        }
-      } else {
-        warn.style.display = 'none';
-        warningShown = false;
-      }
-
-      if (secs <= 0) {
-        window.location.href = '/admin/login';
-      }
+      secondsRemaining = data.seconds_remaining;
+      renderCountdown();
     } catch(e) {}
   }
 
   async function extendSession() {
-    // Hit any admin endpoint to reset the last_active timestamp
-    await fetch('/api/admin/session_status');
-    document.getElementById('session-warning').style.display = 'none';
-    warningShown = false;
+    try {
+      const res = await fetch('/api/admin/session_extend', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+      });
+      const data = await res.json();
+      if (!data.authenticated) {
+        window.location.href = '/admin/login';
+        return;
+      }
+      secondsRemaining = data.seconds_remaining;
+      warningShown = false;
+      document.getElementById('session-warning').style.display = 'none';
+    } catch(e) {}
   }
+
+  // Local 1-second ticker keeps the displayed countdown moving; the 15s
+  // poll below is what actually re-syncs it against the server's clock.
+  setInterval(function () {
+    if (secondsRemaining !== null && secondsRemaining > 0) {
+      secondsRemaining -= 1;
+      renderCountdown();
+    }
+  }, 1000);
 
   // Poll every 15 seconds
   checkSession();

@@ -8,12 +8,29 @@
 </div>
 
 <div class="card" style="max-width:480px;">
-  <form method="POST">
+  <form method="POST" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Name</label>
       <input name="name" value="{{ (form.name if form else (site.name if site else '')) }}" placeholder="e.g. Fox Creek Middle School" required />
     </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Logo</label>
+      {% if site and site.logo_filename %}
+      <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;padding:.6rem;background:var(--surface2);border:1px solid var(--border);border-radius:7px;">
+        <img src="{{ url_for('branding_logo', filename=site.logo_filename) }}" alt="{{ site.name }} logo" style="max-height:44px;max-width:160px;">
+        <label style="display:flex;align-items:center;gap:.4rem;margin-left:auto;font-size:.8rem;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" name="remove_logo" style="width:auto;" /> Remove
+        </label>
+      </div>
+      {% endif %}
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Optional — overrides the district default logo (set under <a href="/admin/branding">Branding</a>) just for this site's nav bar and login page.
+      </span>
+    </div>
+
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="google_loaner_autodisable_enabled" style="width:auto;"
              {{ 'checked' if (form.get('google_loaner_autodisable_enabled') if form else (site and site.google_loaner_autodisable_enabled)) }} />

@@ -15,12 +15,16 @@ COPY . .
 
 ENV FLASK_APP=app.py
 
-# Run as a non-root user
-RUN useradd --create-home --shell /bin/bash appuser \
+# gosu lets entrypoint.sh start as root just long enough to fix ownership on
+# a freshly-created Docker volume (see entrypoint.sh), then drop to appuser
+# before running any application code — same non-root end state as before,
+# just with a root-capable step ahead of it now.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash appuser \
     && mkdir -p /app/instance \
     && chown -R appuser:appuser /app \
     && chmod +x /app/entrypoint.sh
-USER appuser
 
 # Expose the port from app.py
 EXPOSE 8081
@@ -29,6 +33,8 @@ EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz', timeout=4).status == 200 else 1)"
 
-# entrypoint.sh runs `flask db upgrade` once, then execs gunicorn (3 workers, 60s timeout,
-# access log to stdout) — see entrypoint.sh for why the migration runs there and not per-worker.
+# Container starts as root (no USER directive) so entrypoint.sh can fix
+# volume ownership; it drops to appuser itself before running any app code —
+# see entrypoint.sh. It then runs `flask db upgrade` once and execs gunicorn
+# (3 workers, 60s timeout, access log to stdout).
 ENTRYPOINT ["/app/entrypoint.sh"]

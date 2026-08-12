@@ -7,6 +7,7 @@ google-credentials/
 # Database (You don't want to push your live data to GitHub!)
 assets.db
 *.sqlite3
+instance/
 
 # Python Cache
 __pycache__/

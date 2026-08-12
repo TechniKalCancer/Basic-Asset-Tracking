@@ -281,7 +281,7 @@ per-student assignment workflow:
   as Check In/Check Out) — a student searches for their own name, then scans/types the loaner's
   asset tag or serial. Checkin just needs the asset tag/serial; the system already knows who has
   it. Leaving the due date blank defaults to a 7-day loan.
-- Overdue loaners get an email automatically once an hour (if `SMTP_USERNAME`/`SMTP_PASSWORD` are
+- Overdue loaners get an email automatically once an hour (if `SMTP_FROM_EMAIL` is
   set) — no one has to remember to check. There's also a "Send Reminders Now" button on
   `/admin/loaners` for an immediate resend without waiting for the next hourly pass.
 
@@ -366,10 +366,12 @@ would be for the currently assigned student, counted across all their devices, a
 Assigning an asset now has an optional **Due Date**. `/admin/reminders` lists every open
 assignment whose due date has passed and lets you email each assigned person a reminder.
 
-- Configure `SMTP_USERNAME` / `SMTP_PASSWORD` in `.env` — see the comments in `.env.example`
-  for the Gmail App Password setup steps (2-Step Verification must be on first). Leaving them
-  blank is fine; the reminders page still shows what's overdue, the send button just stays
-  disabled.
+- Configure `SMTP_FROM_EMAIL` (and `SMTP_SERVER`/`SMTP_PORT`) in `.env` — see the comments in
+  `.env.example` for two setup paths: a personal/Workspace Gmail account with an App Password
+  (`SMTP_USERNAME`/`SMTP_PASSWORD`), or a Google Workspace SMTP relay
+  (`smtp-relay.gmail.com`) with no password at all if your admin has it IP-allowlisted. Leaving
+  `SMTP_FROM_EMAIL` blank is fine; the reminders page still shows what's overdue, the send
+  button just stays disabled.
 - `POST /admin/reminders/send` emails everyone currently overdue in one batch, skipping
   gracefully (with a summary count) if a person was deleted or a send fails, and records
   `reminder_sent_at` per assignment so you can see who's already been nudged.
@@ -492,6 +494,32 @@ Reminders and Sites entries carry a small red badge with the current overdue-ass
 count. The Admin Panel dashboard itself keeps its data-driven content (stat tiles, per-site
 breakdown, CSV upload) and promotes the overdue/orphan counts to alert banners at the top of the
 page, so that urgency signal isn't lost now that the button wall is gone.
+
+## Branding
+
+`/admin/branding` (superuser only) is the one place to set the app's logo, name, and color —
+everything else is derived automatically:
+
+- Set a **primary color** (a native color picker — no hex-code guessing required) and the app
+  generates the rest of the palette itself: a hover-state shade, secondary and tertiary accent
+  colors (via hue rotation off the primary), and a readable black-or-white text color for each,
+  picked automatically. Every generated color is checked against this app's dark background and
+  nudged lighter if needed until it clears WCAG AA (4.5:1 contrast) — so a school's real brand
+  red, which usually reads *too dark* against a near-black page, gets brightened just enough to
+  stay legible without an admin having to eyeball it. A live preview on the settings page shows
+  the exact result before you save.
+- Upload a **logo** (PNG/JPG/SVG/WebP) — shown in the nav bar and on the login page. This is the
+  district-wide default.
+- Individual sites can **override the logo** under `/admin/sites` — e.g. a middle school and high
+  school sharing one color scheme but each showing their own mascot. Whichever logo applies is
+  resolved automatically: a site-scoped admin login (or a kiosk device tied to a site) sees that
+  site's logo; anyone else (a superuser, or the login page before anyone's authenticated) sees the
+  district default.
+- Leaving everything unset keeps the app's original look exactly as it was before this feature
+  existed — there's no required setup step.
+- Uploaded logos live in a `branding-data` Docker volume (see `docker-compose.yml`), not `static/`,
+  since `static/` is baked into the image at build time and would lose anything uploaded there on
+  the next deploy.
 
 ## Production Hardening
 

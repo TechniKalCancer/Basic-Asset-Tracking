@@ -43,7 +43,7 @@
     </div>
     <div style="min-width:160px;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Asset Tag / Serial</label>
-      <input name="asset_tag" placeholder="Scan or type…" />
+      <input name="asset_tag" id="loanerAssetTagInput" placeholder="Scan or type…" />
     </div>
     <div style="min-width:150px;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Due Date (optional)</label>
@@ -58,6 +58,13 @@
   <script src="/static/js/person_search.js"></script>
   <script>
     initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+
+    function fillLoanerTag(value) {
+      const input = document.getElementById('loanerAssetTagInput');
+      input.value = value;
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      input.focus();
+    }
   </script>
 </div>
 
@@ -79,8 +86,12 @@
       {% for row in loaner_rows %}
       {% set checkout = open_checkouts.get(row.asset_tag) %}
       <tr>
-        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
-        <td>{{ row.serial_number or '—' }}</td>
+        <td><button type="button" class="tag-link" onclick="fillLoanerTag('{{ row.asset_tag }}')" title="Use this in the Check Out form above"><code>{{ row.asset_tag }}</code></button></td>
+        <td>
+          {% if row.serial_number %}
+          <button type="button" class="tag-link" onclick="fillLoanerTag('{{ row.serial_number }}')" title="Use this in the Check Out form above"><code>{{ row.serial_number }}</code></button>
+          {% else %}—{% endif %}
+        </td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
         {% if current_site_ids() is none or current_site_ids()|length > 1 %}
         <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>

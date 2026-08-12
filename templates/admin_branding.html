@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% block title %}Branding{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🎨 Branding</h1>
+  <span class="badge {{ 'badge-green' if settings.primary_color_raw else 'badge-yellow' }}">
+    {{ 'Configured' if settings.primary_color_raw else 'Using Default' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <p style="color:var(--muted);font-size:.9rem;margin-bottom:0;">
+    Set one logo and one primary color and this app builds the rest of the palette itself —
+    secondary and tertiary accent colors are automatically picked (via hue rotation off your
+    primary), and every color here is checked against this app's dark background and nudged
+    lighter if needed until it's comfortably readable (WCAG AA, 4.5:1 contrast). You never have to
+    pick a "readable enough" color by eye.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Logo &amp; Name</h2>
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">
+    This is the district-wide default, shown on the login page and in the nav bar for anyone not
+    scoped to a single site. Individual sites can override it with their own logo under
+    <a href="/admin/sites">Sites</a> — e.g. Fox Creek Middle School and Fox Creek High School can
+    each show their own mascot while sharing the same color scheme below.
+  </p>
+
+  {% if settings.logo_filename %}
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;padding:1rem;background:var(--surface2);border:1px solid var(--border);border-radius:7px;">
+    <img src="{{ url_for('branding_logo', filename=settings.logo_filename) }}" alt="Current logo" style="max-height:60px;max-width:220px;">
+    <form method="POST" style="margin-left:auto;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="remove_logo">
+      <button type="submit" class="btn btn-ghost" style="width:auto;">Remove Logo</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <form method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+
+    <div style="margin-bottom:1.2rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">App Name</label>
+      <input name="app_name" value="{{ settings.app_name or '' }}" placeholder="AssetTracker" />
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">
+        {{ 'Replace Logo' if settings.logo_filename else 'Logo' }}
+      </label>
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp" />
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Primary Color</label>
+      <div style="display:flex;align-items:center;gap:.8rem;">
+        <input type="color" id="primary_color" name="primary_color"
+               value="{{ settings.primary_color_raw or '#4f7ef8' }}"
+               style="width:60px;height:44px;padding:.2rem;cursor:pointer;" />
+        <span id="primary-hex" style="font-family:monospace;color:var(--muted);">{{ settings.primary_color_raw or '#4f7ef8' }}</span>
+      </div>
+    </div>
+
+    <h2 style="font-size:1rem;">Live Preview</h2>
+    <p style="color:var(--muted);font-size:.82rem;margin-bottom:.8rem;">
+      Updates as you move the color picker — this is exactly what gets saved.
+    </p>
+    <div id="branding-preview" style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+      <div style="flex:1;min-width:140px;">
+        <div id="sw-accent" style="border-radius:7px;padding:1rem;text-align:center;font-weight:600;">Primary</div>
+        <div style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:.3rem;">buttons, links</div>
+      </div>
+      <div style="flex:1;min-width:140px;">
+        <div id="sw-dim" style="border-radius:7px;padding:1rem;text-align:center;font-weight:600;color:#fff;">Hover</div>
+        <div style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:.3rem;">button hover</div>
+      </div>
+      <div style="flex:1;min-width:140px;">
+        <div id="sw-secondary" style="border-radius:7px;padding:1rem;text-align:center;font-weight:600;">Secondary</div>
+        <div style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:.3rem;">auto-selected</div>
+      </div>
+      <div style="flex:1;min-width:140px;">
+        <div id="sw-tertiary" style="border-radius:7px;padding:1rem;text-align:center;font-weight:600;">Tertiary</div>
+        <div style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:.3rem;">auto-selected</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:.8rem;">
+      <button type="submit" class="btn btn-primary">Save Branding</button>
+    </div>
+  </form>
+
+  <form method="POST" style="margin-top:.8rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="reset_color">
+    <button type="submit" class="btn btn-ghost" style="width:auto;font-size:.82rem;">Reset colors to default</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  const colorInput = document.getElementById('primary_color');
+  const hexLabel   = document.getElementById('primary-hex');
+  let debounceTimer;
+
+  async function updatePreview(color) {
+    hexLabel.textContent = color;
+    try {
+      const res = await fetch('/admin/branding/preview?color=' + encodeURIComponent(color));
+      if (!res.ok) return;
+      const p = await res.json();
+      const accent    = document.getElementById('sw-accent');
+      const dim       = document.getElementById('sw-dim');
+      const secondary = document.getElementById('sw-secondary');
+      const tertiary  = document.getElementById('sw-tertiary');
+      accent.style.background = p.accent;       accent.style.color = p.accent_text;
+      dim.style.background    = p.accent_dim;
+      secondary.style.background = p.secondary; secondary.style.color = p.secondary_text;
+      tertiary.style.background  = p.tertiary;  tertiary.style.color = p.tertiary_text;
+    } catch (e) {}
+  }
+
+  colorInput.addEventListener('input', function () {
+    clearTimeout(debounceTimer);
+    const color = colorInput.value;
+    debounceTimer = setTimeout(function () { updatePreview(color); }, 120);
+  });
+
+  updatePreview(colorInput.value);
+})();
+</script>
+{% endblock %}

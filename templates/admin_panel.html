@@ -17,6 +17,13 @@
   {% if google_loaner_autodisable_active %}
   <span class="badge badge-blue">🔒 Loaner Auto-Disable: Active</span>
   {% endif %}
+  {% if is_super_admin() %}
+  <a href="/admin/branding" style="text-decoration:none;">
+    <span class="badge {{ 'badge-green' if branding_configured else 'badge-yellow' }}">
+      🎨 Branding: {{ 'Configured' if branding_configured else 'Default' }}
+    </span>
+  </a>
+  {% endif %}
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
     ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>

@@ -2205,8 +2205,6 @@ def admin_person_reactivate(person_id):
     return redirect(url_for('admin_people', show='inactive'))
 
 
-@app.route('/admin/people/import', methods=['GET', 'POST'])
-@require_permission('people')
 def _parse_bool_csv(value):
     """Parses a lenient boolean CSV cell. Returns True/False, or None if the
     cell is blank/missing — None means 'leave the existing value alone' on an
@@ -2217,6 +2215,8 @@ def _parse_bool_csv(value):
     return value in ('true', 'yes', 'y', '1')
 
 
+@app.route('/admin/people/import', methods=['GET', 'POST'])
+@require_permission('people')
 def admin_people_import():
     """
     Bulk create-or-update people from a district roster CSV — the "everyone

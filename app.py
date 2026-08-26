@@ -105,8 +105,9 @@ ADMIN_PASSWORD_HASH = generate_password_hash(
 GOOGLE_SERVICE_ACCOUNT_FILE    = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')
 GOOGLE_ADMIN_IMPERSONATE_EMAIL = os.environ.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')
 GOOGLE_SYNC_ENABLED = bool(GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSONATE_EMAIL)
-GOOGLE_SCOPE_READONLY = 'https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly'
-GOOGLE_SCOPE_MANAGE   = 'https://www.googleapis.com/auth/admin.directory.device.chromeos'
+GOOGLE_SCOPE_READONLY      = 'https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly'
+GOOGLE_SCOPE_MANAGE        = 'https://www.googleapis.com/auth/admin.directory.device.chromeos'
+GOOGLE_SCOPE_USER_READONLY = 'https://www.googleapis.com/auth/admin.directory.user.readonly'
 
 # Remotely disabling a live device is a much bigger blast radius than the
 # read-only sync above, so it gets its own separate opt-in on top of
@@ -216,6 +217,42 @@ class EmailSettings(db.Model):
     updated_at                  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CustomField(db.Model):
+    """
+    A user-defined extra field on Person or AssetRegistry — lets an admin
+    capture data this app doesn't have a real column for (without a code
+    change/migration each time) via /admin/custom_fields. Values live in
+    that row's own custom_fields JSON column, keyed by field_key; this
+    table is just the field's definition (what exists, what it's called).
+    """
+    __tablename__ = 'custom_field'
+    id          = db.Column(db.Integer, primary_key=True)
+    entity_type = db.Column(db.String(20), nullable=False)  # 'person' | 'device'
+    field_key   = db.Column(db.String(60), nullable=False)  # slug, used as the JSON key
+    label       = db.Column(db.String(120), nullable=False)
+    field_type  = db.Column(db.String(20), nullable=False, default='text')  # 'text' | 'number' | 'date' | 'boolean'
+    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('entity_type', 'field_key', name='uq_custom_field_entity_key'),)
+
+
+class GoogleFieldMapping(db.Model):
+    """
+    Maps one field from a Google Directory API record onto one target field
+    on Person or AssetRegistry, applied by _run_google_sync() at
+    /admin/google_field_mapping. google_field is a dotted path into the raw
+    API response (e.g. 'name.givenName', 'orgUnitPath', 'phones.0.value') —
+    see _get_nested_value(). target_field is either a real column name (from
+    PERSON_SYNC_TARGET_FIELDS/DEVICE_SYNC_TARGET_FIELDS) or 'custom:<key>'
+    referencing a CustomField.
+    """
+    __tablename__ = 'google_field_mapping'
+    id           = db.Column(db.Integer, primary_key=True)
+    entity_type  = db.Column(db.String(20), nullable=False)  # 'person' | 'device'
+    google_field = db.Column(db.String(120), nullable=False)
+    target_field = db.Column(db.String(80), nullable=False)
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class UserSite(db.Model):
     """Join table: which sites a (non-super-admin) User account can see/manage."""
     __tablename__ = 'user_site'
@@ -292,6 +329,7 @@ class AssetRegistry(db.Model):
     purchase_date = db.Column(db.Date, nullable=True)
     purchase_cost = db.Column(db.Numeric(10, 2), nullable=True)
     warranty_expiration = db.Column(db.Date, nullable=True)
+    custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
 
     site = db.relationship('Site')
     device_model = db.relationship('DeviceModel')
@@ -370,6 +408,7 @@ class Person(db.Model):
     is_active  = db.Column(db.Boolean, nullable=False, default=True, index=True)  # False once graduated/withdrawn — keeps history/incidents intact instead of deleting
     insurance_opted_in = db.Column(db.Boolean, nullable=False, default=False)  # family paid for the device protection plan this year
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
 
     site = db.relationship('Site')
 
@@ -1027,6 +1066,134 @@ def set_chromeos_device_enabled(serial_number, enabled):
     ).execute()
 
 
+# ─── Configurable Google field sync (People + Devices) ─────────────────────────
+# A generalized version of sync_chromeos_device_from_google() above (which
+# only ever pulls 3 fixed fields for one device at a time): an admin defines
+# CustomField columns and GoogleFieldMapping rows at /admin/google_field_mapping,
+# then _run_google_people_sync()/_run_google_device_sync() pull every user or
+# ChromeOS device from Workspace, match by email/serial number, and apply
+# whatever mappings exist onto the matched Person/AssetRegistry row. Deliberately
+# match-only — never creates a new Person/AssetRegistry row from Google data
+# alone, since the SIS roster (not Google's pre-provisioned accounts) is this
+# district's source of truth for who's actually enrolled.
+
+PERSON_SYNC_TARGET_FIELDS = {
+    'first_name': 'First Name', 'last_name': 'Last Name',
+    'role': 'Role', 'department': 'Department',
+}
+DEVICE_SYNC_TARGET_FIELDS = {
+    'description': 'Description', 'device_type': 'Device Type',
+}
+
+
+def _get_nested_value(data, dotted_path):
+    """Resolves a dotted path like 'name.givenName' or 'phones.0.value'
+    against a nested dict/list (as returned by the Google API). Returns
+    None if any segment along the way is missing, rather than raising —
+    a mapping referencing a field a given record just doesn't have is a
+    normal, expected case (e.g. not everyone has a phones entry)."""
+    current = data
+    for part in dotted_path.split('.'):
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+
+def _apply_field_mappings(google_record, obj, mappings):
+    """Applies every mapping onto obj (a Person or AssetRegistry instance)
+    from the raw Google record. Real-column targets are set directly;
+    'custom:<key>' targets go into obj.custom_fields. Returns True if
+    anything actually changed (so the caller can count real updates, not
+    just matches). Does not commit."""
+    changed = False
+    custom = dict(obj.custom_fields or {})
+    for m in mappings:
+        value = _get_nested_value(google_record, m.google_field)
+        if value is None:
+            continue
+        value = str(value)
+        if m.target_field.startswith('custom:'):
+            key = m.target_field.split(':', 1)[1]
+            if custom.get(key) != value:
+                custom[key] = value
+                changed = True
+        elif hasattr(obj, m.target_field) and getattr(obj, m.target_field) != value:
+            setattr(obj, m.target_field, value)
+            changed = True
+    if changed:
+        obj.custom_fields = custom
+    return changed
+
+
+def _run_google_people_sync():
+    """Pulls every Google Workspace user, matches to an existing Person by
+    email, and applies each entity_type='person' GoogleFieldMapping onto the
+    match. Returns (matched, updated, unmatched_google_accounts)."""
+    mappings = GoogleFieldMapping.query.filter_by(entity_type='person').all()
+    if not mappings:
+        return 0, 0, 0
+    service = _google_directory_service([GOOGLE_SCOPE_USER_READONLY])
+    matched = updated = unmatched = 0
+    page_token = None
+    while True:
+        response = service.users().list(
+            customer='my_customer', maxResults=200, pageToken=page_token,
+        ).execute()
+        for u in response.get('users', []):
+            email = u.get('primaryEmail')
+            person = Person.query.filter_by(email=email).first() if email else None
+            if not person:
+                unmatched += 1
+                continue
+            matched += 1
+            if _apply_field_mappings(u, person, mappings):
+                updated += 1
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
+    db.session.commit()
+    return matched, updated, unmatched
+
+
+def _run_google_device_sync():
+    """Pulls every Google Workspace ChromeOS device, matches to an existing
+    AssetRegistry row by serial number, and applies each entity_type='device'
+    GoogleFieldMapping onto the match. Returns (matched, updated, unmatched)."""
+    mappings = GoogleFieldMapping.query.filter_by(entity_type='device').all()
+    if not mappings:
+        return 0, 0, 0
+    service = _google_directory_service([GOOGLE_SCOPE_READONLY])
+    matched = updated = unmatched = 0
+    page_token = None
+    while True:
+        response = service.chromeosdevices().list(
+            customerId='my_customer', maxResults=200, pageToken=page_token,
+        ).execute()
+        for d in response.get('chromeosdevices', []):
+            serial = d.get('serialNumber')
+            row = AssetRegistry.query.filter_by(serial_number=serial).first() if serial else None
+            if not row:
+                unmatched += 1
+                continue
+            matched += 1
+            if _apply_field_mappings(d, row, mappings):
+                updated += 1
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
+    db.session.commit()
+    return matched, updated, unmatched
+
+
 def _sync_loaner_google_state(registry_row, enabled):
     """
     Best-effort Google enable/disable for a loaner Chromebook on checkout/checkin.
@@ -1518,6 +1685,8 @@ NAV_SECTION_PREFIXES = [
     ('/admin/branding', 'admin'),
     ('/admin/emails', 'admin'),
     ('/admin/google_setup', 'admin'),
+    ('/admin/custom_fields', 'admin'),
+    ('/admin/google_field_mapping', 'admin'),
     ('/admin', 'admin'),
     ('/checkin', 'home'),
     ('/checkout', 'home'),
@@ -2806,6 +2975,7 @@ def admin_person_new():
 def admin_person_edit(person_id):
     site_ids = _current_site_ids()
     person = _scope_people(Person.query, site_ids).filter_by(id=person_id).first_or_404()
+    custom_field_labels = {f.field_key: f.label for f in CustomField.query.filter_by(entity_type='person').all()}
 
     if request.method == 'POST':
         values = _person_form_values()
@@ -2813,7 +2983,7 @@ def admin_person_edit(person_id):
         if error:
             flash(error, 'error')
             return render_template('admin_person_form.html', person=person, form=values,
-                                    sites=_sites_for_actor(site_ids))
+                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
 
         try:
             for field, value in values.items():
@@ -2826,9 +2996,10 @@ def admin_person_edit(person_id):
             db.session.rollback()
             flash(f'Could not update person: {e}', 'error')
             return render_template('admin_person_form.html', person=person, form=values,
-                                    sites=_sites_for_actor(site_ids))
+                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
 
-    return render_template('admin_person_form.html', person=person, form=None, sites=_sites_for_actor(site_ids))
+    return render_template('admin_person_form.html', person=person, form=None,
+                           sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
 
 
 def _release_person_assets(person, condition_in):
@@ -3245,13 +3416,14 @@ def admin_asset_assign(asset_tag):
         .order_by(Repair.returned_at.desc()).all()
 
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
+    custom_field_labels = {f.field_key: f.label for f in CustomField.query.filter_by(entity_type='device').all()}
 
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
                            history=history, combined_history=combined_history, events=events, incidents=incidents,
                            current_person_incident_count=current_person_incident_count,
                            repair_categories=repair_categories,
                            open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
-                           asset_statuses=ASSET_STATUSES,
+                           asset_statuses=ASSET_STATUSES, custom_field_labels=custom_field_labels,
                            now=datetime.utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
@@ -3560,6 +3732,163 @@ def admin_google_setup_test():
     except Exception as e:
         flash(f'Connection failed: {e}', 'error')
     return redirect(url_for('admin_google_setup'))
+
+
+def _slugify_field_key(label):
+    """Turns a human label like 'Employee ID' into a safe JSON-key/slug like
+    'employee_id' — lowercase, non-alphanumerics collapsed to underscores,
+    trimmed. Used so custom fields don't need a separate raw-key input."""
+    slug = re.sub(r'[^a-z0-9]+', '_', label.strip().lower()).strip('_')
+    return slug or 'field'
+
+
+@app.route('/admin/custom_fields')
+@require_super_admin
+def admin_custom_fields():
+    entity_type = request.args.get('entity', 'person')
+    if entity_type not in ('person', 'device'):
+        entity_type = 'person'
+    fields = CustomField.query.filter_by(entity_type=entity_type).order_by(CustomField.label).all()
+    return render_template('admin_custom_fields.html', fields=fields, entity_type=entity_type)
+
+
+@app.route('/admin/custom_fields/new', methods=['GET', 'POST'])
+@require_super_admin
+def admin_custom_field_new():
+    entity_type = request.args.get('entity', 'person')
+    if entity_type not in ('person', 'device'):
+        entity_type = 'person'
+    if request.method == 'POST':
+        entity_type = request.form.get('entity_type', entity_type)
+        label = request.form.get('label', '').strip()
+        field_type = request.form.get('field_type', 'text').strip()
+        if field_type not in ('text', 'number', 'date', 'boolean'):
+            field_type = 'text'
+        if not label:
+            flash('Give the field a label.', 'error')
+            return render_template('admin_custom_field_form.html', entity_type=entity_type, form=request.form)
+
+        field_key = _slugify_field_key(label)
+        if CustomField.query.filter_by(entity_type=entity_type, field_key=field_key).first():
+            flash(f'A field with key "{field_key}" already exists for this entity type.', 'error')
+            return render_template('admin_custom_field_form.html', entity_type=entity_type, form=request.form)
+
+        db.session.add(CustomField(entity_type=entity_type, field_key=field_key, label=label, field_type=field_type))
+        _log_activity('custom_field_add', f'Added custom field "{label}" ({entity_type}).')
+        db.session.commit()
+        flash(f'Field "{label}" added.', 'success')
+        return redirect(url_for('admin_custom_fields', entity=entity_type))
+
+    return render_template('admin_custom_field_form.html', entity_type=entity_type, form=None)
+
+
+@app.route('/admin/custom_fields/<int:field_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_custom_field_delete(field_id):
+    """Deletes a custom field's definition and any mappings that fed it —
+    existing values already written into rows' custom_fields JSON are left
+    alone (harmless orphaned data, not worth a bulk cleanup pass)."""
+    field = CustomField.query.get_or_404(field_id)
+    target = f'custom:{field.field_key}'
+    GoogleFieldMapping.query.filter_by(entity_type=field.entity_type, target_field=target).delete()
+    _log_activity('custom_field_delete', f'Deleted custom field "{field.label}" ({field.entity_type}).')
+    db.session.delete(field)
+    db.session.commit()
+    flash('Field deleted.', 'success')
+    return redirect(url_for('admin_custom_fields', entity=field.entity_type))
+
+
+@app.route('/admin/google_field_mapping')
+@require_super_admin
+def admin_google_field_mapping():
+    entity_type = request.args.get('entity', 'person')
+    if entity_type not in ('person', 'device'):
+        entity_type = 'person'
+    mappings = GoogleFieldMapping.query.filter_by(entity_type=entity_type).order_by(GoogleFieldMapping.google_field).all()
+    custom_fields = CustomField.query.filter_by(entity_type=entity_type).order_by(CustomField.label).all()
+    real_fields = PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS
+    return render_template('admin_google_field_mapping.html', mappings=mappings, entity_type=entity_type,
+                           custom_fields=custom_fields, real_fields=real_fields,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/google_field_mapping/new', methods=['GET', 'POST'])
+@require_super_admin
+def admin_google_field_mapping_new():
+    entity_type = request.args.get('entity', 'person')
+    if entity_type not in ('person', 'device'):
+        entity_type = 'person'
+    custom_fields = CustomField.query.filter_by(entity_type=entity_type).order_by(CustomField.label).all()
+    real_fields = PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS
+
+    if request.method == 'POST':
+        entity_type = request.form.get('entity_type', entity_type)
+        google_field = request.form.get('google_field', '').strip()
+        target_field = request.form.get('target_field', '').strip()
+        valid_targets = set((PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS).keys())
+        valid_targets |= {f'custom:{c.field_key}' for c in CustomField.query.filter_by(entity_type=entity_type).all()}
+
+        if not google_field:
+            flash('Enter the Google field to pull from (e.g. orgUnitPath).', 'error')
+            return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
+                                   custom_fields=custom_fields, real_fields=real_fields, form=request.form)
+        if target_field not in valid_targets:
+            flash('Choose a valid target field.', 'error')
+            return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
+                                   custom_fields=custom_fields, real_fields=real_fields, form=request.form)
+
+        db.session.add(GoogleFieldMapping(entity_type=entity_type, google_field=google_field, target_field=target_field))
+        _log_activity('google_field_mapping_add', f'Mapped Google "{google_field}" -> "{target_field}" ({entity_type}).')
+        db.session.commit()
+        flash('Mapping added.', 'success')
+        return redirect(url_for('admin_google_field_mapping', entity=entity_type))
+
+    return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
+                           custom_fields=custom_fields, real_fields=real_fields, form=None)
+
+
+@app.route('/admin/google_field_mapping/<int:mapping_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_google_field_mapping_delete(mapping_id):
+    mapping = GoogleFieldMapping.query.get_or_404(mapping_id)
+    entity_type = mapping.entity_type
+    _log_activity('google_field_mapping_delete', f'Removed mapping "{mapping.google_field}" -> "{mapping.target_field}" ({entity_type}).')
+    db.session.delete(mapping)
+    db.session.commit()
+    flash('Mapping removed.', 'success')
+    return redirect(url_for('admin_google_field_mapping', entity=entity_type))
+
+
+@app.route('/admin/google_field_mapping/sync/people', methods=['POST'])
+@require_super_admin
+def admin_google_sync_people():
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
+        return redirect(url_for('admin_google_field_mapping', entity='person'))
+    try:
+        matched, updated, unmatched = _run_google_people_sync()
+        _log_activity('google_field_sync', f'Synced People from Google: {matched} matched, {updated} updated.')
+        flash(f'{matched} matched, {updated} updated. {unmatched} Google account(s) had no matching Person by email.',
+              'success' if matched else 'info')
+    except Exception as e:
+        flash(f'Sync failed: {e}', 'error')
+    return redirect(url_for('admin_google_field_mapping', entity='person'))
+
+
+@app.route('/admin/google_field_mapping/sync/devices', methods=['POST'])
+@require_super_admin
+def admin_google_sync_devices():
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
+        return redirect(url_for('admin_google_field_mapping', entity='device'))
+    try:
+        matched, updated, unmatched = _run_google_device_sync()
+        _log_activity('google_field_sync', f'Synced Devices from Google: {matched} matched, {updated} updated.')
+        flash(f'{matched} matched, {updated} updated. {unmatched} Google device(s) had no matching registry serial number.',
+              'success' if matched else 'info')
+    except Exception as e:
+        flash(f'Sync failed: {e}', 'error')
+    return redirect(url_for('admin_google_field_mapping', entity='device'))
 
 
 # ─── Kiosk Devices ──────────────────────────────────────────────────────────────
@@ -5796,6 +6125,8 @@ ACTIVITY_LOG_ACTIONS = [
     'asset_number_range_add', 'asset_number_range_edit', 'asset_number_range_delete',
     'repair_category_add', 'repair_category_edit', 'repair_category_delete',
     'branding_edit', 'email_template_edit',
+    'custom_field_add', 'custom_field_delete',
+    'google_field_mapping_add', 'google_field_mapping_delete', 'google_field_sync',
 ]
 
 

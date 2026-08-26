@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Add Custom Field{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🧩 Add Custom Field</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/custom_fields?entity={{ entity_type }}" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div style="margin-bottom:1.2rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Applies To</label>
+      <select name="entity_type">
+        <option value="person" {{ 'selected' if entity_type == 'person' }}>People</option>
+        <option value="device" {{ 'selected' if entity_type == 'device' }}>Devices</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:1.2rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Label</label>
+      <input name="label" value="{{ form.label if form else '' }}" placeholder="e.g. Employee ID" autofocus required />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        The field's key (used internally and in Google Field Mapping) is generated from this automatically.
+      </span>
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Type</label>
+      <select name="field_type">
+        <option value="text" {{ 'selected' if form and form.field_type == 'text' }}>Text</option>
+        <option value="number" {{ 'selected' if form and form.field_type == 'number' }}>Number</option>
+        <option value="date" {{ 'selected' if form and form.field_type == 'date' }}>Date</option>
+        <option value="boolean" {{ 'selected' if form and form.field_type == 'boolean' }}>Yes / No</option>
+      </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Add Field</button>
+  </form>
+</div>
+{% endblock %}

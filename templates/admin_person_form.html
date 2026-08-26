@@ -58,4 +58,21 @@
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if person else 'Add Person' }}</button>
   </form>
 </div>
+
+{% if person and person.custom_fields %}
+<div class="card" style="max-width:480px;">
+  <h2 style="margin-top:0;font-size:1rem;">🧩 Custom Fields</h2>
+  <p style="color:var(--muted);font-size:.8rem;margin-bottom:1rem;">
+    Synced from Google — configure what's pulled in at <a href="/admin/google_field_mapping?entity=person">Google Field Mapping</a>.
+  </p>
+  <table>
+    {% for key, value in person.custom_fields.items() %}
+    <tr>
+      <td style="color:var(--muted);width:160px;">{{ custom_field_labels.get(key, key) }}</td>
+      <td>{{ value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 {% endblock %}

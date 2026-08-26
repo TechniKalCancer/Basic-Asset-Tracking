@@ -415,6 +415,20 @@
       Sync from Google{{ '' if google_sync_enabled else ' (not configured)' }}
     </button>
   </form>
+
+  {% if registry_row.custom_fields %}
+  <table style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+    {% for key, value in registry_row.custom_fields.items() %}
+    <tr>
+      <td style="color:var(--muted);width:140px;">{{ custom_field_labels.get(key, key) }}</td>
+      <td>{{ value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p style="color:var(--muted);font-size:.78rem;margin-top:.5rem;">
+    🧩 Bulk-synced via <a href="/admin/google_field_mapping?entity=device">Google Field Mapping</a>.
+  </p>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:480px;">

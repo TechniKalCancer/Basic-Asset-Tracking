@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Add Field Mapping{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔗 Add Field Mapping</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/google_field_mapping?entity={{ entity_type }}" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div style="margin-bottom:1.2rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Applies To</label>
+      <select name="entity_type">
+        <option value="person" {{ 'selected' if entity_type == 'person' }}>People</option>
+        <option value="device" {{ 'selected' if entity_type == 'device' }}>Devices</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom:1.2rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Google Field</label>
+      <input name="google_field" value="{{ form.google_field if form else '' }}" placeholder="e.g. orgUnitPath" autofocus required />
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Target Field</label>
+      <select name="target_field" required>
+        <optgroup label="Built-in">
+          {% for key, label in real_fields.items() %}
+          <option value="{{ key }}" {{ 'selected' if form and form.target_field == key }}>{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% if custom_fields %}
+        <optgroup label="Custom Fields">
+          {% for c in custom_fields %}
+          <option value="custom:{{ c.field_key }}" {{ 'selected' if form and form.target_field == 'custom:' + c.field_key }}>{{ c.label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Add Mapping</button>
+  </form>
+</div>
+{% endblock %}

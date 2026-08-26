@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}Google Field Mapping{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔗 Google Field Mapping</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/custom_fields" class="btn btn-ghost">🧩 Custom Fields</a>
+  <a href="/admin/google_setup" class="btn btn-ghost">Google Sync Setup</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Map any field from a Google Workspace user or Chrome device record onto a field here — a built-in
+  column, or one you define under <a href="/admin/custom_fields">Custom Fields</a>. Running a sync
+  pulls every {{ 'user' if entity_type == 'person' else 'ChromeOS device' }} from Google and applies
+  these mappings onto whichever {{ 'Person' if entity_type == 'person' else 'device' }} record matches
+  by {{ 'email' if entity_type == 'person' else 'serial number' }} — it never creates new records, only
+  fills in extra data on ones that already exist here.
+</p>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1.5rem;">
+  <a href="?entity=person" class="btn {{ 'btn-primary' if entity_type == 'person' else 'btn-ghost' }}">People</a>
+  <a href="?entity=device" class="btn {{ 'btn-primary' if entity_type == 'device' else 'btn-ghost' }}">Devices</a>
+</div>
+
+<div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+  <div>
+    <strong>Run this sync now</strong>
+    <p style="color:var(--muted);font-size:.82rem;margin-top:.2rem;">
+      Pulls all {{ 'Google users' if entity_type == 'person' else 'Chrome devices' }} and applies the
+      mappings below. Can take a minute on a large fleet/roster.
+    </p>
+  </div>
+  <span class="spacer" style="flex:1;"></span>
+  <form method="POST" action="/admin/google_field_mapping/sync/{{ 'people' if entity_type == 'person' else 'devices' }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not google_sync_enabled or not mappings }}>
+      ▶️ Run Sync Now{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">➕ Add a Mapping</h2>
+  <form method="POST" action="/admin/google_field_mapping/new" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="entity_type" value="{{ entity_type }}">
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Google Field</label>
+      <input name="google_field" placeholder="e.g. orgUnitPath" required />
+    </div>
+    <div style="min-width:200px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Target Field</label>
+      <select name="target_field" required>
+        <optgroup label="Built-in">
+          {% for key, label in real_fields.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% if custom_fields %}
+        <optgroup label="Custom Fields">
+          {% for c in custom_fields %}
+          <option value="custom:{{ c.field_key }}">{{ c.label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Mapping</button>
+    {% if not custom_fields %}
+    <a href="/admin/custom_fields/new?entity={{ entity_type }}" class="btn btn-ghost">+ New Custom Field</a>
+    {% endif %}
+  </form>
+
+  <details style="margin-top:1rem;">
+    <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">Common Google field names</summary>
+    <div style="margin-top:.6rem;font-size:.8rem;color:var(--muted);line-height:1.9;">
+      {% if entity_type == 'person' %}
+        <code>primaryEmail</code> · <code>name.givenName</code> · <code>name.familyName</code> ·
+        <code>orgUnitPath</code> · <code>suspended</code> · <code>lastLoginTime</code> ·
+        <code>phones.0.value</code> · <code>organizations.0.title</code> · <code>organizations.0.department</code>
+      {% else %}
+        <code>serialNumber</code> · <code>model</code> · <code>orgUnitPath</code> · <code>annotatedLocation</code> ·
+        <code>annotatedUser</code> · <code>annotatedAssetId</code> · <code>notes</code> · <code>osVersion</code> ·
+        <code>lastSync</code> · <code>recentUsers.0.email</code> · <code>lastKnownNetwork.0.ipAddress</code>
+      {% endif %}
+    </div>
+  </details>
+</div>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Google Field</th>
+        <th>Target Field</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in mappings %}
+      <tr>
+        <td><code>{{ m.google_field }}</code></td>
+        <td>
+          {% if m.target_field.startswith('custom:') %}
+            🧩 {{ custom_fields|selectattr('field_key', 'equalto', m.target_field[7:])|map(attribute='label')|first or m.target_field }}
+          {% else %}
+            {{ real_fields.get(m.target_field, m.target_field) }}
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/google_field_mapping/{{ m.id }}/delete" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">No mappings yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

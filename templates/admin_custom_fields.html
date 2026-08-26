@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Custom Fields{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🧩 Custom Fields</h1>
+  <span class="badge badge-blue">{{ fields|length }} total</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/custom_fields/new?entity={{ entity_type }}" class="btn btn-primary">+ Add Field</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Extra fields FoxDesk doesn't have a built-in column for — once added here, they show up as a target
+  in <a href="/admin/google_field_mapping">Google Field Mapping</a> and their values appear on the
+  matching Person/Device page whenever something's actually been synced into them.
+</p>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1.5rem;">
+  <a href="?entity=person" class="btn {{ 'btn-primary' if entity_type == 'person' else 'btn-ghost' }}">People</a>
+  <a href="?entity=device" class="btn {{ 'btn-primary' if entity_type == 'device' else 'btn-ghost' }}">Devices</a>
+</div>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Label</th>
+        <th>Field Key</th>
+        <th>Type</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in fields %}
+      <tr>
+        <td>{{ f.label }}</td>
+        <td><code>{{ f.field_key }}</code></td>
+        <td style="color:var(--muted);">{{ f.field_type|capitalize }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/custom_fields/{{ f.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('Delete the \'{{ f.label }}\' field? Any Google field mapping using it is removed too. Values already synced onto records are left alone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">
+        No custom fields yet for {{ 'People' if entity_type == 'person' else 'Devices' }}.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,6 +1,14 @@
-# Asset Tracking System
+# FoxDesk
 
-This is a K-12-focused asset tracking system built with Flask, SQLAlchemy, and JavaScript — think a lightweight, self-hosted alternative to IncidentIQ for a school's Chromebook fleet (and chargers, iPads, hotspots, etc). It checks devices in/out with a full history, keeps a student/staff directory, bulk-assigns a whole roster to their devices at once, prints Dymo labels (with an optional second charger label), sends overdue-return email reminders, supports physical inventory audits, and logs damage incidents per student.
+FoxDesk is a self-hosted IT operations platform for K-12 schools, built with Flask, SQLAlchemy, and
+JavaScript — a lightweight alternative to IncidentIQ for a district's Chromebook fleet (and
+chargers, iPads, hotspots, and anything else with an asset tag). It covers the full lifecycle of a
+device from purchase to retirement: check devices in/out with a full history, run a help-desk
+ticket queue with categories and per-category pricing, manage a short-term loaner pool that
+auto-detects checkout vs. check-in from a single scan, log damage/repair incidents against a
+catalog of standard repair types and print a real invoice for what's owed, track RMA repairs sent
+to a vendor, and keep a student/staff directory in sync with Google Workspace. Add it up and it's
+the one place staff go to check a device out, open a ticket, or find out who has what.
 
 ## Quickstart (5 minutes)
 

@@ -1,0 +1,48 @@
+{#
+Shared table helpers used by every admin list page — sortable column headers
+and a search box — both built off `request.args` directly (Flask injects
+`request` into every template) so they work on any page without the caller
+needing to enumerate that page's specific filter params.
+#}
+
+{% macro sort_link(col, label) %}
+{% set args = request.args.to_dict() %}
+{% set new_dir = 'desc' if request.args.get('sort') == col and request.args.get('dir', 'asc') == 'asc' else 'asc' %}
+{% set _ = args.update({'sort': col, 'dir': new_dir}) %}
+{% set _ = args.pop('page', None) %}
+<a href="?{{ args|urlencode }}">{{ label }}{% if request.args.get('sort') == col %}<span class="sort-arrow">{{ '▲' if request.args.get('dir', 'asc') == 'asc' else '▼' }}</span>{% endif %}</a>
+{%- endmacro %}
+
+{% macro search_box(placeholder, extra_html='') %}
+<form method="GET" style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.2rem;align-items:center;">
+  {% for key, value in request.args.items() %}
+    {% if key not in ['q', 'page'] %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
+  {% endfor %}
+  <input type="text" name="q" value="{{ request.args.get('q', '') }}" placeholder="{{ placeholder }}" style="flex:1;min-width:220px;max-width:400px;" />
+  {{ extra_html|safe }}
+  <button type="submit" class="btn btn-ghost">Search</button>
+  {% if request.args.get('q') %}
+  {% set clear_args = request.args.to_dict() %}
+  {% set _ = clear_args.pop('q', None) %}
+  {% set _ = clear_args.pop('page', None) %}
+  <a href="?{{ clear_args|urlencode }}" class="btn btn-ghost">Clear</a>
+  {% endif %}
+</form>
+{%- endmacro %}
+
+{#
+Per-column instant filter row — a small text box under each column header
+that narrows the rows already on the page as you type (no server round
+trip, see the tr.filter-row JS in base.html). Complements search_box above,
+which searches the full server-side dataset instead of just the loaded page.
+total_cols is the header row's total <th> count (including the trailing
+actions column); skip is a list of 0-based column indices to leave blank
+(anything not worth filtering on — badges, an actions column, etc).
+#}
+{% macro filter_row(total_cols, skip=[]) %}
+<tr class="filter-row">
+  {% for i in range(total_cols) %}
+  <th>{% if i not in skip %}<input type="text" class="col-filter" data-col-index="{{ i }}" placeholder="Filter…" />{% endif %}</th>
+  {% endfor %}
+</tr>
+{%- endmacro %}

@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
-  <title>{% block title %}Asset Tracker{% endblock %}</title>
+  <title>{% block title %}FoxDesk{% endblock %}</title>
+  {% if branding.favicon_url %}<link rel="icon" href="{{ branding.favicon_url }}">{% endif %}
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -28,7 +29,7 @@
       --warning: #f59e0b;
       --danger: #ef4444;
       --text: #e8eaf6;
-      --muted: #6b7280;
+      --muted: #99a1bf;
       --radius: 10px;
     }
 
@@ -51,35 +52,41 @@
     }
     nav .brand { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; font-size: 1.1rem; color: var(--accent); letter-spacing: .5px; }
     nav .brand img { height: 28px; width: auto; display: block; }
+    /* A plate behind an uploaded logo, so a logo drawn for a light or dark
+       background stays readable regardless of which one it lands on — set
+       per-district at /admin/branding since we can't know a logo's own
+       color scheme ahead of time. */
+    .logo-plate-light, .logo-plate-dark { border-radius: 6px; padding: .3rem .6rem; display: inline-flex; align-items: center; }
+    .logo-plate-light { background: #ffffff; }
+    .logo-plate-dark { background: #0f1117; }
     nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
     nav a:hover { color: var(--text); }
     nav .spacer { flex: 1; pointer-events: none; }
     nav .logout { color: var(--danger) !important; border: 1px solid var(--danger); border-radius: 6px; padding: .25rem .7rem; font-size: .82rem; }
     nav .logout:hover { background: var(--danger); color: #fff !important; }
     nav .nav-search { display: flex; }
-    .nav-dropdown { position: relative; }
-    .nav-dropdown > button {
-      background: none; border: none; font-family: inherit; cursor: pointer;
-      color: var(--muted); font-size: .9rem; padding: 0; display: flex; align-items: center; gap: .3rem;
-      transition: color .15s;
+    nav { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
+    .nav-top {
+      padding: .6rem 1.5rem; display: flex; align-items: center; gap: 1.6rem; flex-wrap: wrap; min-height: 56px;
     }
-    .nav-dropdown > button:hover, .nav-dropdown.open > button { color: var(--text); }
-    .nav-dropdown-badge {
+    .nav-tabs { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
+    .nav-tab {
+      display: flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .9rem;
+      padding: .4rem .8rem; border-radius: 7px; transition: color .15s, background .15s;
+    }
+    .nav-tab:hover { color: var(--text); background: var(--surface2); }
+    .nav-tab.active { color: var(--accent-text); background: var(--accent); }
+    .nav-tab-badge {
       background: var(--danger); color: #fff; border-radius: 999px; font-size: .68rem;
       font-weight: 700; padding: 0 .4rem; line-height: 1.4;
     }
-    .nav-dropdown-menu {
-      display: none; position: absolute; top: 100%; left: 0; margin-top: .7rem;
-      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
-      min-width: 210px; padding: .4rem; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    .nav-sub {
+      display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
+      padding: .55rem 1.5rem; background: var(--surface2); border-top: 1px solid var(--border);
     }
-    .nav-dropdown.open .nav-dropdown-menu { display: block; }
-    .nav-dropdown-menu a {
-      display: flex; justify-content: space-between; gap: .5rem; align-items: center;
-      padding: .5rem .7rem; border-radius: 6px; font-size: .88rem; color: var(--text);
-    }
-    .nav-dropdown-menu a:hover { background: var(--surface); color: var(--accent); }
-    .nav-dropdown-menu .nav-divider { height: 1px; background: var(--border); margin: .4rem .2rem; }
+    .nav-sub a { font-size: .85rem; }
+    .nav-sub a:hover { color: var(--accent); }
+    .nav-sub-divider { width: 1px; align-self: stretch; background: var(--border); }
     nav .nav-search input {
       width: 220px;
       padding: .35rem .7rem;
@@ -103,7 +110,7 @@
     #session-warning {
       display: none;
       position: fixed;
-      top: 56px; left: 0; right: 0;
+      top: 0; left: 0; right: 0;
       background: #78350f;
       border-bottom: 2px solid var(--warning);
       color: var(--warning);
@@ -115,7 +122,7 @@
     }
     #session-warning a { color: #fff; margin-left: .5rem; text-decoration: underline; cursor: pointer; }
 
-    .container { max-width: 1000px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 2rem 1.5rem; }
 
     h1 { font-size: 1.6rem; margin-bottom: 1.5rem; }
     h2 { font-size: 1.2rem; margin-bottom: 1rem; }
@@ -204,6 +211,51 @@
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: var(--surface2); }
 
+    /* Sortable column headers — used by list pages that support ?sort=&dir= */
+    th.sortable a { display: flex; align-items: center; gap: .3rem; color: inherit; white-space: nowrap; }
+    th.sortable a:hover { color: var(--text); }
+    .sort-arrow { color: var(--accent); font-size: .7rem; }
+
+    /* Compact per-row "⋮" action menu — keeps secondary row actions out of
+       the table's horizontal flow so wide tables fit without scrolling.
+       .row-menu-items uses position:fixed (JS sets its top/right on open,
+       see the script at the bottom of this file) rather than absolute —
+       tables live inside a .card with overflow-x:auto, and CSS forces
+       overflow-y to auto too whenever overflow-x isn't visible, so an
+       absolutely-positioned dropdown extending past the table's bottom edge
+       gets clipped by that same scroll box. Fixed positioning escapes it. */
+    .row-menu { position: relative; display: inline-block; }
+    .row-menu > button {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+      border-radius: 6px; padding: .3rem .6rem; cursor: pointer; font-size: .95rem; line-height: 1;
+    }
+    .row-menu > button:hover { color: var(--text); }
+    .row-menu-items {
+      display: none; position: fixed; margin-top: .3rem;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      min-width: 160px; padding: .4rem; z-index: 1000; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .row-menu.open .row-menu-items { display: block; }
+    .row-menu-items a, .row-menu-items button {
+      display: block; width: 100%; text-align: left; padding: .5rem .7rem; border-radius: 6px;
+      font-size: .85rem; color: var(--text); background: none; border: none; cursor: pointer; font-family: inherit;
+    }
+    .row-menu-items a:hover, .row-menu-items button:hover { background: var(--surface); color: var(--accent); }
+    .row-menu-items button.danger:hover { color: var(--danger); }
+    /* Inputs/selects inside a dropdown need to read as a distinct field, not
+       blend into the dropdown panel behind them (both would otherwise be the
+       same --surface2) — recess them one shade darker, matching the page's
+       own base background. */
+    .row-menu-items input, .row-menu-items select { background: var(--surface); }
+
+    /* Per-column instant filter row (see macros.filter_row) — a small text
+       box under each header that narrows the loaded rows as you type. */
+    tr.filter-row th { padding: .3rem .6rem; background: var(--surface); }
+    tr.filter-row input.col-filter {
+      width: 100%; padding: .3rem .5rem; font-size: .78rem;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text);
+    }
+
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
     .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.2rem; text-align: center; }
     .stat-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
@@ -212,100 +264,113 @@
 </head>
 <body>
   <nav>
-    <span class="brand">
-      {% if branding.logo_url %}<img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}">{% else %}📦{% endif %}
-      {{ branding.app_name or 'AssetTracker' }}
-    </span>
-    <a href="/">Home</a>
-    <a href="/checkin">Check In</a>
-    <a href="/checkout">Check Out</a>
-    <a href="/report_problem">Report a Problem</a>
-    <span class="spacer"></span>
-    {% if session.get('admin_logged_in') %}
-      <form class="nav-search" method="GET" action="/admin/search">
-        <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
-        <button type="submit" title="Search">🔎</button>
-      </form>
-
-      {% if can('devices') %}
-      <div class="nav-dropdown">
-        <button type="button">Devices ▾</button>
-        <div class="nav-dropdown-menu">
-          <a href="/admin/registry">Registry</a>
-          <a href="/admin/bulk_assign">Bulk Assign</a>
-          <a href="/admin/bulk_print">Bulk Print Labels</a>
-          <a href="/admin/audit">Asset Audit</a>
-          <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
-          <a href="/admin/fees">Fees / Who Owes</a>
-          <a href="/admin/collection">Collection (Who Has What)</a>
-          <a href="/admin/registry/export">Export CSV</a>
-          <a href="/asset_history">Asset History</a>
-          <a href="/api/assets" target="_blank">Assets API</a>
-          {% if can('devices_manage') %}
-          <div class="nav-divider"></div>
-          <a href="/admin/registry/new">Add Device</a>
-          <a href="/admin/registry/set_sites">Set Device Sites</a>
+    <div class="nav-top">
+      <span class="brand">
+        {% if branding.logo_url %}
+          {% if branding.logo_background %}<span class="logo-plate-{{ branding.logo_background }}"><img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}"></span>
+          {% else %}<img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}">{% endif %}
+        {% else %}📦{% endif %}
+        {{ branding.app_name or 'FoxDesk' }}
+      </span>
+      {% if session.get('admin_logged_in') %}
+        <div class="nav-tabs">
+          <a href="/" class="nav-tab {{ 'active' if active_section == 'home' }}">🏠 Home</a>
+          {% if can('devices') %}
+          <a href="/admin/registry" class="nav-tab {{ 'active' if active_section == 'devices' }}">📋 Devices</a>
           {% endif %}
-          {% if is_super_admin() %}
-          <div class="nav-divider"></div>
-          <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-dropdown-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
+          {% if can('people') %}
+          <a href="/admin/people" class="nav-tab {{ 'active' if active_section == 'people' }}">👥 People</a>
+          {% endif %}
+          {% if can('loaner_checkinout') or can('loaners') %}
+          <a href="{{ '/loaner_checkinout' if can('loaner_checkinout') else '/admin/loaners' }}" class="nav-tab {{ 'active' if active_section == 'loaners' }}">🎒 Loaners</a>
+          {% endif %}
+          {% if can('repairs') %}
+          <a href="/admin/repairs" class="nav-tab {{ 'active' if active_section == 'repairs' }}">🛠️ Repairs</a>
+          {% endif %}
+          {% if can('tickets') %}
+          <a href="/admin/tickets" class="nav-tab {{ 'active' if active_section == 'tickets' }}">🎫 Tickets {% if nav_open_tickets_count %}<span class="nav-tab-badge">{{ nav_open_tickets_count }}</span>{% endif %}</a>
+          {% endif %}
+          {% if can('admin') or can('manage_users') or is_super_admin() %}
+          <a href="/admin" class="nav-tab {{ 'active' if active_section == 'admin' }}">⚙️ Admin</a>
           {% endif %}
         </div>
-      </div>
+        <span class="spacer"></span>
+        <form class="nav-search" method="GET" action="/admin/search">
+          <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
+          <button type="submit" title="Search">🔎</button>
+        </form>
+        <a href="/admin/logout" class="logout">Logout</a>
+      {% else %}
+        <a href="/">Home</a>
+        <a href="/checkin">Check In</a>
+        <a href="/checkout">Check Out</a>
+        <a href="/report_problem">Report a Problem</a>
+        <span class="spacer"></span>
+        <a href="/admin/login">Admin</a>
       {% endif %}
+    </div>
 
-      {% if can('people') %}
-      <div class="nav-dropdown">
-        <button type="button">People ▾</button>
-        <div class="nav-dropdown-menu">
-          <a href="/admin/people">People</a>
-          <a href="/admin/people/new">Add Person</a>
-          <a href="/admin/people/import">Import People CSV</a>
-          <a href="/admin/people/graduate">Graduate Students</a>
-        </div>
-      </div>
+    {% if session.get('admin_logged_in') and active_section in ['home', 'devices', 'people', 'loaners', 'tickets', 'admin'] %}
+    <div class="nav-sub">
+      {% if active_section == 'home' %}
+        <a href="/checkin">Check In</a>
+        <a href="/checkout">Check Out</a>
+        <a href="/report_problem">Report a Problem</a>
+      {% elif active_section == 'devices' and can('devices') %}
+        <a href="/admin/registry">Registry</a>
+        <a href="/admin/bulk_assign">Bulk Assign</a>
+        <a href="/admin/bulk_print">Bulk Print Labels</a>
+        <a href="/admin/audit">Asset Audit</a>
+        <span class="nav-sub-divider"></span>
+        <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
+        <a href="/admin/fees">Billing</a>
+        <a href="/admin/repair_categories">Repair Categories</a>
+        <a href="/admin/collection">Collection (Who Has What)</a>
+        <a href="/admin/registry/export">Export CSV</a>
+        <a href="/asset_history">Asset History</a>
+        <a href="/api/assets" target="_blank">Assets API</a>
+        {% if can('devices_manage') %}
+        <span class="nav-sub-divider"></span>
+        <a href="/admin/registry/new">Add Device</a>
+        <a href="/admin/registry/set_sites">Set Device Sites</a>
+        <a href="/admin/device_models">Device Models</a>
+        <a href="/admin/asset_number_ranges">Asset Number Ranges</a>
+        {% endif %}
+        {% if is_super_admin() %}
+        <span class="nav-sub-divider"></span>
+        <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-tab-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
+        {% endif %}
+      {% elif active_section == 'people' and can('people') %}
+        <a href="/admin/people">People</a>
+        <a href="/admin/people/new">Add Person</a>
+        <a href="/admin/people/import">Import People CSV</a>
+        <a href="/admin/people/graduate">Graduate Students</a>
+      {% elif active_section == 'loaners' %}
+        {% if can('loaner_checkinout') %}<a href="/loaner_checkinout">Check In / Out</a>{% endif %}
+        {% if can('loaners') %}<a href="/admin/loaners">Loaner Pool</a>{% endif %}
+      {% elif active_section == 'tickets' and can('tickets') %}
+        <a href="/admin/tickets">Queue</a>
+        <a href="/admin/tickets/new">New Ticket</a>
+        <a href="/admin/ticket_categories">Categories</a>
+      {% elif active_section == 'admin' %}
+        <a href="/admin">Dashboard</a>
+        {% if can('admin') %}
+        <a href="/admin/kiosk">Kiosk Devices</a>
+        <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
+        <a href="/admin/activity">Activity Log</a>
+        {% endif %}
+        {% if can('manage_users') %}
+        <span class="nav-sub-divider"></span>
+        <a href="/admin/users">Users</a>
+        {% endif %}
+        {% if is_super_admin() %}
+        <a href="/admin/sites">Sites</a>
+        <a href="/admin/branding">Branding</a>
+        <a href="/admin/emails">Email</a>
+        <a href="/admin/google_setup">Google Sync Setup</a>
+        {% endif %}
       {% endif %}
-
-      {% if can('loaners') %}
-      <div class="nav-dropdown">
-        <button type="button">Loaners ▾</button>
-        <div class="nav-dropdown-menu">
-          <a href="/admin/loaners">Loaner Pool</a>
-          <a href="/loaner_checkout" target="_blank">Student Checkout Page</a>
-          <a href="/loaner_checkin" target="_blank">Student Checkin Page</a>
-          <a href="/admin/collection">Collection (Who Has What)</a>
-        </div>
-      </div>
-      {% endif %}
-
-      {% if can('repairs') %}<a href="/admin/repairs">Repairs</a>{% endif %}
-
-      {% if can('admin') or can('manage_users') or is_super_admin() %}
-      <div class="nav-dropdown">
-        <button type="button">Admin ▾</button>
-        <div class="nav-dropdown-menu">
-          <a href="/admin">Dashboard</a>
-          {% if can('admin') %}
-          <a href="/admin/kiosk">Kiosk Devices</a>
-          <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-dropdown-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
-          <a href="/admin/activity">Activity Log</a>
-          {% endif %}
-          {% if can('manage_users') %}
-          <div class="nav-divider"></div>
-          <a href="/admin/users">Users</a>
-          {% endif %}
-          {% if is_super_admin() %}
-          <a href="/admin/sites">Sites</a>
-          <a href="/admin/branding">Branding</a>
-          <a href="/admin/google_setup">Google Sync Setup</a>
-          {% endif %}
-        </div>
-      </div>
-      {% endif %}
-
-      <a href="/admin/logout" class="logout">Logout</a>
-    {% else %}
-      <a href="/admin/login">Admin</a>
+    </div>
     {% endif %}
   </nav>
 
@@ -331,18 +396,69 @@
     {% block content %}{% endblock %}
   </div>
 <script>
-// Click-toggle nav dropdowns (not hover-only — kiosks are plausibly touchscreens).
-document.querySelectorAll('.nav-dropdown > button').forEach(function (toggle) {
-  toggle.addEventListener('click', function (e) {
+// The nav can be one or two rows tall depending on whether a sub-nav row is
+// showing for the active tab — position the session-expiry banner right
+// below whatever height it actually rendered at, rather than a hardcoded value.
+(function () {
+  const navEl = document.querySelector('nav');
+  const warnEl = document.getElementById('session-warning');
+  if (navEl && warnEl) warnEl.style.top = navEl.offsetHeight + 'px';
+})();
+
+// Click-toggle per-row "⋮" action menus (see .row-menu in the stylesheet).
+// .row-menu-items is position:fixed, so its top/right have to be computed
+// relative to the trigger button each time it opens (fixed positioning is
+// viewport-relative, not parent-relative, unlike absolute).
+function closeAllRowMenus() {
+  document.querySelectorAll('.row-menu.open').forEach(function (menu) { menu.classList.remove('open'); });
+}
+document.addEventListener('click', function (e) {
+  const trigger = e.target.closest('.row-menu > button');
+  if (trigger) {
     e.stopPropagation();
-    const dropdown = toggle.parentElement;
-    const wasOpen = dropdown.classList.contains('open');
-    document.querySelectorAll('.nav-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
-    if (!wasOpen) dropdown.classList.add('open');
-  });
+    const openMenu = trigger.parentElement;
+    const wasOpen = openMenu.classList.contains('open');
+    closeAllRowMenus();
+    if (!wasOpen) {
+      const items = openMenu.querySelector('.row-menu-items');
+      const rect = trigger.getBoundingClientRect();
+      items.style.top = rect.bottom + 'px';
+      items.style.right = (window.innerWidth - rect.right) + 'px';
+      openMenu.classList.add('open');
+    }
+    return;
+  }
+  // Clicking inside an open menu's own content (a label, an input while
+  // typing an amount, a select) must NOT close it — only a click genuinely
+  // outside every row-menu should. Submit buttons still work fine since the
+  // page navigates away on submit regardless.
+  if (e.target.closest('.row-menu')) return;
+  closeAllRowMenus();
 });
-document.addEventListener('click', function () {
-  document.querySelectorAll('.nav-dropdown.open').forEach(function (d) { d.classList.remove('open'); });
+window.addEventListener('scroll', closeAllRowMenus, true);
+
+// Per-column instant filter row (see macros.filter_row in _macros.html) —
+// narrows the rows already loaded in that table as you type, purely
+// client-side. Complements the page's own top search_box, which searches
+// the full server-side dataset (and works across pages) instead of just
+// what's currently on screen.
+document.querySelectorAll('tr.filter-row').forEach(function (filterRow) {
+  const table = filterRow.closest('table');
+  const inputs = filterRow.querySelectorAll('input.col-filter');
+  function applyFilters() {
+    const active = Array.from(inputs)
+      .map(function (inp) { return { index: parseInt(inp.dataset.colIndex, 10), value: inp.value.trim().toLowerCase() }; })
+      .filter(function (f) { return f.value; });
+    table.querySelectorAll('tbody tr').forEach(function (row) {
+      const cells = row.children;
+      const match = active.every(function (f) {
+        const cell = cells[f.index];
+        return cell && cell.textContent.toLowerCase().includes(f.value);
+      });
+      row.style.display = match ? '' : 'none';
+    });
+  }
+  inputs.forEach(function (inp) { inp.addEventListener('input', applyFilters); });
 });
 
 // Only run session polling on admin pages

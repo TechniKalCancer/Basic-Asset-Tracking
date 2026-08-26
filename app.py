@@ -39,7 +39,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FORCE_HTTPS', 'false').lower() == 'true'
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=15)
+SESSION_TIMEOUT_MINUTES = 180  # how long an idle admin session stays logged in
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB, generous for a CSV upload
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-in-prod')
 
@@ -90,7 +91,6 @@ def _handle_server_error(e):
     return render_template('error.html', code=500, message='Something went wrong on our end.'), 500
 
 
-SESSION_TIMEOUT_MINUTES = 15
 WARNING_BEFORE_SECONDS  = 120  # warn 2 min before expiry
 
 ADMIN_PASSWORD_HASH = generate_password_hash(

@@ -377,7 +377,7 @@
   <!-- Session timeout warning banner (only shown on admin pages) -->
   <div id="session-warning">
     ⚠️ Your session will expire in <span id="session-countdown"></span>.
-    <a onclick="extendSession()">Stay logged in</a>
+    <a id="stay-logged-in-link">Stay logged in</a>
     &nbsp;·&nbsp;
     <a href="/admin/logout">Logout now</a>
   </div>
@@ -534,6 +534,11 @@ if (isAdmin) {
       document.getElementById('session-warning').style.display = 'none';
     } catch(e) {}
   }
+
+  // extendSession is declared inside this if-block, so it isn't reachable
+  // from an inline onclick="" attribute (those resolve against the global
+  // scope, not this block's) — wire the click up directly instead.
+  document.getElementById('stay-logged-in-link').addEventListener('click', extendSession);
 
   // Local 1-second ticker keeps the displayed countdown moving; the 15s
   // poll below is what actually re-syncs it against the server's clock.

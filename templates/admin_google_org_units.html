@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Org Units{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🗂️ Org Units</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/google_field_mapping" class="btn btn-ghost">🔗 Google Field Mapping</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Pull the Organizational Unit tree straight from Google Workspace, then tag each one Staff or Student.
+  That tag becomes a scope you can pick on <a href="/admin/google_field_mapping">Google Field Mapping</a> —
+  so a mapping can apply to every Staff org unit, every Student org unit, or one specific org unit, instead
+  of always applying to everyone.
+</p>
+
+<div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <div>
+    <strong>Refresh from Google</strong>
+    <p style="color:var(--muted);font-size:.82rem;margin-top:.2rem;">
+      Pulls every org unit path from Workspace. New ones are added; existing ones keep their category.
+    </p>
+  </div>
+  <span class="spacer" style="flex:1;"></span>
+  <form method="POST" action="/admin/google_org_units/refresh">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not google_sync_enabled }}>
+      🔄 Refresh from Google{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
+    </button>
+  </form>
+</div>
+
+<form method="POST" action="/admin/google_org_units/save">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Org Unit Path</th>
+          <th>Name</th>
+          <th style="width:200px;">Category</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ou in org_units %}
+        <tr>
+          <td><code>{{ ou.org_unit_path }}</code></td>
+          <td>{{ ou.name or '—' }}</td>
+          <td>
+            <select name="category_{{ ou.id }}">
+              <option value="unclassified" {{ 'selected' if ou.category == 'unclassified' }}>— Unclassified —</option>
+              <option value="staff"   {{ 'selected' if ou.category == 'staff' }}>🧑‍💼 Staff</option>
+              <option value="student" {{ 'selected' if ou.category == 'student' }}>🎓 Student</option>
+            </select>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">
+          No org units yet — click "Refresh from Google" above to pull them in.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if org_units %}
+  <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Save Classifications</button>
+  {% endif %}
+</form>
+{% endblock %}

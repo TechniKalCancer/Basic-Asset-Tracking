@@ -108,6 +108,7 @@ GOOGLE_SYNC_ENABLED = bool(GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_ADMIN_IMPERSON
 GOOGLE_SCOPE_READONLY      = 'https://www.googleapis.com/auth/admin.directory.device.chromeos.readonly'
 GOOGLE_SCOPE_MANAGE        = 'https://www.googleapis.com/auth/admin.directory.device.chromeos'
 GOOGLE_SCOPE_USER_READONLY = 'https://www.googleapis.com/auth/admin.directory.user.readonly'
+GOOGLE_SCOPE_ORGUNIT_READONLY = 'https://www.googleapis.com/auth/admin.directory.orgunit.readonly'
 
 # Remotely disabling a live device is a much bigger blast radius than the
 # read-only sync above, so it gets its own separate opt-in on top of
@@ -250,7 +251,26 @@ class GoogleFieldMapping(db.Model):
     entity_type  = db.Column(db.String(20), nullable=False)  # 'person' | 'device'
     google_field = db.Column(db.String(120), nullable=False)
     target_field = db.Column(db.String(80), nullable=False)
+    org_unit_scope = db.Column(db.String(255), nullable=True)  # None=all; '__staff__'/'__student__'=category; else an exact org unit path — see _mapping_applies_to_org_unit()
     created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class GoogleOrgUnit(db.Model):
+    """
+    A cached copy of one Google Workspace Organizational Unit, refreshed from
+    the Admin SDK at /admin/google_org_units. category is set by hand (not by
+    Google) so an admin can bucket each OU as staff or student — that bucket
+    is then usable as a GoogleFieldMapping.org_unit_scope, and/or as the
+    source for a mapping that writes 'staff'/'student' onto Person.role.
+    Kept as its own table (not folded into the mapping form) since one org
+    unit tree is shared by every mapping, for both entity types.
+    """
+    __tablename__ = 'google_org_unit'
+    id            = db.Column(db.Integer, primary_key=True)
+    org_unit_path = db.Column(db.String(255), unique=True, nullable=False)
+    name          = db.Column(db.String(255), nullable=True)
+    category      = db.Column(db.String(20), nullable=False, default='unclassified')  # 'unclassified' | 'staff' | 'student'
+    updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class UserSite(db.Model):
@@ -1108,15 +1128,56 @@ def _get_nested_value(data, dotted_path):
     return current
 
 
+ORG_UNIT_SCOPE_STAFF   = '__staff__'
+ORG_UNIT_SCOPE_STUDENT = '__student__'
+ORG_UNIT_SCOPE_CHOICES = {ORG_UNIT_SCOPE_STAFF: 'Staff (by org unit)', ORG_UNIT_SCOPE_STUDENT: 'Student (by org unit)'}
+
+
+def _classify_org_unit(org_unit_path):
+    """Returns 'staff'/'student' for the given org unit path, based on the
+    closest classified ancestor in GoogleOrgUnit (so a sub-OU like
+    '/Students/Class of 2030/Section A' inherits its parent's classification
+    even if only '/Students' was tagged). Returns None if nothing matches."""
+    if not org_unit_path:
+        return None
+    best_category, best_len = None, -1
+    for ou in GoogleOrgUnit.query.filter(GoogleOrgUnit.category.in_(['staff', 'student'])).all():
+        path = ou.org_unit_path
+        if org_unit_path == path or org_unit_path.startswith(path.rstrip('/') + '/'):
+            if len(path) > best_len:
+                best_category, best_len = ou.category, len(path)
+    return best_category
+
+
+def _mapping_applies_to_org_unit(mapping, org_unit_path):
+    """Whether mapping's org_unit_scope allows it to apply to a record in
+    org_unit_path — unscoped (None) mappings always apply; '__staff__'/
+    '__student__' apply based on _classify_org_unit(); anything else is
+    treated as an exact org unit path (also matching its sub-OUs)."""
+    scope = mapping.org_unit_scope
+    if not scope:
+        return True
+    if scope == ORG_UNIT_SCOPE_STAFF:
+        return _classify_org_unit(org_unit_path) == 'staff'
+    if scope == ORG_UNIT_SCOPE_STUDENT:
+        return _classify_org_unit(org_unit_path) == 'student'
+    return bool(org_unit_path) and (org_unit_path == scope or org_unit_path.startswith(scope.rstrip('/') + '/'))
+
+
 def _apply_field_mappings(google_record, obj, mappings):
     """Applies every mapping onto obj (a Person or AssetRegistry instance)
-    from the raw Google record. Real-column targets are set directly;
+    from the raw Google record. Mappings scoped to a specific org unit or
+    org-unit category (see _mapping_applies_to_org_unit) are skipped for
+    records outside that scope. Real-column targets are set directly;
     'custom:<key>' targets go into obj.custom_fields. Returns True if
     anything actually changed (so the caller can count real updates, not
     just matches). Does not commit."""
     changed = False
     custom = dict(obj.custom_fields or {})
+    org_unit_path = google_record.get('orgUnitPath')
     for m in mappings:
+        if not _mapping_applies_to_org_unit(m, org_unit_path):
+            continue
         value = _get_nested_value(google_record, m.google_field)
         if value is None:
             continue
@@ -1132,6 +1193,29 @@ def _apply_field_mappings(google_record, obj, mappings):
     if changed:
         obj.custom_fields = custom
     return changed
+
+
+def _fetch_google_org_units():
+    """Pulls the full Organizational Unit tree from the Admin SDK (shared by
+    both Users and ChromeOS devices) and upserts it into GoogleOrgUnit —
+    inserting new paths, refreshing the display name on existing ones, and
+    leaving each row's hand-set category untouched. Returns the number of
+    org units seen."""
+    service = _google_directory_service([GOOGLE_SCOPE_ORGUNIT_READONLY])
+    response = service.orgunits().list(customerId='my_customer', type='all').execute()
+    org_units = response.get('organizationUnits', [])
+    existing = {ou.org_unit_path: ou for ou in GoogleOrgUnit.query.all()}
+    for entry in org_units:
+        path = entry.get('orgUnitPath')
+        if not path:
+            continue
+        name = entry.get('name')
+        if path in existing:
+            existing[path].name = name
+        else:
+            db.session.add(GoogleOrgUnit(org_unit_path=path, name=name))
+    db.session.commit()
+    return len(org_units)
 
 
 def _run_google_people_sync():
@@ -1686,6 +1770,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/emails', 'admin'),
     ('/admin/google_setup', 'admin'),
     ('/admin/custom_fields', 'admin'),
+    ('/admin/google_org_units', 'admin'),
     ('/admin/google_field_mapping', 'admin'),
     ('/admin', 'admin'),
     ('/checkin', 'home'),
@@ -3798,6 +3883,49 @@ def admin_custom_field_delete(field_id):
     return redirect(url_for('admin_custom_fields', entity=field.entity_type))
 
 
+@app.route('/admin/google_org_units')
+@require_super_admin
+def admin_google_org_units():
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
+    return render_template('admin_google_org_units.html', org_units=org_units,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/google_org_units/refresh', methods=['POST'])
+@require_super_admin
+def admin_google_org_units_refresh():
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
+        return redirect(url_for('admin_google_org_units'))
+    try:
+        count = _fetch_google_org_units()
+        _log_activity('org_unit_refresh', f'Refreshed org unit list from Google: {count} found.')
+        flash(f'Pulled {count} org unit(s) from Google Workspace.', 'success')
+    except Exception as e:
+        flash(f'Refresh failed: {e}', 'error')
+    return redirect(url_for('admin_google_org_units'))
+
+
+@app.route('/admin/google_org_units/save', methods=['POST'])
+@require_super_admin
+def admin_google_org_units_save():
+    changed = 0
+    for ou in GoogleOrgUnit.query.all():
+        category = request.form.get(f'category_{ou.id}', 'unclassified')
+        if category not in ('unclassified', 'staff', 'student'):
+            category = 'unclassified'
+        if category != ou.category:
+            ou.category = category
+            changed += 1
+    if changed:
+        _log_activity('org_unit_classify', f'Reclassified {changed} org unit(s).')
+        db.session.commit()
+        flash(f'Saved — {changed} org unit(s) reclassified.', 'success')
+    else:
+        flash('No changes to save.', 'info')
+    return redirect(url_for('admin_google_org_units'))
+
+
 @app.route('/admin/google_field_mapping')
 @require_super_admin
 def admin_google_field_mapping():
@@ -3807,8 +3935,10 @@ def admin_google_field_mapping():
     mappings = GoogleFieldMapping.query.filter_by(entity_type=entity_type).order_by(GoogleFieldMapping.google_field).all()
     custom_fields = CustomField.query.filter_by(entity_type=entity_type).order_by(CustomField.label).all()
     real_fields = PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
     return render_template('admin_google_field_mapping.html', mappings=mappings, entity_type=entity_type,
                            custom_fields=custom_fields, real_fields=real_fields,
+                           org_units=org_units, org_unit_scope_choices=ORG_UNIT_SCOPE_CHOICES,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
@@ -3820,31 +3950,44 @@ def admin_google_field_mapping_new():
         entity_type = 'person'
     custom_fields = CustomField.query.filter_by(entity_type=entity_type).order_by(CustomField.label).all()
     real_fields = PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
 
     if request.method == 'POST':
         entity_type = request.form.get('entity_type', entity_type)
         google_field = request.form.get('google_field', '').strip()
         target_field = request.form.get('target_field', '').strip()
+        org_unit_scope = request.form.get('org_unit_scope', '').strip() or None
         valid_targets = set((PERSON_SYNC_TARGET_FIELDS if entity_type == 'person' else DEVICE_SYNC_TARGET_FIELDS).keys())
         valid_targets |= {f'custom:{c.field_key}' for c in CustomField.query.filter_by(entity_type=entity_type).all()}
+        valid_scopes = set(ORG_UNIT_SCOPE_CHOICES.keys()) | {ou.org_unit_path for ou in org_units}
 
         if not google_field:
             flash('Enter the Google field to pull from (e.g. orgUnitPath).', 'error')
             return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
-                                   custom_fields=custom_fields, real_fields=real_fields, form=request.form)
+                                   custom_fields=custom_fields, real_fields=real_fields,
+                                   org_units=org_units, org_unit_scope_choices=ORG_UNIT_SCOPE_CHOICES, form=request.form)
         if target_field not in valid_targets:
             flash('Choose a valid target field.', 'error')
             return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
-                                   custom_fields=custom_fields, real_fields=real_fields, form=request.form)
+                                   custom_fields=custom_fields, real_fields=real_fields,
+                                   org_units=org_units, org_unit_scope_choices=ORG_UNIT_SCOPE_CHOICES, form=request.form)
+        if org_unit_scope is not None and org_unit_scope not in valid_scopes:
+            flash('Choose a valid org unit scope.', 'error')
+            return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
+                                   custom_fields=custom_fields, real_fields=real_fields,
+                                   org_units=org_units, org_unit_scope_choices=ORG_UNIT_SCOPE_CHOICES, form=request.form)
 
-        db.session.add(GoogleFieldMapping(entity_type=entity_type, google_field=google_field, target_field=target_field))
-        _log_activity('google_field_mapping_add', f'Mapped Google "{google_field}" -> "{target_field}" ({entity_type}).')
+        db.session.add(GoogleFieldMapping(entity_type=entity_type, google_field=google_field,
+                                           target_field=target_field, org_unit_scope=org_unit_scope))
+        scope_note = f' (scoped to {org_unit_scope})' if org_unit_scope else ''
+        _log_activity('google_field_mapping_add', f'Mapped Google "{google_field}" -> "{target_field}" ({entity_type}){scope_note}.')
         db.session.commit()
         flash('Mapping added.', 'success')
         return redirect(url_for('admin_google_field_mapping', entity=entity_type))
 
     return render_template('admin_google_field_mapping_form.html', entity_type=entity_type,
-                           custom_fields=custom_fields, real_fields=real_fields, form=None)
+                           custom_fields=custom_fields, real_fields=real_fields,
+                           org_units=org_units, org_unit_scope_choices=ORG_UNIT_SCOPE_CHOICES, form=None)
 
 
 @app.route('/admin/google_field_mapping/<int:mapping_id>/delete', methods=['POST'])
@@ -6127,6 +6270,7 @@ ACTIVITY_LOG_ACTIONS = [
     'branding_edit', 'email_template_edit',
     'custom_field_add', 'custom_field_delete',
     'google_field_mapping_add', 'google_field_mapping_delete', 'google_field_sync',
+    'org_unit_refresh', 'org_unit_classify',
 ]
 
 

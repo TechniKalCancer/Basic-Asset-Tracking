@@ -42,6 +42,25 @@
       </select>
     </div>
 
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Org Unit Scope</label>
+      <select name="org_unit_scope">
+        <option value="" {{ 'selected' if not (form and form.org_unit_scope) }}>— All accounts —</option>
+        <optgroup label="By Category">
+          {% for value, label in org_unit_scope_choices.items() %}
+          <option value="{{ value }}" {{ 'selected' if form and form.org_unit_scope == value }}>{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% if org_units %}
+        <optgroup label="Specific Org Unit">
+          {% for ou in org_units %}
+          <option value="{{ ou.org_unit_path }}" {{ 'selected' if form and form.org_unit_scope == ou.org_unit_path }}>{{ ou.org_unit_path }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </div>
+
     <button type="submit" class="btn btn-primary">Add Mapping</button>
   </form>
 </div>

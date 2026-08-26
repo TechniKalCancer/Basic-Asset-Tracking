@@ -7,6 +7,7 @@
     {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
   <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/google_org_units" class="btn btn-ghost">🗂️ Org Units</a>
   <a href="/admin/custom_fields" class="btn btn-ghost">🧩 Custom Fields</a>
   <a href="/admin/google_setup" class="btn btn-ghost">Google Sync Setup</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
@@ -69,11 +70,34 @@
         {% endif %}
       </select>
     </div>
+    <div style="min-width:200px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Org Unit Scope</label>
+      <select name="org_unit_scope">
+        <option value="">— All accounts —</option>
+        <optgroup label="By Category">
+          {% for value, label in org_unit_scope_choices.items() %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% if org_units %}
+        <optgroup label="Specific Org Unit">
+          {% for ou in org_units %}
+          <option value="{{ ou.org_unit_path }}">{{ ou.org_unit_path }}{{ ' (' + ou.category + ')' if ou.category != 'unclassified' else '' }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </div>
     <button type="submit" class="btn btn-primary">Add Mapping</button>
     {% if not custom_fields %}
     <a href="/admin/custom_fields/new?entity={{ entity_type }}" class="btn btn-ghost">+ New Custom Field</a>
     {% endif %}
   </form>
+  <p style="color:var(--muted);font-size:.8rem;margin-top:.8rem;">
+    Scope limits when a mapping applies — e.g. pull "Job Title" only for Staff org units, or pull a different
+    field just for one specific org unit. Leave it on "All accounts" for a mapping that should always run.
+    Tag org units first at <a href="/admin/google_org_units">Org Units</a>.
+  </p>
 
   <details style="margin-top:1rem;">
     <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">Common Google field names</summary>
@@ -97,6 +121,7 @@
       <tr>
         <th>Google Field</th>
         <th>Target Field</th>
+        <th>Scope</th>
         <th></th>
       </tr>
     </thead>
@@ -111,6 +136,15 @@
             {{ real_fields.get(m.target_field, m.target_field) }}
           {% endif %}
         </td>
+        <td>
+          {% if not m.org_unit_scope %}
+            <span style="color:var(--muted);">All accounts</span>
+          {% elif m.org_unit_scope in org_unit_scope_choices %}
+            {{ org_unit_scope_choices[m.org_unit_scope] }}
+          {% else %}
+            <code>{{ m.org_unit_scope }}</code>
+          {% endif %}
+        </td>
         <td style="text-align:right;white-space:nowrap;">
           <form method="POST" action="/admin/google_field_mapping/{{ m.id }}/delete" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -119,7 +153,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">No mappings yet.</td></tr>
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No mappings yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

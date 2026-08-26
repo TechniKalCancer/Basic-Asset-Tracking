@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Edit Ticket #{{ ticket.id }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">✏️ Edit Ticket #{{ ticket.id }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/tickets/{{ ticket.id }}" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST" style="position:relative;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;position:relative;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Requester (optional)</label>
+      <input type="hidden" name="person_id" id="personIdInput" value="{{ ticket.requester_person_id or '' }}" />
+      <input type="text" id="personSearchInput" autocomplete="off" placeholder="Type a name…" value="{{ ticket.requester_name or '' }}" />
+      <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+           background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+           max-height:260px;overflow-y:auto;"></div>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Leave as-is to keep the current requester — only changes if you search and pick someone new.
+      </span>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
+      <select name="category_id" required>
+        <option value="">Choose a category…</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {{ 'selected' if ticket.category_id == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Subject</label>
+      <input type="text" name="subject" value="{{ ticket.subject }}" required />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Asset Tag (optional)</label>
+      <input type="text" name="asset_tag" value="{{ ticket.asset_tag or '' }}" placeholder="e.g. 483920" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+      <select name="site_id" required>
+        <option value="">Choose a site…</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}" {{ 'selected' if ticket.site_id == site.id }}>{{ site.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
+      <textarea name="description" rows="6" style="width:100%;resize:vertical;" required>{{ ticket.description }}</textarea>
+    </div>
+    <span style="display:block;margin-bottom:1rem;font-size:.78rem;color:var(--muted);">
+      Status, priority, and assignment are changed from the <a href="/admin/tickets/{{ ticket.id }}">ticket detail page</a> instead.
+    </span>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+  </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+  </script>
+</div>
+{% endblock %}

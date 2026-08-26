@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}New Ticket{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">➕ New Ticket</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/tickets" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST" style="position:relative;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;position:relative;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Requester (optional)</label>
+      <input type="hidden" name="person_id" id="personIdInput" />
+      <input type="text" id="personSearchInput" autocomplete="off" placeholder="Type a name…" />
+      <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+           background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+           max-height:260px;overflow-y:auto;"></div>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
+      <select name="category_id" required>
+        <option value="">Choose a category…</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {{ 'selected' if form and form.category_id == c.id|string }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Subject</label>
+      <input type="text" name="subject" value="{{ form.subject if form else '' }}" placeholder="e.g. Wifi down in room 204" required />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Priority</label>
+      <select name="priority">
+        {% for p in priorities %}
+        <option value="{{ p }}" {{ 'selected' if (form.priority if form else 'normal') == p }}>{{ p|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Asset Tag (optional)</label>
+      <input type="text" name="asset_tag" value="{{ form.asset_tag if form else '' }}" placeholder="e.g. 483920" />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+      <select name="site_id" required>
+        <option value="">Choose a site…</option>
+        {% for site in sites %}
+        <option value="{{ site.id }}" {{ 'selected' if form and form.site_id == site.id|string }}>{{ site.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
+      <textarea name="description" rows="4" placeholder="Describe the issue…" style="width:100%;resize:vertical;" required>{{ form.description if form else '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Create Ticket</button>
+  </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+  </script>
+</div>
+{% endblock %}

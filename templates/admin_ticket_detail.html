@@ -1,0 +1,280 @@
+{% extends 'base.html' %}
+{% block title %}Ticket #{{ ticket.id }}{% endblock %}
+{% block content %}
+{% set status_badge = {'open': 'badge-blue', 'in_progress': 'badge-yellow', 'resolved': 'badge-green', 'closed': 'badge-red'} %}
+{% set priority_badge = {'low': 'badge-blue', 'normal': 'badge-blue', 'high': 'badge-yellow', 'urgent': 'badge-red'} %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🎫 #{{ ticket.id }} — {{ ticket.subject }}</h1>
+  <span class="badge {{ status_badge.get(ticket.status, 'badge-blue') }}">{{ ticket.status|replace('_', ' ')|capitalize }}</span>
+  <span class="badge {{ priority_badge.get(ticket.priority, 'badge-blue') }}">{{ ticket.priority|capitalize }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/tickets/{{ ticket.id }}/edit" class="btn btn-ghost">✏️ Edit</a>
+  <a href="/admin/tickets" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <table style="width:100%;">
+    <tr><td style="color:var(--muted);width:140px;">Category</td><td>{{ ticket.category.name if ticket.category else '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Requester</td><td>{{ ticket.requester_name or '—' }} {% if ticket.requester_email %}<span style="color:var(--muted);">({{ ticket.requester_email }})</span>{% endif %}</td></tr>
+    <tr><td style="color:var(--muted);">Site</td><td>{{ ticket.site.name if ticket.site else '—' }}</td></tr>
+    <tr>
+      <td style="color:var(--muted);">Device</td>
+      <td>
+        {% if ticket.asset_tag %}
+          {% if registry_row %}<a href="/admin/assets/{{ ticket.asset_tag }}/assign"><code>{{ ticket.asset_tag }}</code></a>{{ ' — ' ~ registry_row.description if registry_row.description }}
+          {% else %}<code>{{ ticket.asset_tag }}</code> <span style="color:var(--warning);">(not in registry)</span>{% endif %}
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    <tr><td style="color:var(--muted);">Opened</td><td>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    <tr><td style="color:var(--muted);">Last Updated</td><td>{{ ticket.updated_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% if ticket.resolved_at %}
+    <tr><td style="color:var(--muted);">Resolved</td><td>{{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% endif %}
+  </table>
+  <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);white-space:pre-wrap;">{{ ticket.description }}</div>
+</div>
+
+<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <div class="card" style="flex:1;min-width:260px;">
+    <h2 style="margin-top:0;">Status / Priority</h2>
+    <form method="POST" action="/admin/tickets/{{ ticket.id }}/status">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Status</label>
+        <select name="status">
+          {% for s in statuses %}
+          <option value="{{ s }}" {{ 'selected' if ticket.status == s }}>{{ s|replace('_', ' ')|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Priority</label>
+        <select name="priority">
+          {% for p in priorities %}
+          <option value="{{ p }}" {{ 'selected' if ticket.priority == p }}>{{ p|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Update</button>
+    </form>
+  </div>
+
+  <div class="card" style="flex:1;min-width:260px;">
+    <h2 style="margin-top:0;">Assignment</h2>
+    <form method="POST" action="/admin/tickets/{{ ticket.id }}/assign">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Assigned To</label>
+        <select name="assigned_to_user_id">
+          <option value="">Unassigned</option>
+          {% for a in assignees %}
+          <option value="{{ a.id }}" {{ 'selected' if ticket.assigned_to_user_id == a.id }}>{{ a.username }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Assign</button>
+    </form>
+  </div>
+</div>
+
+{% if ticket.repair %}
+{% set repair = ticket.repair %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <h2 style="margin:0;">🛠️ Repair</h2>
+    {% if repair.returned_at %}
+      {% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
+      <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
+    {% else %}
+      <span class="badge badge-yellow">Open</span>
+    {% endif %}
+  </div>
+
+  <table style="width:100%;margin-bottom:1rem;">
+    <tr><td style="color:var(--muted);width:160px;">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Ticket # (vendor's)</td><td>{{ repair.ticket_number or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Issue</td><td>{{ repair.issue_description or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Sent</td><td>{{ repair.sent_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% if repair.expected_return_at %}
+    <tr><td style="color:var(--muted);">Expected Return</td><td>{{ repair.expected_return_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% endif %}
+    {% if repair.returned_at %}
+    <tr><td style="color:var(--muted);">Returned</td><td>{{ repair.returned_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% if repair.notes %}
+    <tr><td style="color:var(--muted);">Notes</td><td>{{ repair.notes }}</td></tr>
+    {% endif %}
+    {% endif %}
+  </table>
+
+  {% if not repair.returned_at %}
+  <details style="margin-bottom:1rem;">
+    <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">✏️ Edit repair details</summary>
+    <form method="POST" action="/admin/repairs/{{ repair.id }}/edit" style="margin-top:.8rem;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
+        <select name="repair_category_id">
+          <option value="">— None —</option>
+          {% for c in repair_categories %}
+          <option value="{{ c.id }}" {{ 'selected' if repair.repair_category_id == c.id }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (vendor's)</label>
+        <input name="ticket_number" value="{{ repair.ticket_number or '' }}" />
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description</label>
+        <input name="issue_description" value="{{ repair.issue_description or '' }}" required />
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return</label>
+        <input type="date" name="expected_return_at" value="{{ repair.expected_return_at.isoformat() if repair.expected_return_at else '' }}" />
+      </div>
+      <button type="submit" class="btn btn-ghost">Save Changes</button>
+    </form>
+  </details>
+
+  <form method="POST" action="/admin/repairs/{{ repair.id }}/return"
+        style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;padding-top:1rem;border-top:1px solid var(--border);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Outcome</label>
+      <select name="outcome" required>
+        <option value="">Choose…</option>
+        {% for key, label in repair_outcomes.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
+      <input name="notes" placeholder="e.g. Replaced under warranty" />
+    </div>
+    <button type="submit" class="btn btn-primary">Mark Returned</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:1.5rem;">
+  {% set total = ticket.charges|sum(attribute='amount') %}
+  {% set unpaid_total = ticket.charges|selectattr('paid_at', 'none')|sum(attribute='amount') %}
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <h2 style="margin:0;">💵 Billing</h2>
+    {% if ticket.charges %}
+    <span class="badge {{ 'badge-red' if unpaid_total else 'badge-green' }}">
+      ${{ '%.2f'|format(total) }} total{% if unpaid_total %} · ${{ '%.2f'|format(unpaid_total) }} unpaid{% endif %}
+    </span>
+    {% endif %}
+  </div>
+
+  {% if ticket.charges %}
+  <div style="overflow-x:auto;">
+  <table style="margin-bottom:1rem;">
+    <thead>
+      <tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in ticket.charges %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ c.created_at.strftime('%Y-%m-%d') }}</td>
+        <td>{{ c.description }}</td>
+        <td style="white-space:nowrap;">${{ '%.2f'|format(c.amount) }}</td>
+        <td>
+          {% if c.paid_at %}
+            <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+          {% else %}
+            <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if not c.paid_at %}
+          <form method="POST" action="/admin/ticket_charges/{{ c.id }}/mark_paid" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
+          </form>
+          {% endif %}
+          <div class="row-menu" style="display:inline-block;">
+            <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
+            <div class="row-menu-items" style="min-width:260px;">
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/edit" style="padding:.4rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Description</label>
+                <input name="description" value="{{ c.description }}" style="margin-bottom:.6rem;" />
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Amount</label>
+                <input name="amount" value="{{ c.amount }}" placeholder="e.g. 15.00" style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-primary" style="width:100%;">Save</button>
+              </form>
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/delete" style="padding:.4rem;border-top:1px solid var(--border);"
+                    onsubmit="return confirm('Delete this ${{ '%.2f'|format(c.amount) }} charge ({{ c.description }})? This cannot be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger" style="width:100%;">Delete</button>
+              </form>
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">No charges on this ticket yet.</p>
+  {% endif %}
+
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/charges"
+        style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;padding-top:1rem;border-top:1px solid var(--border);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
+      <input name="description" placeholder="e.g. Replacement charger" required />
+    </div>
+    <div style="min-width:140px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Amount</label>
+      <input name="amount" placeholder="e.g. 15.00" required />
+    </div>
+    <button type="submit" class="btn btn-primary">Add Charge</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Comments</h2>
+  {% for c in ticket.comments %}
+  <div style="padding:.8rem 0;border-bottom:1px solid var(--border);">
+    <div style="color:var(--muted);font-size:.8rem;margin-bottom:.3rem;">{{ c.author_label }} — {{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    <div style="white-space:pre-wrap;">{{ c.body }}</div>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:.85rem;">No comments yet.</p>
+  {% endfor %}
+
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/comment" style="margin-top:1rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <textarea name="body" rows="3" placeholder="Add a comment…" style="width:100%;resize:vertical;margin-bottom:.8rem;" required></textarea>
+    <button type="submit" class="btn btn-primary">Add Comment</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">🕵️ History</h2>
+  {% if history %}
+  <table>
+    <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+    <tbody>
+      {% for h in history %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ h.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td style="white-space:nowrap;">{{ h.actor_label }}</td>
+        <td>{{ h.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:.85rem;">No history recorded yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

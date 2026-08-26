@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Users{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">🔑 Users</h1>
@@ -14,43 +15,51 @@
   blank at login) always has full access, regardless of what's set here.
 </p>
 
+{{ macros.search_box('Search username…') }}
+
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
-        <th>Username</th>
+        <th class="sortable">
+          <a href="?dir={{ 'desc' if sort_dir == 'asc' else 'asc' }}{% if search %}&q={{ search }}{% endif %}">Username <span class="sort-arrow">{{ '▲' if sort_dir == 'asc' else '▼' }}</span></a>
+        </th>
         <th>Sites</th>
-        <th>Admin</th>
-        <th>Super Admin</th>
-        <th>Manage Users</th>
-        <th>People</th>
-        <th>Devices</th>
-        <th>Manage Devices</th>
-        <th>Loaners</th>
-        <th>Loaner Check-In/Out</th>
-        <th>Check-In/Out</th>
-        <th>Repairs</th>
+        <th>Role</th>
+        <th>Permissions</th>
         <th>Status</th>
         <th></th>
       </tr>
+      {{ macros.filter_row(6, skip=[5]) }}
     </thead>
     <tbody>
       {% for user in users %}
+      {% set perm_labels = {
+        'can_people': 'People', 'can_devices': 'Devices', 'can_devices_manage': 'Manage Devices',
+        'can_loaners': 'Loaners', 'can_loaner_checkinout': 'Loaner Check-In/Out', 'can_checkinout': 'Check-In/Out',
+        'can_repairs': 'Repairs', 'can_tickets': 'Tickets', 'can_manage_users': 'Manage Users',
+      } %}
       <tr>
         <td>{{ user.username }}</td>
         <td style="color:var(--muted);">
           {% if user.is_super_admin %}All sites{% elif user.sites %}{{ user.sites|map(attribute='name')|join(', ') }}{% else %}—{% endif %}
         </td>
-        <td>{{ '✓' if user.is_admin else '—' }}</td>
-        <td>{{ '✓' if user.is_super_admin else '—' }}</td>
-        <td>{{ '✓' if user.can_manage_users else '—' }}</td>
-        <td>{{ '✓' if user.can_people else '—' }}</td>
-        <td>{{ '✓' if user.can_devices else '—' }}</td>
-        <td>{{ '✓' if user.can_devices_manage else '—' }}</td>
-        <td>{{ '✓' if user.can_loaners else '—' }}</td>
-        <td>{{ '✓' if user.can_loaner_checkinout else '—' }}</td>
-        <td>{{ '✓' if user.can_checkinout else '—' }}</td>
-        <td>{{ '✓' if user.can_repairs else '—' }}</td>
+        <td>
+          {% if user.is_super_admin %}<span class="badge badge-blue" style="font-size:.7rem;">Super Admin</span>
+          {% elif user.is_admin %}<span class="badge badge-blue" style="font-size:.7rem;">Admin</span>
+          {% else %}<span style="color:var(--muted);">Standard</span>{% endif %}
+        </td>
+        <td style="color:var(--muted);font-size:.82rem;">
+          {% if user.is_admin or user.is_super_admin %}
+            <span style="color:var(--muted);">Full access</span>
+          {% else %}
+            {% set granted_names = [] %}
+            {% for attr, label in perm_labels.items() %}
+              {% if user[attr] %}{{ granted_names.append(label) or '' }}{% endif %}
+            {% endfor %}
+            {{ granted_names|join(', ') if granted_names else '—' }}
+          {% endif %}
+        </td>
         <td>
           {% if user.is_active %}
             <span class="badge badge-green">Active</span>
@@ -68,7 +77,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="14" style="text-align:center;color:var(--muted);padding:2rem;">No users yet.</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem;">No users yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

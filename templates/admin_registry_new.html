@@ -12,13 +12,33 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">
-        Asset Tag <span style="font-weight:400;">(optional — leave blank to self-assign a random 6-digit tag)</span>
+        Asset Tag <span style="font-weight:400;">(optional — leave blank to self-assign one)</span>
       </label>
       <input name="asset_tag" value="{{ form.asset_tag if form else '' }}" placeholder="e.g. 483920" />
     </div>
+    {% if asset_number_ranges %}
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Generate From Range (optional)</label>
+      <select name="range_id">
+        {% set default_range = asset_number_ranges|selectattr('is_default')|first %}
+        <option value="">
+          {{ '— Default: ' + default_range.label + ' (' + default_range.range_start|string + '–' + default_range.range_end|string + ') —' if default_range else '— Random (avoids all reserved ranges) —' }}
+        </option>
+        {% for r in asset_number_ranges %}
+        <option value="{{ r.id }}" {{ 'selected' if form and form.range_id == r.id|string }}>{{ r.label }} ({{ r.range_start }}–{{ r.range_end }}){{ ' — default' if r.is_default }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Only used when Asset Tag above is left blank — hands out the next unused number in the chosen
+        range (lowest first), matching a physical batch of pre-printed labels. CSV import pulls from the
+        default range the same way. Manage ranges (and set a default) under
+        <a href="/admin/asset_number_ranges">Asset Number Ranges</a>.
+      </span>
+    </div>
+    {% endif %}
     <div style="margin-bottom:1rem;">
-      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Serial Number (optional)</label>
-      <input name="serial_number" value="{{ form.serial_number if form else '' }}" />
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Serial Number</label>
+      <input name="serial_number" value="{{ form.serial_number if form else '' }}" required />
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description (optional)</label>
@@ -31,6 +51,18 @@
           <option value="{{ t }}" {{ 'selected' if form and form.device_type == t }}>{{ t|capitalize }}</option>
         {% endfor %}
       </select>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Model (optional)</label>
+      <select name="device_model_id">
+        <option value="">— None / custom —</option>
+        {% for m in device_models %}
+        <option value="{{ m.id }}" {{ 'selected' if form and form.device_model_id == m.id|string }}>{{ m.full_name }} ({{ m.device_type }})</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        <a href="/admin/device_models/new">+ Add a new model</a> to the catalog first if it's not listed.
+      </span>
     </div>
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>

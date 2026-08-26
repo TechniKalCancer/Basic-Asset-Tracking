@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Category' if category else 'Add Category' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Category' if category else 'Add Category' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/ticket_categories" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Name</label>
+      <input name="name" value="{{ (form.name if form else (category.name if category else '')) }}" placeholder="e.g. Network" required />
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Default Price (optional)</label>
+      <input name="default_price" value="{{ (form.default_price if form else (category.default_price if category and category.default_price is not none else '')) }}" placeholder="e.g. 15.00" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Applied automatically as the fee on any new ticket opened under this category — editable per-ticket afterward.
+      </span>
+    </div>
+    {% if category %}
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="is_active" style="width:auto;" {{ 'checked' if category.is_active }} />
+      Active (shows up when submitting/creating a ticket)
+    </label>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if category else 'Add Category' }}</button>
+  </form>
+</div>
+{% endblock %}

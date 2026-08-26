@@ -78,6 +78,10 @@
         Repairs
       </label>
       <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+        <input type="checkbox" name="can_tickets" style="width:auto;" {{ 'checked' if user and user.can_tickets }} />
+        Tickets (help-desk queue, categories, assignment)
+      </label>
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
         <input type="checkbox" name="can_manage_users" style="width:auto;" {{ 'checked' if user and user.can_manage_users }} />
         Add / edit / delete users (can't grant Admin or Super Admin)
       </label>

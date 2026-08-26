@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Device Model' if model else 'Add Device Model' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Device Model' if model else 'Add Device Model' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/device_models" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Manufacturer</label>
+      <input name="manufacturer" value="{{ (form.manufacturer if form else (model.manufacturer if model else '')) }}" placeholder="e.g. Dell" required />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Model Name</label>
+      <input name="model_name" value="{{ (form.model_name if form else (model.model_name if model else '')) }}" placeholder="e.g. Chromebook 3120" required />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Type</label>
+      <select name="device_type">
+        {% for t in device_types %}
+          <option value="{{ t }}" {{ 'selected' if (form.device_type if form else (model.device_type if model else 'chromebook')) == t }}>{{ t|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
+      <input name="notes" value="{{ (form.notes if form else (model.notes if model else '')) or '' }}" />
+    </div>
+    {% if model %}
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="is_active" style="width:auto;" {{ 'checked' if model.is_active }} />
+      Active (shows up in the Model picker on Add/Edit Device)
+    </label>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if model else 'Add Model' }}</button>
+  </form>
+</div>
+{% endblock %}

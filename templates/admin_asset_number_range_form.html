@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Reserved Range' if range else 'Reserve Asset Number Range' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Reserved Range' if range else 'Reserve Asset Number Range' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/asset_number_ranges" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Label</label>
+      <input name="label" value="{{ (form.label if form else (range.label if range else '')) }}" placeholder="e.g. 2026 Chromebook order" required />
+    </div>
+    <div style="display:flex;gap:1rem;margin-bottom:1rem;">
+      <div style="flex:1;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Range Start</label>
+        <input type="number" name="range_start" value="{{ (form.range_start if form else (range.range_start if range else '')) }}" placeholder="e.g. 700000" required />
+      </div>
+      <div style="flex:1;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Range End</label>
+        <input type="number" name="range_end" value="{{ (form.range_end if form else (range.range_end if range else '')) }}" placeholder="e.g. 700099" required />
+      </div>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
+      <input name="notes" value="{{ (form.notes if form else (range.notes if range else '')) or '' }}" />
+    </div>
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if range else 'Reserve Range' }}</button>
+  </form>
+</div>
+{% endblock %}

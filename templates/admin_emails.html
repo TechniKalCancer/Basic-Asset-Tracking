@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Email{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">✉️ Email</h1>
+  <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
+    {{ 'Sending enabled' if email_enabled else 'Not configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <p style="color:var(--muted);font-size:.9rem;margin-bottom:0;">
+    Customize the wording of every reminder email this app sends. Use <code>{variable}</code>
+    placeholders anywhere in the subject or body — each card below lists which ones are
+    available for that email. Leave a field blank to use the built-in default. Not configured?
+    Set <code>SMTP_FROM_EMAIL</code> (and <code>SMTP_USERNAME</code>/<code>SMTP_PASSWORD</code> if your relay
+    requires auth) in <code>.env</code> to enable sending.
+  </p>
+</div>
+
+{% for k in kinds %}
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <h2 style="margin:0;">{{ k.label }}</h2>
+    <span class="badge {{ 'badge-green' if k.is_custom else 'badge-yellow' }}">{{ 'Customized' if k.is_custom else 'Using Default' }}</span>
+  </div>
+
+  <p style="color:var(--muted);font-size:.82rem;margin-bottom:1rem;">
+    Available variables:
+    {% for v in k.variables %}<code style="margin-right:.4rem;">{{'{' + v + '}'}}</code>{% endfor %}
+  </p>
+
+  <form method="POST" style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+    <div style="flex:1;min-width:320px;">
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Subject</label>
+        <input name="{{ k.key }}_subject" id="{{ k.key }}_subject" value="{{ k.subject }}"
+               oninput="renderEmailPreview('{{ k.key }}')" />
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Body</label>
+        <textarea name="{{ k.key }}_body" id="{{ k.key }}_body" rows="8" style="width:100%;resize:vertical;font-family:inherit;"
+                  oninput="renderEmailPreview('{{ k.key }}')">{{ k.body }}</textarea>
+      </div>
+      <div style="display:flex;gap:.8rem;">
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:280px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Live Preview (sample data)</label>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:1rem;">
+        <div style="font-weight:600;margin-bottom:.6rem;" id="{{ k.key }}_preview_subject">{{ k.preview_subject }}</div>
+        <div style="white-space:pre-wrap;color:var(--muted);font-size:.88rem;" id="{{ k.key }}_preview_body">{{ k.preview_body }}</div>
+      </div>
+    </div>
+  </form>
+
+  {% if k.is_custom %}
+  <form method="POST" style="margin-top:1rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="reset:{{ k.key }}">
+    <button type="submit" class="btn btn-ghost" style="width:auto;font-size:.82rem;"
+            onclick="return confirm('Reset \'{{ k.label }}\' to the built-in default wording?');">
+      Reset to default
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+
+<script>
+const SAMPLE_VALUES = {{ sample_vars|tojson }};
+
+function renderEmailPreview(kind) {
+  const subjectInput = document.getElementById(kind + '_subject');
+  const bodyInput = document.getElementById(kind + '_body');
+  const subjectOut = document.getElementById(kind + '_preview_subject');
+  const bodyOut = document.getElementById(kind + '_preview_body');
+  function fill(template) {
+    return template.replace(/\{(\w+)\}/g, function (match, name) {
+      return Object.prototype.hasOwnProperty.call(SAMPLE_VALUES, name) ? SAMPLE_VALUES[name] : match;
+    });
+  }
+  if (subjectOut) subjectOut.textContent = fill(subjectInput.value);
+  if (bodyOut) bodyOut.textContent = fill(bodyInput.value);
+}
+</script>
+{% endblock %}

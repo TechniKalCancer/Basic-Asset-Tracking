@@ -31,11 +31,25 @@
 
   {% if settings.logo_filename %}
   <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;padding:1rem;background:var(--surface2);border:1px solid var(--border);border-radius:7px;">
-    <img src="{{ url_for('branding_logo', filename=settings.logo_filename) }}" alt="Current logo" style="max-height:60px;max-width:220px;">
+    <span class="{{ 'logo-plate-' + settings.logo_background if settings.logo_background else '' }}">
+      <img src="{{ url_for('branding_logo', filename=settings.logo_filename) }}" alt="Current logo" style="display:block;max-height:60px;max-width:220px;">
+    </span>
     <form method="POST" style="margin-left:auto;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="remove_logo">
       <button type="submit" class="btn btn-ghost" style="width:auto;">Remove Logo</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if settings.favicon_filename %}
+  <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;padding:1rem;background:var(--surface2);border:1px solid var(--border);border-radius:7px;">
+    <img src="{{ url_for('branding_logo', filename=settings.favicon_filename) }}" alt="Current favicon" style="display:block;width:32px;height:32px;background:#fff;border-radius:4px;padding:2px;">
+    <span style="color:var(--muted);font-size:.85rem;">Current favicon (browser tab icon)</span>
+    <form method="POST" style="margin-left:auto;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="remove_favicon">
+      <button type="submit" class="btn btn-ghost" style="width:auto;">Remove Favicon</button>
     </form>
   </div>
   {% endif %}
@@ -46,7 +60,7 @@
 
     <div style="margin-bottom:1.2rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">App Name</label>
-      <input name="app_name" value="{{ settings.app_name or '' }}" placeholder="AssetTracker" />
+      <input name="app_name" value="{{ settings.app_name or '' }}" placeholder="FoxDesk" />
     </div>
 
     <div style="margin-bottom:1.5rem;">
@@ -54,6 +68,31 @@
         {{ 'Replace Logo' if settings.logo_filename else 'Logo' }}
       </label>
       <input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp" />
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">
+        {{ 'Replace Favicon' if settings.favicon_filename else 'Favicon' }}
+      </label>
+      <input type="file" name="favicon" accept=".png,.jpg,.jpeg,.svg,.webp,.ico" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        The small icon shown in the browser tab. A square PNG or ICO around 32×32 or 64×64 works best.
+      </span>
+    </div>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Logo Background</label>
+      <select name="logo_background">
+        <option value="" {{ 'selected' if not settings.logo_background }}>None (transparent)</option>
+        <option value="light" {{ 'selected' if settings.logo_background == 'light' }}>Light plate</option>
+        <option value="dark" {{ 'selected' if settings.logo_background == 'dark' }}>Dark plate</option>
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        This app's nav/login are always dark — if your logo has dark text or outlines (like a
+        design meant for a white background), pick <strong>Light plate</strong> so it stays
+        readable instead of blending into the background. Pick <strong>Dark plate</strong> for a
+        logo with light/white elements that would otherwise vanish against a light page.
+      </span>
     </div>
 
     <div style="margin-bottom:1.5rem;">

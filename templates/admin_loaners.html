@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Loaners{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">🎒 Loaners</h1>
@@ -8,8 +9,7 @@
     <span class="badge badge-red">{{ overdue_count }} overdue</span>
   {% endif %}
   <span class="spacer" style="flex:1;"></span>
-  <a href="/loaner_checkout" class="btn btn-ghost" target="_blank">📤 Student Checkout Page</a>
-  <a href="/loaner_checkin" class="btn btn-ghost" target="_blank">📥 Student Checkin Page</a>
+  <a href="/loaner_checkinout" class="btn btn-ghost" target="_blank">🎒 Loaner Check In / Out Page</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -68,17 +68,32 @@
   </script>
 </div>
 
+{{ macros.search_box('Search asset tag, serial, description…') }}
+
+<form id="loanerEmailForm" method="POST" action="/admin/loaners/email_selected"
+      style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-primary" {{ 'disabled' if not email_enabled }}>
+    ✉️ Email Selected{{ '' if email_enabled else ' (email not configured)' }}
+  </button>
+  <span id="selectedCount" style="color:var(--muted);font-size:.85rem;">0 selected</span>
+</form>
+<p style="color:var(--muted);font-size:.82rem;margin-top:-.6rem;margin-bottom:1.5rem;">
+  Check any checked-out loaner below — due or not yet due — and email just those. Blank/no-date checkouts get a generic reminder instead of a due-date one.
+</p>
+
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
-        <th>Asset Tag</th>
-        <th>Serial</th>
-        <th>Description</th>
-        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th>Site</th>{% endif %}
-        <th>Status</th>
+        <th style="width:2rem;"><input type="checkbox" id="selectAllLoaners" onclick="toggleAllLoanerCheckboxes(this)" title="Select all checked-out loaners" /></th>
+        <th class="sortable">{{ macros.sort_link('asset_tag', 'Asset Tag') }}</th>
+        <th class="sortable">{{ macros.sort_link('serial_number', 'Serial') }}</th>
+        <th class="sortable">{{ macros.sort_link('description', 'Description') }}</th>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>{% endif %}
+        <th class="sortable">{{ macros.sort_link('status', 'Status') }}</th>
         <th>Checked Out To</th>
-        <th>Due</th>
+        <th class="sortable">{{ macros.sort_link('due_date', 'Due') }}</th>
         <th></th>
       </tr>
     </thead>
@@ -86,6 +101,12 @@
       {% for row in loaner_rows %}
       {% set checkout = open_checkouts.get(row.asset_tag) %}
       <tr>
+        <td>
+          {% if checkout %}
+          <input type="checkbox" name="asset_tags" value="{{ row.asset_tag }}" form="loanerEmailForm"
+                 class="loaner-email-checkbox" onchange="updateSelectedLoanerCount()" />
+          {% endif %}
+        </td>
         <td><button type="button" class="tag-link" onclick="fillLoanerTag('{{ row.asset_tag }}')" title="Use this in the Check Out form above"><code>{{ row.asset_tag }}</code></button></td>
         <td>
           {% if row.serial_number %}
@@ -124,11 +145,22 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="{{ 8 if (current_site_ids() is none or current_site_ids()|length > 1) else 7 }}" style="text-align:center;color:var(--muted);padding:2rem;">
+      <tr><td colspan="{{ 9 if (current_site_ids() is none or current_site_ids()|length > 1) else 8 }}" style="text-align:center;color:var(--muted);padding:2rem;">
         No devices are marked as loaners yet. Mark one from the <a href="/admin/registry">Asset Registry</a>.
       </td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<script>
+function toggleAllLoanerCheckboxes(master) {
+  document.querySelectorAll('.loaner-email-checkbox').forEach(function (cb) { cb.checked = master.checked; });
+  updateSelectedLoanerCount();
+}
+function updateSelectedLoanerCount() {
+  const n = document.querySelectorAll('.loaner-email-checkbox:checked').length;
+  const el = document.getElementById('selectedCount');
+  if (el) el.textContent = n + ' selected';
+}
+</script>
 {% endblock %}

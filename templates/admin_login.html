@@ -4,9 +4,16 @@
 <div style="max-width:360px;margin:4rem auto;">
   <div class="card">
     {% if branding.logo_url %}
-    <img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}" style="display:block;max-height:80px;max-width:100%;margin:0 auto 1rem;">
+    <div style="text-align:center;margin-bottom:1rem;">
+      <span class="{{ 'logo-plate-' + branding.logo_background if branding.logo_background else '' }}" style="display:inline-flex;">
+        <img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}" style="display:block;max-height:80px;max-width:100%;">
+      </span>
+    </div>
     {% endif %}
-    <h1 style="text-align:center;margin-bottom:1.5rem;">🔒 Admin Login</h1>
+    <h1 style="text-align:center;margin-bottom:.4rem;">🔒 Admin Login</h1>
+    <p style="text-align:center;color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+      {{ branding.app_name or 'FoxDesk' }} — devices, loaners, tickets, and repairs, all in one place.
+    </p>
     <form method="POST" autocomplete="off">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label style="display:block;font-size:.85rem;color:var(--muted);margin-bottom:.4rem;">Username (leave blank for the shared admin password)</label>

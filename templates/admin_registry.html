@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Asset Registry{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">📋 Asset Registry</h1>
@@ -23,6 +24,8 @@
 
 <form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;">
   {% if person_filter %}<input type="hidden" name="person_id" value="{{ person_filter }}">{% endif %}
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ sort_dir }}">
   <input name="q" value="{{ search }}" placeholder="Search tag, serial, or description…" style="max-width:360px;flex:1;" />
   <select name="status" style="max-width:160px;">
     <option value="">All statuses</option>
@@ -55,15 +58,17 @@
   <table>
     <thead>
       <tr>
-        <th>Asset Tag</th>
-        <th>Serial Number</th>
-        <th>Description</th>
-        <th>Type</th>
-        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th>Site</th>{% endif %}
-        <th>Status</th>
+        <th class="sortable">{{ macros.sort_link('asset_tag', 'Asset Tag') }}</th>
+        <th class="sortable">{{ macros.sort_link('serial_number', 'Serial Number') }}</th>
+        <th class="sortable">{{ macros.sort_link('description', 'Description') }}</th>
+        <th class="sortable">{{ macros.sort_link('device_type', 'Type') }}</th>
+        {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>{% endif %}
+        <th class="sortable">{{ macros.sort_link('status', 'Status') }}</th>
         <th>Assigned To</th>
         <th></th>
       </tr>
+      {% set total_cols = 8 if (current_site_ids() is none or current_site_ids()|length > 1) else 7 %}
+      {{ macros.filter_row(total_cols, skip=[total_cols - 1]) }}
     </thead>
     <tbody>
       {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
@@ -103,18 +108,21 @@
             {{ 'Reassign' if asset and asset.assigned_to else 'Assign' }}
           </a>
           {% if can('devices_manage') %}
-          <a href="/admin/registry/{{ row.asset_tag }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
-          <form method="POST" action="/admin/assets/{{ row.asset_tag }}/toggle_loaner" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">
-              {{ 'Unmark Loaner' if row.is_loaner else 'Mark Loaner' }}
-            </button>
-          </form>
-          <form method="POST" action="/admin/registry/{{ row.asset_tag }}/delete" style="display:inline;"
-                onsubmit="return confirm('Permanently delete {{ row.asset_tag }} from the registry?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
-          </form>
+          <div class="row-menu">
+            <button type="button">⋮</button>
+            <div class="row-menu-items">
+              <a href="/admin/registry/{{ row.asset_tag }}/edit">✏️ Edit</a>
+              <form method="POST" action="/admin/assets/{{ row.asset_tag }}/toggle_loaner">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit">🎒 {{ 'Unmark Loaner' if row.is_loaner else 'Mark Loaner' }}</button>
+              </form>
+              <form method="POST" action="/admin/registry/{{ row.asset_tag }}/delete"
+                    onsubmit="return confirm('Permanently delete {{ row.asset_tag }} from the registry?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="danger">🗑️ Delete</button>
+              </form>
+            </div>
+          </div>
           {% endif %}
         </td>
       </tr>
@@ -128,13 +136,13 @@
 {% if pagination.pages > 1 %}
 <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;">
   {% if pagination.has_prev %}
-    <a href="?page={{ pagination.prev_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
+    <a href="?page={{ pagination.prev_num }}&sort={{ sort }}&dir={{ sort_dir }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
   {% endif %}
   <span style="padding:.5rem 1rem;color:var(--muted);font-size:.88rem;">
     Page {{ pagination.page }} of {{ pagination.pages }}
   </span>
   {% if pagination.has_next %}
-    <a href="?page={{ pagination.next_num }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
+    <a href="?page={{ pagination.next_num }}&sort={{ sort }}&dir={{ sort_dir }}{% if search %}&q={{ search }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if type_filter %}&device_type={{ type_filter }}{% endif %}{% if warranty_filter %}&warranty={{ warranty_filter }}{% endif %}{% if person_filter %}&person_id={{ person_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
   {% endif %}
 </div>
 {% endif %}

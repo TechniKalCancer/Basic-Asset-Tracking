@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Collection{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">📦 Collection — Who Still Has What</h1>
@@ -11,6 +12,8 @@
   outstanding list — useful for end-of-year collection instead of checking the registry and
   loaner pages separately.
 </p>
+
+{{ macros.search_box('Search asset tag, description, or person…') }}
 
 {% if can('devices') %}
 <div class="card" style="padding:0;overflow-x:auto;">

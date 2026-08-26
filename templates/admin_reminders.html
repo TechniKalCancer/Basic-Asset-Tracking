@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Overdue Reminders{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">⏰ Overdue Reminders</h1>
@@ -20,7 +21,9 @@
 </div>
 {% endif %}
 
-<div class="card" style="padding:0;overflow:hidden;">
+{{ macros.search_box('Search asset tag or person…') }}
+
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>

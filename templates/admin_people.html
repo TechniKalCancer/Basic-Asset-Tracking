@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}People{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">👤 People</h1>
@@ -12,6 +13,8 @@
 </div>
 
 <form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ sort_dir }}">
   <input name="q" value="{{ search }}" placeholder="Search name, email, site, or ID…" style="max-width:360px;" />
   <select name="show" onchange="this.form.submit()">
     <option value="active"   {{ 'selected' if show == 'active' }}>Active only</option>
@@ -26,18 +29,17 @@
   {% if search or insurance_filter %}<a href="/admin/people?show={{ show }}" class="btn btn-ghost">Clear</a>{% endif %}
 </form>
 
-<div class="card" style="padding:0;overflow:hidden;">
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Email</th>
-        <th>ID</th>
-        <th>Role</th>
-        <th>Site</th>
-        <th>Department</th>
+        <th class="sortable">{{ macros.sort_link('name', 'Name') }}</th>
+        <th class="sortable">{{ macros.sort_link('email', 'Email') }}</th>
+        <th class="sortable">{{ macros.sort_link('external_id', 'ID') }}</th>
+        <th class="sortable">{{ macros.sort_link('role', 'Role') }}</th>
+        <th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>
+        <th class="sortable">{{ macros.sort_link('department', 'Department') }}</th>
         <th>Assets</th>
-        <th></th>
         <th></th>
       </tr>
     </thead>
@@ -62,25 +64,28 @@
           {% endif %}
         </td>
         <td style="text-align:right;white-space:nowrap;">
-          <a href="/admin/people/{{ person.id }}/history" class="btn btn-ghost" style="padding:.3rem .7rem;">History</a>
           <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
-          {% if not person.is_active %}
-          <form method="POST" action="/admin/people/{{ person.id }}/reactivate" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Reactivate</button>
-          </form>
-          {% endif %}
-        </td>
-        <td style="text-align:right;white-space:nowrap;">
-          <form method="POST" action="/admin/people/{{ person.id }}/delete" style="display:inline;"
-                onsubmit="return confirm('Permanently delete {{ person.full_name }}? Any assigned assets will be unassigned. Prefer Graduate Students for leaving students.');">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
-          </form>
+          <div class="row-menu">
+            <button type="button">⋮</button>
+            <div class="row-menu-items">
+              <a href="/admin/people/{{ person.id }}/history">📜 History</a>
+              {% if not person.is_active %}
+              <form method="POST" action="/admin/people/{{ person.id }}/reactivate">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit">↩️ Reactivate</button>
+              </form>
+              {% endif %}
+              <form method="POST" action="/admin/people/{{ person.id }}/delete"
+                    onsubmit="return confirm('Permanently delete {{ person.full_name }}? Any assigned assets will be unassigned. Prefer Graduate Students for leaving students.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="danger">🗑️ Delete</button>
+              </form>
+            </div>
+          </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
+      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -89,13 +94,13 @@
 {% if pagination.pages > 1 %}
 <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;">
   {% if pagination.has_prev %}
-    <a href="?page={{ pagination.prev_num }}&show={{ show }}{% if search %}&q={{ search }}{% endif %}{% if insurance_filter %}&insurance={{ insurance_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
+    <a href="?page={{ pagination.prev_num }}&show={{ show }}&sort={{ sort }}&dir={{ sort_dir }}{% if search %}&q={{ search }}{% endif %}{% if insurance_filter %}&insurance={{ insurance_filter }}{% endif %}" class="btn btn-ghost">‹ Prev</a>
   {% endif %}
   <span style="padding:.5rem 1rem;color:var(--muted);font-size:.88rem;">
     Page {{ pagination.page }} of {{ pagination.pages }}
   </span>
   {% if pagination.has_next %}
-    <a href="?page={{ pagination.next_num }}&show={{ show }}{% if search %}&q={{ search }}{% endif %}{% if insurance_filter %}&insurance={{ insurance_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
+    <a href="?page={{ pagination.next_num }}&show={{ show }}&sort={{ sort }}&dir={{ sort_dir }}{% if search %}&q={{ search }}{% endif %}{% if insurance_filter %}&insurance={{ insurance_filter }}{% endif %}" class="btn btn-ghost">Next ›</a>
   {% endif %}
 </div>
 {% endif %}

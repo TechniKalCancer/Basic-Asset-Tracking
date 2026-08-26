@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Orphaned Records{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">⚠️ Orphaned Records</h1>
@@ -15,11 +16,15 @@
   </p>
 </div>
 
+{{ macros.search_box('Search asset tag…') }}
+
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
-        <th>Asset Tag</th>
+        <th class="sortable">
+          <a href="?dir={{ 'desc' if sort_dir == 'asc' else 'asc' }}{% if search %}&q={{ search }}{% endif %}">Asset Tag <span class="sort-arrow">{{ '▲' if sort_dir == 'asc' else '▼' }}</span></a>
+        </th>
         <th>Last Check-In</th>
         <th>Last Check-Out</th>
         <th>Status</th>

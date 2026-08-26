@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Loaner Check In / Out{% endblock %}
+{% block content %}
+<h1>🎒 Loaner Check In / Out</h1>
+
+<div class="card" style="max-width:480px;">
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
+    Scan or type the loaner's asset tag/serial — we'll figure out whether it's a checkout or a check-in.
+  </p>
+
+  <form method="POST" id="loanerForm" style="position:relative;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Asset Tag / Serial</label>
+      <input type="text" name="scan_value" id="scanInput" autocomplete="off" autofocus placeholder="Scan or type…" />
+    </div>
+
+    <p id="lookupStatus" style="font-size:.85rem;color:var(--muted);min-height:1.2em;margin-bottom:1rem;"></p>
+
+    <div id="checkoutFields" style="display:none;position:relative;">
+      <div style="margin-bottom:1rem;position:relative;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Your Name</label>
+        <input type="hidden" name="person_id" id="personIdInput" />
+        <input type="text" id="personSearchInput" autocomplete="off" placeholder="Type your name…" />
+        <div id="personResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+             background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+             max-height:260px;overflow-y:auto;"></div>
+      </div>
+      <div style="margin-bottom:1.5rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Type your full name to acknowledge you're responsible for this device</label>
+        <input type="text" name="acknowledged_by" id="acknowledgedByInput" autocomplete="off" placeholder="Your full name" />
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="submitBtn" disabled>Scan a device to continue</button>
+  </form>
+  <script src="/static/js/person_search.js"></script>
+  <script>
+    initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
+
+    var form = document.getElementById('loanerForm');
+    var scanInput = document.getElementById('scanInput');
+    var lookupStatus = document.getElementById('lookupStatus');
+    var checkoutFields = document.getElementById('checkoutFields');
+    var submitBtn = document.getElementById('submitBtn');
+    var acknowledgedByInput = document.getElementById('acknowledgedByInput');
+    var lookupTimer = null;
+    var resolvedFor = null; // the scan value the current mode was resolved for
+
+    function reset() {
+      resolvedFor = null;
+      checkoutFields.style.display = 'none';
+      acknowledgedByInput.required = false;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Scan a device to continue';
+      lookupStatus.textContent = '';
+    }
+
+    function lookup(value, autoSubmitOnCheckin) {
+      fetch('/api/loaner_lookup?scan_value=' + encodeURIComponent(value))
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!data.found) {
+            reset();
+            lookupStatus.style.color = 'var(--danger)';
+            lookupStatus.textContent = '"' + value + '" was not found in the asset registry.';
+            return;
+          }
+          if (!data.is_loaner) {
+            reset();
+            lookupStatus.style.color = 'var(--danger)';
+            lookupStatus.textContent = data.asset_tag + ' is not a loaner device.';
+            return;
+          }
+          resolvedFor = value;
+          lookupStatus.style.color = 'var(--muted)';
+          if (data.checked_out) {
+            checkoutFields.style.display = 'none';
+            acknowledgedByInput.required = false;
+            lookupStatus.textContent = '✅ ' + data.asset_tag + ' is checked out to ' + data.checked_out_to + ' — checking it in…';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Check In';
+            if (autoSubmitOnCheckin) form.submit();
+          } else {
+            checkoutFields.style.display = 'block';
+            acknowledgedByInput.required = true;
+            lookupStatus.textContent = '🎒 ' + data.asset_tag + ' is available — enter your name below to check it out.';
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Check Out';
+            document.getElementById('personSearchInput').focus();
+          }
+        })
+        .catch(function () {
+          lookupStatus.style.color = 'var(--danger)';
+          lookupStatus.textContent = 'Could not look up that device — try again.';
+        });
+    }
+
+    scanInput.addEventListener('input', function () {
+      reset();
+      clearTimeout(lookupTimer);
+      var value = scanInput.value.trim();
+      if (!value) return;
+      lookupTimer = setTimeout(function () { lookup(value, false); }, 350);
+    });
+    scanInput.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var value = scanInput.value.trim();
+      if (!value) return;
+      clearTimeout(lookupTimer);
+      // A barcode scanner sends the code then Enter almost instantly — if we
+      // already resolved this exact value (checkin case, no extra fields
+      // needed), submit immediately instead of making them press Enter twice.
+      if (resolvedFor === value) { form.submit(); return; }
+      lookup(value, true);
+    });
+  </script>
+</div>
+{% endblock %}

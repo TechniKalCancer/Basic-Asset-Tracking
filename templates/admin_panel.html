@@ -92,6 +92,14 @@
     </div>
   </a>
   {% endif %}
+  {% if open_tickets_count is not none %}
+  <a href="/admin/tickets" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num" style="color:{{ 'var(--warning)' if open_tickets_count else 'var(--success)' }}">{{ open_tickets_count }}</div>
+      <div class="lbl">Open Tickets</div>
+    </div>
+  </a>
+  {% endif %}
 </div>
 
 {% if can('devices') %}
@@ -145,7 +153,9 @@
   <h2>📂 Upload Asset Registry CSV</h2>
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     All columns are optional — rows with no <code>asset_tag</code> (and no <code>serial_number</code>
-    to fall back on) get a random unique 6-digit tag self-assigned automatically.<br>
+    to fall back on) get a tag self-assigned automatically: sequential numbers from the
+    <a href="/admin/asset_number_ranges">default asset number range</a> if one's set, otherwise a
+    random unique 6-digit tag.<br>
     Uploading a new CSV <strong>completely replaces the entire registry, every site</strong>, and auto-heals
     any orphaned scan records — this is why it's super-admin only. Site admins can fill in devices' sites
     without replacing anything via <a href="/admin/registry/set_sites">Set Sites (CSV)</a> instead.

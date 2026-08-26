@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Kiosk Devices{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">🖥️ Kiosk Devices</h1>
@@ -41,13 +42,17 @@
   {% endif %}
 </div>
 
-<div class="card" style="padding:0;overflow:hidden;">
+{{ macros.search_box('Search label…') }}
+
+<div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
         <th>Label</th>
         <th>Site</th>
-        <th>Enrolled</th>
+        <th class="sortable">
+          <a href="?dir={{ 'asc' if sort_dir == 'desc' else 'desc' }}{% if search %}&q={{ search }}{% endif %}">Enrolled <span class="sort-arrow">{{ '▲' if sort_dir == 'asc' else '▼' }}</span></a>
+        </th>
         <th></th>
         <th></th>
       </tr>

@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Repair Categories{% endblock %}
+{% import '_macros.html' as macros %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🔧 Repair Categories</h1>
+  <span class="badge badge-blue">{{ categories|length }} total</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/repair_categories/new" class="btn btn-primary">+ Add Category</a>
+  <a href="/admin/fees" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Standard damage/repair types (e.g. "Cracked Screen", "Lost Charger") with their usual price — pick one
+  when logging an incident on a device's Assign page to auto-fill the description and fee.
+</p>
+
+{{ macros.search_box('Search category name…') }}
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th class="sortable">
+          <a href="?dir={{ 'desc' if sort_dir == 'asc' else 'asc' }}{% if search %}&q={{ search }}{% endif %}">Name <span class="sort-arrow">{{ '▲' if sort_dir == 'asc' else '▼' }}</span></a>
+        </th>
+        <th>Default Price</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in categories %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td style="color:var(--muted);">{% if c.default_price %}${{ '%.2f'|format(c.default_price) }}{% else %}—{% endif %}</td>
+        <td><span class="badge {{ 'badge-green' if c.is_active else 'badge-red' }}">{{ 'Active' if c.is_active else 'Inactive' }}</span></td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/repair_categories/{{ c.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
+          <form method="POST" action="/admin/repair_categories/{{ c.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('Delete category {{ c.name }}? Only works if no incidents reference it.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No repair categories yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

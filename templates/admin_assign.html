@@ -1,10 +1,22 @@
 {% extends 'base.html' %}
 {% block title %}Assign {{ registry_row.asset_tag }}{% endblock %}
 {% block content %}
-<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">Assign <code>{{ registry_row.asset_tag }}</code></h1>
   {% if registry_row.site %}<span class="badge badge-blue">🏫 {{ registry_row.site.name }}</span>{% endif %}
+  {% if registry_row.is_loaner %}<span class="badge badge-yellow">🎒 Loaner</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
+  {% if can('devices_manage') %}
+  <a href="/admin/registry/{{ registry_row.asset_tag }}/edit" class="btn btn-ghost">✏️ Edit Device</a>
+  {% if not registry_row.is_loaner and asset and asset.assigned_to %}
+  <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">🎒 Mark as Loaner</button>
+  {% else %}
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/toggle_loaner" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost">{{ '🎒 Unmark Loaner' if registry_row.is_loaner else '🎒 Mark as Loaner' }}</button>
+  </form>
+  {% endif %}
+  {% endif %}
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -36,7 +48,12 @@
     {% endif %}
   </p>
 
-  {% if has_people %}
+  {% if registry_row.is_loaner %}
+  <p style="color:var(--muted);font-size:.88rem;">
+    🎒 This device is in the loaner pool, so it can't be permanently assigned here — check it out via
+    <a href="/loaner_checkinout">Loaner Check In / Out</a> instead, or unmark it as a loaner above first.
+  </p>
+  {% elif has_people %}
   <form method="POST">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;position:relative;">
@@ -140,34 +157,73 @@
 </div>
 
 <div class="card" style="max-width:480px;">
-  <h2>🛠️ Incidents / Damage Reports</h2>
+  <div style="display:flex;align-items:center;gap:.6rem;">
+    <h2 style="margin:0;">🛠️ Incidents / Damage Reports</h2>
+    {% if incidents %}
+    <a href="/admin/assets/{{ registry_row.asset_tag }}/invoice" target="_blank" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.8rem;margin-left:auto;">🖨️ Print Invoice</a>
+    {% endif %}
+  </div>
   {% if asset and asset.assigned_to and current_person_incident_count %}
-    <p style="color:var(--warning);font-size:.85rem;margin-bottom:1rem;">
+    <p style="color:var(--warning);font-size:.85rem;margin:.8rem 0;">
       This will be incident #{{ current_person_incident_count + 1 }} for {{ asset.assigned_to.full_name }}
       (across all assets, all time).
     </p>
   {% endif %}
   {% if asset and asset.assigned_to and asset.assigned_to.insurance_opted_in %}
-    <p style="margin-bottom:1rem;">
+    <p style="margin:.8rem 0;">
       <span class="badge badge-blue">🛡️ {{ asset.assigned_to.full_name }} has the device protection plan — check before charging a fee.</span>
     </p>
   {% endif %}
-  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" style="margin-bottom:1rem;">
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" style="margin:1rem 0;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if repair_categories %}
+    <div style="margin-bottom:.8rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Repair Category (optional)</label>
+      <select id="repairCategorySelect" name="repair_category_id">
+        <option value="">— None / custom —</option>
+        {% for c in repair_categories %}
+        <option value="{{ c.id }}" data-name="{{ c.name }}" data-price="{{ c.default_price if c.default_price is not none else '' }}">
+          {{ c.name }}{% if c.default_price %} (${{ '%.2f'|format(c.default_price) }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Picking one fills in the description and fee below — both stay editable.
+        <a href="/admin/repair_categories">Manage categories</a>
+      </span>
+    </div>
+    {% endif %}
     <div style="margin-bottom:.8rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
-      <input name="description" placeholder="e.g. Cracked screen, reported by student" required />
+      <input id="incidentDescription" name="description" placeholder="e.g. Cracked screen, reported by student" required />
     </div>
     <div style="margin-bottom:.8rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Fee Amount (optional)</label>
-      <input name="fee_amount" placeholder="e.g. 50.00" />
+      <input id="incidentFeeAmount" name="fee_amount" placeholder="e.g. 50.00" />
     </div>
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
-      <input type="checkbox" name="fee_charged" style="width:auto;" />
+      <input id="incidentFeeCharged" type="checkbox" name="fee_charged" style="width:auto;" />
       Fee charged for this incident
     </label>
     <button type="submit" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">Log Incident</button>
   </form>
+  <script>
+    (function () {
+      var select = document.getElementById('repairCategorySelect');
+      if (!select) return;
+      select.addEventListener('change', function () {
+        var opt = select.options[select.selectedIndex];
+        var name = opt.getAttribute('data-name');
+        var price = opt.getAttribute('data-price');
+        if (!name) return;
+        document.getElementById('incidentDescription').value = name;
+        if (price) {
+          document.getElementById('incidentFeeAmount').value = price;
+          document.getElementById('incidentFeeCharged').checked = true;
+        }
+      });
+    })();
+  </script>
 
   {% if incidents %}
   <table>
@@ -179,7 +235,7 @@
       <tr>
         <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--muted);">{{ inc.person_name or '—' }}</td>
-        <td>{{ inc.description }}</td>
+        <td>{{ inc.description }}{% if inc.repair_category and inc.repair_category.name != inc.description %}<span style="color:var(--muted);font-size:.78rem;"> — {{ inc.repair_category.name }}</span>{% endif %}</td>
         <td style="white-space:nowrap;">
           {% if inc.fee_charged %}
             {% if inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% endif %}
@@ -197,6 +253,24 @@
             <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
           </form>
           {% endif %}
+          <div class="row-menu" style="display:inline-block;">
+            <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
+            <div class="row-menu-items" style="min-width:240px;">
+              <form method="POST" action="/admin/incidents/{{ inc.id }}/fee" style="padding:.4rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">
+                  {{ 'Correct Fee Amount' if inc.fee_charged else 'Charge a Fee' }} (blank clears it)
+                </label>
+                <input name="fee_amount" value="{{ inc.fee_amount if inc.fee_amount is not none else '' }}" placeholder="e.g. 15.00" style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-primary" style="width:100%;">Save Fee</button>
+              </form>
+              <form method="POST" action="/admin/incidents/{{ inc.id }}/delete" style="padding:.4rem;border-top:1px solid var(--border);"
+                    onsubmit="return confirm('Delete this incident{% if inc.fee_amount %} (${{ '%.2f'|format(inc.fee_amount) }}){% endif %}? This removes it entirely, including from incident history.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger" style="width:100%;">Delete</button>
+              </form>
+            </div>
+          </div>
         </td>
       </tr>
       {% endfor %}
@@ -212,13 +286,44 @@
   <h2>🛠️ Repair</h2>
   {% if open_repair %}
     <p style="color:var(--muted);font-size:.88rem;margin-bottom:.5rem;">
-      Sent {{ open_repair.sent_at.strftime('%Y-%m-%d') }}{% if open_repair.vendor %} to {{ open_repair.vendor }}{% endif %}
+      Sent {{ open_repair.sent_at.strftime('%Y-%m-%d') }}{% if open_repair.repair_category %} — {{ open_repair.repair_category.name }}{% endif %}
       {% if open_repair.ticket_number %} &mdash; ticket #{{ open_repair.ticket_number }}{% endif %}.
       {% if open_repair.expected_return_at %}Expected back {{ open_repair.expected_return_at.strftime('%Y-%m-%d') }}.{% endif %}
+      {% if open_repair.ticket_id %}<a href="/admin/tickets/{{ open_repair.ticket_id }}">🎫 View Ticket #{{ open_repair.ticket_id }}</a>{% endif %}
     </p>
     {% if open_repair.issue_description %}
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">Issue: {{ open_repair.issue_description }}</p>
     {% endif %}
+
+    <details style="margin-bottom:1rem;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">✏️ Edit repair details</summary>
+      <form method="POST" action="/admin/repairs/{{ open_repair.id }}/edit" style="margin-top:.8rem;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="margin-bottom:.8rem;">
+          <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
+          <select name="repair_category_id">
+            <option value="">— None —</option>
+            {% for c in repair_categories %}
+            <option value="{{ c.id }}" {{ 'selected' if open_repair.repair_category_id == c.id }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="margin-bottom:.8rem;">
+          <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (vendor's)</label>
+          <input name="ticket_number" value="{{ open_repair.ticket_number or '' }}" />
+        </div>
+        <div style="margin-bottom:.8rem;">
+          <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description</label>
+          <input name="issue_description" value="{{ open_repair.issue_description or '' }}" required />
+        </div>
+        <div style="margin-bottom:1rem;">
+          <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return</label>
+          <input type="date" name="expected_return_at" value="{{ open_repair.expected_return_at.isoformat() if open_repair.expected_return_at else '' }}" />
+        </div>
+        <button type="submit" class="btn btn-ghost">Save Changes</button>
+      </form>
+    </details>
+
     <form method="POST" action="/admin/repairs/{{ open_repair.id }}/return">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:.8rem;">
@@ -240,16 +345,21 @@
     <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/repairs/send">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:.8rem;">
-        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Vendor (optional)</label>
-        <input name="vendor" placeholder="e.g. CompuCom" />
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category (optional)</label>
+        <select name="repair_category_id">
+          <option value="">— None —</option>
+          {% for c in repair_categories %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div style="margin-bottom:.8rem;">
         <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (optional)</label>
         <input name="ticket_number" />
       </div>
       <div style="margin-bottom:.8rem;">
-        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description (optional)</label>
-        <input name="issue_description" placeholder="e.g. Won't power on" />
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description</label>
+        <input name="issue_description" placeholder="e.g. Won't power on" required />
       </div>
       <div style="margin-bottom:1rem;">
         <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return (optional)</label>
@@ -263,7 +373,7 @@
   <h3 style="margin-top:1.5rem;font-size:.9rem;color:var(--muted);">Past Repairs</h3>
   <table>
     <thead>
-      <tr><th>Sent</th><th>Returned</th><th>Outcome</th><th>Vendor</th></tr>
+      <tr><th>Sent</th><th>Returned</th><th>Outcome</th><th>Category</th></tr>
     </thead>
     <tbody>
       {% for r in closed_repairs %}
@@ -271,7 +381,7 @@
         <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--muted);white-space:nowrap;">{{ r.returned_at.strftime('%Y-%m-%d') }}</td>
         <td>{{ repair_outcomes.get(r.outcome, r.outcome) }}</td>
-        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+        <td style="color:var(--muted);">{{ r.repair_category.name if r.repair_category else '—' }}</td>
       </tr>
       {% endfor %}
     </tbody>

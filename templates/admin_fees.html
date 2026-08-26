@@ -1,46 +1,97 @@
 {% extends 'base.html' %}
-{% block title %}Fees{% endblock %}
+{% block title %}Billing{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">💵 Fees / Who Owes</h1>
-  <span class="badge {{ 'badge-red' if grand_total else 'badge-green' }}">${{ '%.2f'|format(grand_total) }} outstanding</span>
+  <h1 style="margin:0;">💵 Billing</h1>
+  <span class="badge {{ 'badge-red' if (status == 'unpaid' and grand_total) else 'badge-green' }}">
+    ${{ '%.2f'|format(grand_total) }} {{ 'outstanding' if status == 'unpaid' else ('collected' if status == 'paid' else 'total billed') }}
+  </span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;">
+  {% set base_args = request.args.to_dict() %}
+  {% for key, label in [('unpaid', 'Unpaid'), ('paid', 'Paid'), ('all', 'All')] %}
+    {% set tab_args = base_args.copy() %}
+    {% set _ = tab_args.update({'status': key}) %}
+    {% set _ = tab_args.pop('page', None) %}
+    <a href="?{{ tab_args|urlencode }}" class="btn {{ 'btn-primary' if status == key else 'btn-ghost' }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{{ macros.search_box('Search person, description, ticket subject, asset tag…') }}
 
 {% if by_person %}
   {% for person_name, data in by_person.items() %}
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:.6rem;">
       {{ person_name }}
-      <span class="badge badge-yellow">${{ '%.2f'|format(data.subtotal) }} owed</span>
+      <span class="badge badge-yellow">${{ '%.2f'|format(data.subtotal) }}</span>
     </h2>
+    <div style="overflow-x:auto;">
     <table>
       <thead>
-        <tr><th>Date</th><th>Asset Tag</th><th>Description</th><th>Amount</th><th></th></tr>
+        <tr><th>Date</th><th>Ref</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr>
       </thead>
       <tbody>
-        {% for inc in data.incidents %}
+        {% for charge in data.charges %}
         <tr>
-          <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
-          <td><a href="/admin/assets/{{ inc.asset_tag }}/assign" style="text-decoration:none;"><code>{{ inc.asset_tag }}</code></a></td>
-          <td style="color:var(--muted);">{{ inc.description }}</td>
-          <td>{% if inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% else %}—{% endif %}</td>
+          <td style="color:var(--muted);white-space:nowrap;">{{ charge.date.strftime('%Y-%m-%d') }}</td>
+          <td><a href="{{ charge.link_url }}" style="text-decoration:none;"><code>{{ charge.link_label }}</code></a></td>
+          <td style="color:var(--muted);">{{ charge.label }}</td>
+          <td>{% if charge.amount %}${{ '%.2f'|format(charge.amount) }}{% else %}—{% endif %}</td>
+          <td>
+            {% if charge.paid %}
+              <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+            {% else %}
+              <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
+            {% endif %}
+          </td>
           <td style="text-align:right;white-space:nowrap;">
-            <form method="POST" action="/admin/incidents/{{ inc.id }}/mark_paid" style="display:inline;">
+            {% if not charge.paid %}
+            <form method="POST" action="{{ charge.mark_paid_url }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Mark Paid</button>
             </form>
+            {% endif %}
+            <div class="row-menu" style="display:inline-block;">
+              <button type="button">Edit ⋮</button>
+              <div class="row-menu-items" style="min-width:240px;">
+                <form method="POST" action="{{ charge.fee_url }}" style="padding:.4rem;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  {% if charge.is_ticket_charge %}
+                  <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Description</label>
+                  <input name="description" value="{{ charge.description }}" style="margin-bottom:.6rem;" />
+                  <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Amount</label>
+                  <input name="amount" value="{{ charge.amount if charge.amount else '' }}" placeholder="e.g. 15.00" style="margin-bottom:.6rem;" />
+                  {% else %}
+                  <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Edit Amount (blank clears it)</label>
+                  <input name="fee_amount" value="{{ charge.amount if charge.amount else '' }}" placeholder="e.g. 15.00" style="margin-bottom:.6rem;" />
+                  {% endif %}
+                  <button type="submit" class="btn btn-primary" style="width:100%;">Save</button>
+                </form>
+                <form method="POST" action="{{ charge.delete_url }}" style="padding:.4rem;border-top:1px solid var(--border);"
+                      onsubmit="return confirm({{ charge.delete_confirm|tojson }});">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-danger" style="width:100%;">Delete</button>
+                </form>
+              </div>
+            </div>
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </div>
   {% endfor %}
 {% else %}
 <div class="card">
-  <p style="color:var(--muted);text-align:center;padding:1rem;">Nobody owes anything right now. 🎉</p>
+  <p style="color:var(--muted);text-align:center;padding:1rem;">
+    {% if status == 'unpaid' %}Nobody owes anything right now. 🎉{% else %}No billing records match.{% endif %}
+  </p>
 </div>
 {% endif %}
 {% endblock %}

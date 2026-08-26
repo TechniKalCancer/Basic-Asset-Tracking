@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Invoice — {{ registry_row.asset_tag }}{% endblock %}
+{% block content %}
+<style>
+  .invoice-actions { display: flex; gap: .8rem; margin-bottom: 1.5rem; }
+  .invoice-paper { background: #fff; color: #111; border-radius: 8px; padding: 2.5rem; max-width: 760px; margin: 0 auto; }
+  .invoice-paper table { width: 100%; border-collapse: collapse; }
+  .invoice-paper th, .invoice-paper td { padding: .6rem .4rem; border-bottom: 1px solid #ddd; text-align: left; }
+  .invoice-paper .muted { color: #666; }
+  .invoice-paper .right { text-align: right; }
+  .invoice-unpaid { color: #b91c1c; font-weight: 600; }
+  .invoice-paid { color: #15803d; font-weight: 600; }
+  @media print {
+    nav, #session-warning, .invoice-actions, .flash-messages { display: none !important; }
+    body, .container { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    .invoice-paper { box-shadow: none !important; padding: 0 !important; max-width: none !important; }
+  }
+</style>
+
+<div class="invoice-actions">
+  <button type="button" class="btn btn-primary" onclick="window.print()">🖨️ Print</button>
+  <a href="/admin/assets/{{ registry_row.asset_tag }}/assign" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="invoice-paper">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:2rem;">
+    <div>
+      {% if registry_row.site and registry_row.site.logo_filename %}
+        <img src="{{ url_for('branding_logo', filename=registry_row.site.logo_filename) }}" alt="" style="max-height:48px;max-width:200px;margin-bottom:.6rem;">
+      {% elif branding_settings and branding_settings.logo_filename %}
+        <img src="{{ url_for('branding_logo', filename=branding_settings.logo_filename) }}" alt="" style="max-height:48px;max-width:200px;margin-bottom:.6rem;">
+      {% endif %}
+      <div style="font-size:1.4rem;font-weight:700;">{{ registry_row.site.name if registry_row.site else (branding_settings.app_name if branding_settings and branding_settings.app_name else 'FoxDesk') }}</div>
+      <div class="muted">Device Damage Invoice</div>
+    </div>
+    <div class="right muted">
+      <div>Generated {{ generated_at.strftime('%Y-%m-%d') }}</div>
+      <div>Asset Tag: <strong style="color:#111;">{{ registry_row.asset_tag }}</strong></div>
+    </div>
+  </div>
+
+  <table style="margin-bottom:1.5rem;">
+    <tr><td class="muted" style="border:none;width:140px;">Device</td><td style="border:none;">{{ registry_row.description or (registry_row.device_model.full_name if registry_row.device_model) or registry_row.device_type|capitalize }}</td></tr>
+    <tr><td class="muted" style="border:none;">Serial Number</td><td style="border:none;">{{ registry_row.serial_number or '—' }}</td></tr>
+    {% if registry_row.site %}<tr><td class="muted" style="border:none;">Site</td><td style="border:none;">{{ registry_row.site.name }}</td></tr>{% endif %}
+  </table>
+
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Person</th><th>Damage</th><th class="right">Fee</th><th class="right">Status</th></tr>
+    </thead>
+    <tbody>
+      {% for inc in incidents %}
+      <tr>
+        <td class="muted" style="white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
+        <td class="muted">{{ inc.person_name or '—' }}</td>
+        <td>{{ inc.repair_category.name if inc.repair_category else inc.description }}{% if inc.repair_category and inc.description and inc.description != inc.repair_category.name %}<div class="muted" style="font-size:.85rem;">{{ inc.description }}</div>{% endif %}</td>
+        <td class="right">{% if inc.fee_charged and inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% else %}—{% endif %}</td>
+        <td class="right">
+          {% if inc.fee_charged %}
+            {% if inc.paid_at %}<span class="invoice-paid">Paid</span>{% else %}<span class="invoice-unpaid">Unpaid</span>{% endif %}
+          {% else %}<span class="muted">No charge</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted" style="text-align:center;padding:1.5rem;">No damages logged for this device.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="border:none;"></td>
+        <td class="right" style="border-top:2px solid #111;font-weight:700;">${{ '%.2f'|format(total) }}</td>
+        <td style="border-top:2px solid #111;"></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endblock %}

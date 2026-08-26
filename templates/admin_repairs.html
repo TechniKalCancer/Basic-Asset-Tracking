@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Repairs{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">🛠️ Repairs</h1>
@@ -8,25 +9,64 @@
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
+<div class="card">
+  <h2 style="margin-top:0;">➕ Send a Device to Repair</h2>
+  <form method="POST" action="/admin/repairs/send" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:180px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Asset Tag / Serial</label>
+      <input name="scan_value" autocomplete="off" placeholder="Scan or type…" autofocus required />
+    </div>
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category (optional)</label>
+      <select name="repair_category_id">
+        <option value="">— None —</option>
+        {% for c in repair_categories %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:120px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (optional)</label>
+      <input name="ticket_number" />
+    </div>
+    <div style="min-width:200px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description</label>
+      <input name="issue_description" placeholder="e.g. Won't power on" required />
+    </div>
+    <div style="min-width:150px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return (optional)</label>
+      <input type="date" name="expected_return_at" />
+    </div>
+    <button type="submit" class="btn btn-primary">Send to Repair</button>
+  </form>
+</div>
+
+{{ macros.search_box('Search asset tag, category, ticket #, issue, person…') }}
+
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>
       <tr>
-        <th>Asset Tag</th>
-        <th>Vendor</th>
-        <th>Ticket #</th>
+        <th class="sortable">{{ macros.sort_link('asset_tag', 'Asset Tag') }}</th>
+        <th class="sortable">{{ macros.sort_link('category', 'Category') }}</th>
+        <th class="sortable">{{ macros.sort_link('ticket_number', 'Ticket #') }}</th>
         <th>Issue</th>
-        <th>Sent</th>
-        <th>Expected Back</th>
-        <th>Had It</th>
+        <th class="sortable">{{ macros.sort_link('sent_at', 'Sent') }}</th>
+        <th class="sortable">{{ macros.sort_link('expected_return_at', 'Expected Back') }}</th>
+        <th class="sortable">{{ macros.sort_link('person', 'Had It') }}</th>
         <th></th>
       </tr>
+      {{ macros.filter_row(8, skip=[7]) }}
     </thead>
     <tbody>
       {% for r in open_repairs %}
       <tr>
-        <td><a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a></td>
-        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+        <td>
+          <a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
+          {% if r.ticket_id %}<br><a href="/admin/tickets/{{ r.ticket_id }}" style="text-decoration:none;font-size:.75rem;color:var(--muted);">🎫 #{{ r.ticket_id }}</a>{% endif %}
+        </td>
+        <td style="color:var(--muted);">{{ r.repair_category.name if r.repair_category else '—' }}</td>
         <td style="color:var(--muted);">{{ r.ticket_number or '—' }}</td>
         <td style="color:var(--muted);">{{ r.issue_description or '—' }}</td>
         <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
@@ -35,7 +75,41 @@
         </td>
         <td style="color:var(--muted);">{{ r.person_name_snapshot or '—' }}</td>
         <td style="text-align:right;white-space:nowrap;">
-          <a href="/admin/assets/{{ r.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">Mark Returned</a>
+          <div class="row-menu">
+            <button type="button">Actions ⋮</button>
+            <div class="row-menu-items" style="min-width:260px;">
+              <form method="POST" action="/admin/repairs/{{ r.id }}/edit" style="padding:.4rem;border-bottom:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Category</label>
+                <select name="repair_category_id" style="margin-bottom:.5rem;">
+                  <option value="">— None —</option>
+                  {% for c in repair_categories %}
+                  <option value="{{ c.id }}" {{ 'selected' if r.repair_category_id == c.id }}>{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Ticket # (vendor's)</label>
+                <input name="ticket_number" value="{{ r.ticket_number or '' }}" style="margin-bottom:.5rem;" />
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Issue Description</label>
+                <input name="issue_description" value="{{ r.issue_description or '' }}" required style="margin-bottom:.5rem;" />
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Expected Return</label>
+                <input type="date" name="expected_return_at" value="{{ r.expected_return_at.isoformat() if r.expected_return_at else '' }}" style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-ghost" style="width:100%;">Save Changes</button>
+              </form>
+              <form method="POST" action="/admin/repairs/{{ r.id }}/return" style="padding:.4rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Outcome</label>
+                <select name="outcome" required style="margin-bottom:.6rem;">
+                  <option value="">Choose…</option>
+                  {% for key, label in repair_outcomes.items() %}
+                  <option value="{{ key }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Notes (optional)</label>
+                <input name="notes" placeholder="e.g. Replaced under warranty" style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-primary" style="width:100%;">Mark Returned</button>
+              </form>
+            </div>
+          </div>
         </td>
       </tr>
       {% else %}
@@ -52,7 +126,7 @@
     <thead>
       <tr>
         <th>Asset Tag</th>
-        <th>Vendor</th>
+        <th>Category</th>
         <th>Sent</th>
         <th>Returned</th>
         <th>Outcome</th>
@@ -62,8 +136,11 @@
     <tbody>
       {% for r in closed_repairs %}
       <tr>
-        <td><a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a></td>
-        <td style="color:var(--muted);">{{ r.vendor or '—' }}</td>
+        <td>
+          <a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
+          {% if r.ticket_id %}<br><a href="/admin/tickets/{{ r.ticket_id }}" style="text-decoration:none;font-size:.75rem;color:var(--muted);">🎫 #{{ r.ticket_id }}</a>{% endif %}
+        </td>
+        <td style="color:var(--muted);">{{ r.repair_category.name if r.repair_category else '—' }}</td>
         <td style="color:var(--muted);white-space:nowrap;">{{ r.sent_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--muted);white-space:nowrap;">{{ r.returned_at.strftime('%Y-%m-%d') }}</td>
         <td>

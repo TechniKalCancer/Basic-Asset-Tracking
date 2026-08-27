@@ -59,6 +59,33 @@
   </form>
 </div>
 
+{% if person %}
+<div class="card" style="max-width:480px;">
+  <h2 style="display:flex;align-items:center;gap:.6rem;font-size:1rem;">
+    🔗 Google Workspace Info
+    <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}" style="font-size:.7rem;">
+      {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+    </span>
+  </h2>
+
+  {% if person.google_last_sync_at %}
+  <table style="margin-bottom:1rem;">
+    <tr><td style="color:var(--muted);width:110px;">Org Unit</td><td>{{ person.google_org_unit or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Last Synced</td><td>{{ person.google_last_sync_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">Not synced from Google yet.</p>
+  {% endif %}
+
+  <form method="POST" action="/admin/people/{{ person.id }}/google_sync">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost" {{ 'disabled' if not google_sync_enabled }}>
+      Sync from Google{{ '' if google_sync_enabled else ' (not configured)' }}
+    </button>
+  </form>
+</div>
+{% endif %}
+
 {% if person and person.custom_fields %}
 <div class="card" style="max-width:480px;">
   <h2 style="margin-top:0;font-size:1rem;">🧩 Custom Fields</h2>

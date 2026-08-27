@@ -439,6 +439,12 @@ class Person(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
 
+    # Populated by the "Sync from Google" button on the person edit page —
+    # same cached-not-live pattern as Asset.google_org_unit below, so the
+    # edit page never has to make a live API call just to render.
+    google_org_unit     = db.Column(db.String(255), nullable=True)
+    google_last_sync_at = db.Column(db.DateTime, nullable=True)
+
     site = db.relationship('Site')
 
     @property
@@ -1069,6 +1075,34 @@ def sync_chromeos_device_from_google(serial_number):
     }
 
 
+def sync_person_from_google(email):
+    """
+    Looks up a Google Workspace user by email and returns their current org
+    unit — same shape/purpose as sync_chromeos_device_from_google() above,
+    but for a Person instead of a device. Requires the
+    https://www.googleapis.com/auth/admin.directory.user.readonly scope
+    (already used for the People sync).
+
+    Args:
+        email: The person's Google account email.
+
+    Returns:
+        A dict with key 'org_unit'.
+
+    Raises:
+        LookupError: No Google account with this email exists in the domain.
+    """
+    from googleapiclient.errors import HttpError
+    service = _google_directory_service([GOOGLE_SCOPE_USER_READONLY])
+    try:
+        user = service.users().get(userKey=email, projection='basic').execute()
+    except HttpError as e:
+        if e.resp.status == 404:
+            raise LookupError(f'No Google account for "{email}" found in Google Workspace.')
+        raise
+    return {'org_unit': user.get('orgUnitPath')}
+
+
 def set_chromeos_device_enabled(serial_number, enabled):
     """
     Enables or disables a Chromebook in Google Workspace by serial number —
@@ -1295,7 +1329,10 @@ def _run_google_people_sync():
     email, and applies each entity_type='person' GoogleFieldMapping onto the
     match — plus, independently of any mapping, corrects site_id from the
     account's org unit if that org unit (or an ancestor) has a Site tagged
-    at /admin/google_org_units (see _org_unit_site_id). Returns (matched,
+    at /admin/google_org_units (see _org_unit_site_id), and caches the org
+    unit itself onto Person.google_org_unit so the person edit page can show
+    it without a live lookup (see admin_person_google_sync for the
+    single-person on-demand version of the same cache). Returns (matched,
     updated, unmatched_google_accounts)."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='person').all()
     has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
@@ -1315,11 +1352,16 @@ def _run_google_people_sync():
                 unmatched += 1
                 continue
             matched += 1
+            org_unit_path = u.get('orgUnitPath')
             row_changed = _apply_field_mappings(u, person, mappings)
-            site_id = _org_unit_site_id(u.get('orgUnitPath'))
+            site_id = _org_unit_site_id(org_unit_path)
             if site_id and person.site_id != site_id:
                 person.site_id = site_id
                 row_changed = True
+            if person.google_org_unit != org_unit_path:
+                person.google_org_unit = org_unit_path
+                row_changed = True
+            person.google_last_sync_at = datetime.utcnow()
             if row_changed:
                 updated += 1
         page_token = response.get('nextPageToken')
@@ -3286,7 +3328,8 @@ def admin_person_edit(person_id):
         if error:
             flash(error, 'error')
             return render_template('admin_person_form.html', person=person, form=values,
-                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
+                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels,
+                                    google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
         try:
             for field, value in values.items():
@@ -3299,10 +3342,39 @@ def admin_person_edit(person_id):
             db.session.rollback()
             flash(f'Could not update person: {e}', 'error')
             return render_template('admin_person_form.html', person=person, form=values,
-                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
+                                    sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels,
+                                    google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
     return render_template('admin_person_form.html', person=person, form=None,
-                           sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels)
+                           sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/people/<int:person_id>/google_sync', methods=['POST'])
+@require_permission('people')
+def admin_person_google_sync(person_id):
+    """Pulls the current org unit from Google Workspace for one person, by
+    email — same cached-not-live pattern as admin_asset_google_sync()."""
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet. Set GOOGLE_SERVICE_ACCOUNT_FILE '
+              'and GOOGLE_ADMIN_IMPERSONATE_EMAIL in .env to enable it.', 'info')
+        return redirect(url_for('admin_person_edit', person_id=person_id))
+
+    try:
+        info = sync_person_from_google(person.email)
+        person.google_org_unit = info.get('org_unit')
+        person.google_last_sync_at = datetime.utcnow()
+        db.session.commit()
+        flash(f'Synced {person.full_name} from Google.', 'success')
+    except LookupError as e:
+        flash(str(e), 'info')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Google sync failed: {e}', 'error')
+
+    return redirect(url_for('admin_person_edit', person_id=person_id))
 
 
 def _release_person_assets(person, condition_in):

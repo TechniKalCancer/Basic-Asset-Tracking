@@ -1,0 +1,219 @@
+{% extends 'base.html' %}
+{% block title %}Repair — {{ repair.asset_tag }}{% endblock %}
+{% block content %}
+{% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🛠️ Repair — <code>{{ repair.asset_tag }}</code></h1>
+  {% if repair.returned_at %}
+    <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
+  {% else %}
+    <span class="badge badge-yellow">Open</span>
+  {% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  {% if repair.ticket_id %}<a href="/admin/tickets/{{ repair.ticket_id }}" class="btn btn-ghost">🎫 View Full Ticket</a>{% endif %}
+  <a href="/admin/assets/{{ repair.asset_tag }}/assign" class="btn btn-ghost">📋 Device Page</a>
+  <a href="/admin/repairs" class="btn btn-ghost">← Back to Repairs</a>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <table style="width:100%;">
+    <tr><td style="color:var(--muted);width:160px;">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Ticket # (vendor's)</td><td>{{ repair.ticket_number or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Issue</td><td>{{ repair.issue_description or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Had It</td><td>{{ repair.person_name_snapshot or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Sent</td><td>{{ repair.sent_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% if repair.expected_return_at %}
+    <tr><td style="color:var(--muted);">Expected Return</td><td>{{ repair.expected_return_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% endif %}
+    {% if repair.returned_at %}
+    <tr><td style="color:var(--muted);">Returned</td><td>{{ repair.returned_at.strftime('%Y-%m-%d') }}</td></tr>
+    {% if repair.notes %}
+    <tr><td style="color:var(--muted);">Notes</td><td>{{ repair.notes }}</td></tr>
+    {% endif %}
+    {% endif %}
+  </table>
+</div>
+
+{% if not repair.returned_at %}
+<div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <div class="card" style="flex:1;min-width:280px;">
+    <h2 style="margin-top:0;">✏️ Edit Details</h2>
+    <form method="POST" action="/admin/repairs/{{ repair.id }}/edit">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
+        <select name="repair_category_id">
+          <option value="">— None —</option>
+          {% for c in repair_categories %}
+          <option value="{{ c.id }}" {{ 'selected' if repair.repair_category_id == c.id }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket # (vendor's)</label>
+        <input name="ticket_number" value="{{ repair.ticket_number or '' }}" />
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Issue Description</label>
+        <input name="issue_description" value="{{ repair.issue_description or '' }}" required />
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return</label>
+        <input type="date" name="expected_return_at" value="{{ repair.expected_return_at.isoformat() if repair.expected_return_at else '' }}" />
+      </div>
+      <button type="submit" class="btn btn-ghost">Save Changes</button>
+    </form>
+  </div>
+
+  <div class="card" style="flex:1;min-width:280px;">
+    <h2 style="margin-top:0;">🎒 Loaner While Repaired</h2>
+    {% if active_loaner %}
+    <p style="font-size:.9rem;margin:0 0 1rem;">
+      <code>{{ active_loaner.asset_tag }}</code> → {{ active_loaner.person_name }}
+      {% if active_loaner.due_date %}<br><span style="color:var(--muted);font-size:.85rem;">Due {{ active_loaner.due_date.strftime('%Y-%m-%d') }}</span>{% endif %}
+    </p>
+    <form method="POST" action="/admin/loaners/checkin">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="asset_tag" value="{{ active_loaner.asset_tag }}">
+      <button type="submit" class="btn btn-ghost">Check In Loaner</button>
+    </form>
+    {% else %}
+    <form method="POST" action="/admin/repairs/{{ repair.id }}/assign_loaner">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div style="position:relative;margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Person to loan to</label>
+        <input type="hidden" name="person_id" id="repairLoanerPersonId" />
+        <input type="text" id="repairLoanerPersonSearch" autocomplete="off" placeholder="Type a name, email, or site…" style="width:100%;" />
+        <div id="repairLoanerPersonResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
+             background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
+             max-height:220px;overflow-y:auto;"></div>
+      </div>
+      <div style="margin-bottom:.8rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Asset Tag / Serial</label>
+        <input name="loaner_asset_tag" placeholder="Scan or type…" />
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Due date (optional — open-ended by default)</label>
+        <input type="date" name="due_date" />
+      </div>
+      <button type="submit" class="btn btn-primary">Assign Loaner</button>
+    </form>
+    <script src="/static/js/person_search.js"></script>
+    <script>
+      initPersonSearch({
+        inputId: 'repairLoanerPersonSearch', hiddenId: 'repairLoanerPersonId', resultsId: 'repairLoanerPersonResults',
+      });
+    </script>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">✅ Mark Returned</h2>
+  <form method="POST" action="/admin/repairs/{{ repair.id }}/return" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Outcome</label>
+      <select name="outcome" required>
+        <option value="">Choose…</option>
+        {% for key, label in repair_outcomes.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
+      <input name="notes" placeholder="e.g. Replaced under warranty" />
+    </div>
+    <button type="submit" class="btn btn-primary">Mark Returned</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  {% if repair.ticket %}
+  {% set ticket = repair.ticket %}
+  {% set total = ticket.charges|sum(attribute='amount') %}
+  {% set unpaid_total = ticket.charges|selectattr('paid_at', 'none')|sum(attribute='amount') %}
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <h2 style="margin:0;">💵 Billing</h2>
+    {% if ticket.charges %}
+    <span class="badge {{ 'badge-red' if unpaid_total else 'badge-green' }}">
+      ${{ '%.2f'|format(total) }} total{% if unpaid_total %} · ${{ '%.2f'|format(unpaid_total) }} unpaid{% endif %}
+    </span>
+    {% endif %}
+  </div>
+
+  {% if ticket.charges %}
+  <div style="overflow-x:auto;">
+  <table style="margin-bottom:1rem;">
+    <thead>
+      <tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in ticket.charges %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ c.created_at.strftime('%Y-%m-%d') }}</td>
+        <td>{{ c.description }}</td>
+        <td style="white-space:nowrap;">${{ '%.2f'|format(c.amount) }}</td>
+        <td>
+          {% if c.paid_at %}
+            <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+          {% else %}
+            <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if not c.paid_at %}
+          <form method="POST" action="/admin/ticket_charges/{{ c.id }}/mark_paid" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
+          </form>
+          {% endif %}
+          <div class="row-menu" style="display:inline-block;">
+            <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
+            <div class="row-menu-items" style="min-width:260px;">
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/edit" style="padding:.4rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Description</label>
+                <input name="description" value="{{ c.description }}" style="margin-bottom:.6rem;" />
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Amount</label>
+                <input name="amount" value="{{ c.amount }}" placeholder="e.g. 15.00" style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-primary" style="width:100%;">Save</button>
+              </form>
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/delete" style="padding:.4rem;border-top:1px solid var(--border);"
+                    onsubmit="return confirm('Delete this ${{ '%.2f'|format(c.amount) }} charge ({{ c.description }})? This cannot be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger" style="width:100%;">Delete</button>
+              </form>
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">No charges yet.</p>
+  {% endif %}
+
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/charges"
+        style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;padding-top:1rem;border-top:1px solid var(--border);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Description</label>
+      <input name="description" placeholder="e.g. Replacement charger" required />
+    </div>
+    <div style="min-width:140px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Amount</label>
+      <input name="amount" placeholder="e.g. 15.00" required />
+    </div>
+    <button type="submit" class="btn btn-primary">Add Charge</button>
+  </form>
+  {% else %}
+  <h2 style="margin-top:0;">💵 Billing</h2>
+  <p style="color:var(--muted);font-size:.85rem;">No ticket is linked to this repair, so there's nowhere to bill charges to.</p>
+  {% endif %}
+</div>
+{% endblock %}

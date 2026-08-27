@@ -55,15 +55,17 @@
         <th class="sortable">{{ macros.sort_link('sent_at', 'Sent') }}</th>
         <th class="sortable">{{ macros.sort_link('expected_return_at', 'Expected Back') }}</th>
         <th class="sortable">{{ macros.sort_link('person', 'Had It') }}</th>
+        <th>Loaner</th>
         <th></th>
       </tr>
-      {{ macros.filter_row(8, skip=[7]) }}
+      {{ macros.filter_row(9, skip=[7, 8]) }}
     </thead>
     <tbody>
       {% for r in open_repairs %}
+      {% set loaner = active_repair_loaners.get(r.id) %}
       <tr>
         <td>
-          <a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
+          <a href="/admin/repairs/{{ r.id }}" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
           {% if r.ticket_id %}<br><a href="/admin/tickets/{{ r.ticket_id }}" style="text-decoration:none;font-size:.75rem;color:var(--muted);">🎫 #{{ r.ticket_id }}</a>{% endif %}
         </td>
         <td style="color:var(--muted);">{{ r.repair_category.name if r.repair_category else '—' }}</td>
@@ -74,46 +76,19 @@
           {{ r.expected_return_at.strftime('%Y-%m-%d') if r.expected_return_at else '—' }}
         </td>
         <td style="color:var(--muted);">{{ r.person_name_snapshot or '—' }}</td>
+        <td style="white-space:nowrap;">
+          {% if loaner %}
+          <span class="badge badge-yellow" title="Checked out to {{ loaner.person_name }}">🎒 {{ loaner.asset_tag }}</span>
+          {% else %}
+          <span style="color:var(--muted);">—</span>
+          {% endif %}
+        </td>
         <td style="text-align:right;white-space:nowrap;">
-          <div class="row-menu">
-            <button type="button">Actions ⋮</button>
-            <div class="row-menu-items" style="min-width:260px;">
-              <form method="POST" action="/admin/repairs/{{ r.id }}/edit" style="padding:.4rem;border-bottom:1px solid var(--border);">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Category</label>
-                <select name="repair_category_id" style="margin-bottom:.5rem;">
-                  <option value="">— None —</option>
-                  {% for c in repair_categories %}
-                  <option value="{{ c.id }}" {{ 'selected' if r.repair_category_id == c.id }}>{{ c.name }}</option>
-                  {% endfor %}
-                </select>
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Ticket # (vendor's)</label>
-                <input name="ticket_number" value="{{ r.ticket_number or '' }}" style="margin-bottom:.5rem;" />
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Issue Description</label>
-                <input name="issue_description" value="{{ r.issue_description or '' }}" required style="margin-bottom:.5rem;" />
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Expected Return</label>
-                <input type="date" name="expected_return_at" value="{{ r.expected_return_at.isoformat() if r.expected_return_at else '' }}" style="margin-bottom:.6rem;" />
-                <button type="submit" class="btn btn-ghost" style="width:100%;">Save Changes</button>
-              </form>
-              <form method="POST" action="/admin/repairs/{{ r.id }}/return" style="padding:.4rem;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Outcome</label>
-                <select name="outcome" required style="margin-bottom:.6rem;">
-                  <option value="">Choose…</option>
-                  {% for key, label in repair_outcomes.items() %}
-                  <option value="{{ key }}">{{ label }}</option>
-                  {% endfor %}
-                </select>
-                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Notes (optional)</label>
-                <input name="notes" placeholder="e.g. Replaced under warranty" style="margin-bottom:.6rem;" />
-                <button type="submit" class="btn btn-primary" style="width:100%;">Mark Returned</button>
-              </form>
-            </div>
-          </div>
+          <a href="/admin/repairs/{{ r.id }}" class="btn btn-ghost" style="padding:.3rem .7rem;">View →</a>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No open repairs.</td></tr>
+      <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:2rem;">No open repairs.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -137,7 +112,7 @@
       {% for r in closed_repairs %}
       <tr>
         <td>
-          <a href="/admin/assets/{{ r.asset_tag }}/assign" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
+          <a href="/admin/repairs/{{ r.id }}" style="text-decoration:none;"><code>{{ r.asset_tag }}</code></a>
           {% if r.ticket_id %}<br><a href="/admin/tickets/{{ r.ticket_id }}" style="text-decoration:none;font-size:.75rem;color:var(--muted);">🎫 #{{ r.ticket_id }}</a>{% endif %}
         </td>
         <td style="color:var(--muted);">{{ r.repair_category.name if r.repair_category else '—' }}</td>

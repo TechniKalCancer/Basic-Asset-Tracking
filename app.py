@@ -231,7 +231,7 @@ class CustomField(db.Model):
     entity_type = db.Column(db.String(20), nullable=False)  # 'person' | 'device'
     field_key   = db.Column(db.String(60), nullable=False)  # slug, used as the JSON key
     label       = db.Column(db.String(120), nullable=False)
-    field_type  = db.Column(db.String(20), nullable=False, default='text')  # 'text' | 'number' | 'date' | 'boolean'
+    field_type  = db.Column(db.String(20), nullable=False, default='text')  # 'text' | 'number' | 'date' | 'boolean' | 'email'
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     __table_args__ = (db.UniqueConstraint('entity_type', 'field_key', name='uq_custom_field_entity_key'),)
 
@@ -262,15 +262,22 @@ class GoogleOrgUnit(db.Model):
     Google) so an admin can bucket each OU as staff or student — that bucket
     is then usable as a GoogleFieldMapping.org_unit_scope, and/or as the
     source for a mapping that writes 'staff'/'student' onto Person.role.
-    Kept as its own table (not folded into the mapping form) since one org
-    unit tree is shared by every mapping, for both entity types.
+    site_id is a second, independent hand-set tag — which building (Site)
+    this org unit belongs to, so _run_google_people_sync/_run_google_device_sync
+    can correct a Person's/AssetRegistry's site_id straight from Google's own
+    org unit, without needing IP/network guesswork. Kept as its own table
+    (not folded into the mapping form) since one org unit tree is shared by
+    every mapping, for both entity types.
     """
     __tablename__ = 'google_org_unit'
     id            = db.Column(db.Integer, primary_key=True)
     org_unit_path = db.Column(db.String(255), unique=True, nullable=False)
     name          = db.Column(db.String(255), nullable=True)
     category      = db.Column(db.String(20), nullable=False, default='unclassified')  # 'unclassified' | 'staff' | 'student'
+    site_id       = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
     updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site = db.relationship('Site')
 
 
 class UserSite(db.Model):
@@ -759,6 +766,9 @@ class LoanerCheckout(db.Model):
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
     condition_notes  = db.Column(db.String(255), nullable=True)
     acknowledged_by  = db.Column(db.String(160), nullable=True)  # typed name acknowledging responsibility at checkout
+    repair_id        = db.Column(db.Integer, db.ForeignKey('repair.id'), nullable=True, index=True)  # set when this loaner covers someone whose own device is out for repair — see _checkout_loaner/admin_repair_assign_loaner
+
+    repair = db.relationship('Repair', backref='loaner_checkouts')
 
 
 # Schema creation/upgrades are handled by Flask-Migrate (`flask db upgrade`),
@@ -1149,6 +1159,22 @@ def _classify_org_unit(org_unit_path):
     return best_category
 
 
+def _org_unit_site_id(org_unit_path):
+    """Returns the Site id tagged on the closest classified ancestor of
+    org_unit_path in GoogleOrgUnit (same closest-ancestor logic as
+    _classify_org_unit, but for the hand-set site_id instead of category).
+    Returns None if no ancestor has a Site tagged."""
+    if not org_unit_path:
+        return None
+    best_site_id, best_len = None, -1
+    for ou in GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).all():
+        path = ou.org_unit_path
+        if org_unit_path == path or org_unit_path.startswith(path.rstrip('/') + '/'):
+            if len(path) > best_len:
+                best_site_id, best_len = ou.site_id, len(path)
+    return best_site_id
+
+
 def _mapping_applies_to_org_unit(mapping, org_unit_path):
     """Whether mapping's org_unit_scope allows it to apply to a record in
     org_unit_path — unscoped (None) mappings always apply; '__staff__'/
@@ -1221,9 +1247,13 @@ def _fetch_google_org_units():
 def _run_google_people_sync():
     """Pulls every Google Workspace user, matches to an existing Person by
     email, and applies each entity_type='person' GoogleFieldMapping onto the
-    match. Returns (matched, updated, unmatched_google_accounts)."""
+    match — plus, independently of any mapping, corrects site_id from the
+    account's org unit if that org unit (or an ancestor) has a Site tagged
+    at /admin/google_org_units (see _org_unit_site_id). Returns (matched,
+    updated, unmatched_google_accounts)."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='person').all()
-    if not mappings:
+    has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
+    if not mappings and not has_site_rules:
         return 0, 0, 0
     service = _google_directory_service([GOOGLE_SCOPE_USER_READONLY])
     matched = updated = unmatched = 0
@@ -1239,7 +1269,12 @@ def _run_google_people_sync():
                 unmatched += 1
                 continue
             matched += 1
-            if _apply_field_mappings(u, person, mappings):
+            row_changed = _apply_field_mappings(u, person, mappings)
+            site_id = _org_unit_site_id(u.get('orgUnitPath'))
+            if site_id and person.site_id != site_id:
+                person.site_id = site_id
+                row_changed = True
+            if row_changed:
                 updated += 1
         page_token = response.get('nextPageToken')
         if not page_token:
@@ -1251,9 +1286,13 @@ def _run_google_people_sync():
 def _run_google_device_sync():
     """Pulls every Google Workspace ChromeOS device, matches to an existing
     AssetRegistry row by serial number, and applies each entity_type='device'
-    GoogleFieldMapping onto the match. Returns (matched, updated, unmatched)."""
+    GoogleFieldMapping onto the match — plus, independently of any mapping,
+    corrects site_id from the device's org unit the same way
+    _run_google_people_sync does for People. Returns (matched, updated,
+    unmatched)."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='device').all()
-    if not mappings:
+    has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
+    if not mappings and not has_site_rules:
         return 0, 0, 0
     service = _google_directory_service([GOOGLE_SCOPE_READONLY])
     matched = updated = unmatched = 0
@@ -1269,7 +1308,12 @@ def _run_google_device_sync():
                 unmatched += 1
                 continue
             matched += 1
-            if _apply_field_mappings(d, row, mappings):
+            row_changed = _apply_field_mappings(d, row, mappings)
+            site_id = _org_unit_site_id(d.get('orgUnitPath'))
+            if site_id and row.site_id != site_id:
+                row.site_id = site_id
+                row_changed = True
+            if row_changed:
                 updated += 1
         page_token = response.get('nextPageToken')
         if not page_token:
@@ -3847,7 +3891,7 @@ def admin_custom_field_new():
         entity_type = request.form.get('entity_type', entity_type)
         label = request.form.get('label', '').strip()
         field_type = request.form.get('field_type', 'text').strip()
-        if field_type not in ('text', 'number', 'date', 'boolean'):
+        if field_type not in ('text', 'number', 'date', 'boolean', 'email'):
             field_type = 'text'
         if not label:
             flash('Give the field a label.', 'error')
@@ -3887,7 +3931,8 @@ def admin_custom_field_delete(field_id):
 @require_super_admin
 def admin_google_org_units():
     org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
-    return render_template('admin_google_org_units.html', org_units=org_units,
+    sites = Site.query.order_by(Site.name).all()
+    return render_template('admin_google_org_units.html', org_units=org_units, sites=sites,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED)
 
 
@@ -3909,6 +3954,7 @@ def admin_google_org_units_refresh():
 @app.route('/admin/google_org_units/save', methods=['POST'])
 @require_super_admin
 def admin_google_org_units_save():
+    valid_site_ids = {s.id for s in Site.query.all()}
     changed = 0
     for ou in GoogleOrgUnit.query.all():
         category = request.form.get(f'category_{ou.id}', 'unclassified')
@@ -3917,10 +3963,16 @@ def admin_google_org_units_save():
         if category != ou.category:
             ou.category = category
             changed += 1
+
+        site_raw = request.form.get(f'site_{ou.id}', '').strip()
+        site_id = int(site_raw) if site_raw.isdigit() and int(site_raw) in valid_site_ids else None
+        if site_id != ou.site_id:
+            ou.site_id = site_id
+            changed += 1
     if changed:
-        _log_activity('org_unit_classify', f'Reclassified {changed} org unit(s).')
+        _log_activity('org_unit_classify', f'Reclassified/re-sited {changed} org unit field(s).')
         db.session.commit()
-        flash(f'Saved — {changed} org unit(s) reclassified.', 'success')
+        flash(f'Saved — {changed} change(s).', 'success')
     else:
         flash('No changes to save.', 'info')
     return redirect(url_for('admin_google_org_units'))
@@ -4910,12 +4962,18 @@ def admin_loaners_email_selected():
     return redirect(url_for('admin_loaners'))
 
 
-def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledged_by=None):
+def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledged_by=None, repair_id=None):
     """Shared checkout logic used by both the admin page and student self-service.
 
-    acknowledged_by MUST stay the last parameter — callers invoke this
-    positionally, so inserting a new param earlier would silently shift
-    site_ids into the wrong argument with no error."""
+    repair_id links this checkout to an open Repair (see admin_repair_assign_loaner)
+    — someone's own device is out for repair and this loaner covers them in the
+    meantime. A repair-linked checkout deliberately gets NO default due date
+    (a repair's turnaround isn't a fixed N-day loan like a normal checkout), so
+    it never shows up as "overdue" just because repair is taking a while.
+
+    repair_id MUST stay the last parameter — callers invoke this positionally,
+    so inserting a new param earlier would silently shift site_ids into the
+    wrong argument with no error."""
     row = AssetRegistry.query.filter_by(asset_tag=asset_tag, is_loaner=True).first()
     if not row:
         return 'error', f'{asset_tag} is not a loaner device.'
@@ -4924,12 +4982,16 @@ def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledg
     already_out = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
     if already_out:
         return 'error', f'{asset_tag} is already checked out to {already_out.person_name}.'
+    resolved_due_date = due_date
+    if resolved_due_date is None and not repair_id:
+        resolved_due_date = datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)
     db.session.add(LoanerCheckout(
         asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
-        due_date=due_date or (datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)),
-        acknowledged_by=acknowledged_by,
+        due_date=resolved_due_date, acknowledged_by=acknowledged_by, repair_id=repair_id,
     ))
-    _log_activity('loaner_checkout', f'Checked out loaner {asset_tag} to {person.full_name}.', site_id=row.site_id)
+    log_message = f'Checked out loaner {asset_tag} to {person.full_name}.' if not repair_id \
+        else f'Checked out repair loaner {asset_tag} to {person.full_name}.'
+    _log_activity('loaner_checkout', log_message, site_id=row.site_id)
     db.session.commit()
     _sync_loaner_google_state(row, enabled=True)
     message = f'Checked out {asset_tag} to {person.full_name}.'
@@ -5634,6 +5696,22 @@ def admin_repair_send_quick():
     return redirect(url_for('admin_repairs'))
 
 
+@app.route('/admin/repairs/<int:repair_id>')
+@require_permission('repairs')
+def admin_repair_detail(repair_id):
+    """A repair's own page — details, edit, loaner assignment, and billing
+    (via the linked Ticket's charges) all together, so billing a repair
+    doesn't require jumping over to the generic Ticket detail page. The
+    Ticket itself (status/priority/assignment/comments) stays one click
+    away via the 'View full ticket' link, for the cases that still need it."""
+    site_ids = _current_site_ids()
+    repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
+    repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
+    active_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
+    return render_template('admin_repair_detail.html', repair=repair, repair_categories=repair_categories,
+                           repair_outcomes=REPAIR_OUTCOMES, active_loaner=active_loaner)
+
+
 @app.route('/admin/repairs/<int:repair_id>/return', methods=['POST'])
 @require_permission('repairs')
 def admin_repair_return(repair_id):
@@ -5645,8 +5723,7 @@ def admin_repair_return(repair_id):
     the Repairs list), so it works from both entry points."""
     site_ids = _current_site_ids()
     repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
-    fallback_url = url_for('admin_ticket_detail', ticket_id=repair.ticket_id) if repair.ticket_id \
-        else url_for('admin_asset_assign', asset_tag=repair.asset_tag)
+    fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
     outcome = request.form.get('outcome', '')
     if outcome not in REPAIR_OUTCOMES:
         flash('Choose a valid outcome.', 'error')
@@ -5671,8 +5748,12 @@ def admin_repair_return(repair_id):
             repair.ticket.updated_at = datetime.utcnow()
         _log_activity('repair_return', f'{repair.asset_tag} returned from repair ({REPAIR_OUTCOMES[outcome]}).',
                        site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
+        open_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
         db.session.commit()
-        flash(f'{repair.asset_tag} marked returned ({REPAIR_OUTCOMES[outcome]}).', 'success')
+        msg = f'{repair.asset_tag} marked returned ({REPAIR_OUTCOMES[outcome]}).'
+        if open_loaner:
+            msg += f' Note: loaner {open_loaner.asset_tag} is still checked out to {open_loaner.person_name} — check it in once it\'s back.'
+        flash(msg, 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not update repair: {e}', 'error')
@@ -5688,8 +5769,7 @@ def admin_repair_edit(repair_id):
     a closed repair's record is historical."""
     site_ids = _current_site_ids()
     repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
-    fallback_url = url_for('admin_ticket_detail', ticket_id=repair.ticket_id) if repair.ticket_id \
-        else url_for('admin_asset_assign', asset_tag=repair.asset_tag)
+    fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
     if repair.returned_at:
         flash('This repair has already been closed out and can no longer be edited.', 'error')
         return redirect(request.referrer or fallback_url)
@@ -5708,6 +5788,42 @@ def admin_repair_edit(repair_id):
                    site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
     db.session.commit()
     flash('Repair updated.', 'success')
+    return redirect(request.referrer or fallback_url)
+
+
+@app.route('/admin/repairs/<int:repair_id>/assign_loaner', methods=['POST'])
+@require_permission('repairs')
+def admin_repair_assign_loaner(repair_id):
+    """Checks out a loaner (from the loaner pool) to cover someone whose own
+    device is at repair.asset_tag while it's out for repair — a thin wrapper
+    over the same _checkout_loaner() the main Loaners page uses, just with
+    repair_id set so it's tracked back to this repair and shows up flagged
+    on the loaner pool (see admin_loaners())."""
+    site_ids = _current_site_ids()
+    repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
+    fallback_url = url_for('admin_ticket_detail', ticket_id=repair.ticket_id) if repair.ticket_id \
+        else url_for('admin_repairs')
+    if repair.returned_at:
+        flash('This repair has already been closed out.', 'error')
+        return redirect(request.referrer or fallback_url)
+    if LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first():
+        flash('This repair already has a loaner checked out.', 'error')
+        return redirect(request.referrer or fallback_url)
+
+    person_id = request.form.get('person_id', '').strip()
+    scan_value = request.form.get('loaner_asset_tag', '').strip()
+    due_date = _parse_date(request.form.get('due_date'))
+    person = _scope_people(Person.query, site_ids).filter_by(id=int(person_id)).first() if person_id.isdigit() else None
+    if not person or not scan_value:
+        flash('Choose both a person and a loaner asset tag.', 'error')
+        return redirect(request.referrer or fallback_url)
+    asset_tag, _ = resolve_scan(scan_value)
+    if not asset_tag:
+        flash(f'"{scan_value}" was not found in the asset registry.', 'error')
+        return redirect(request.referrer or fallback_url)
+
+    status, message = _checkout_loaner(asset_tag, person, due_date, site_ids, repair_id=repair.id)
+    flash(message, 'success' if status == 'ok' else 'error')
     return redirect(request.referrer or fallback_url)
 
 
@@ -5751,8 +5867,14 @@ def admin_repairs():
     closed_repairs = _apply_search(_scope_repairs(Repair.query, site_ids).filter(Repair.returned_at.isnot(None))) \
         .order_by(Repair.returned_at.desc()).limit(50).all()
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
+    open_repair_ids = [r.id for r in open_repairs]
+    active_repair_loaners = {
+        c.repair_id: c for c in LoanerCheckout.query.filter(
+            LoanerCheckout.repair_id.in_(open_repair_ids), LoanerCheckout.checked_in_at.is_(None))
+    } if open_repair_ids else {}
     return render_template('admin_repairs.html', open_repairs=open_repairs, closed_repairs=closed_repairs,
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
+                           active_repair_loaners=active_repair_loaners,
                            today=datetime.utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)
 
 

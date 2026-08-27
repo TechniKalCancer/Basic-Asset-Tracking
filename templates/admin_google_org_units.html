@@ -15,7 +15,9 @@
   Pull the Organizational Unit tree straight from Google Workspace, then tag each one Staff or Student.
   That tag becomes a scope you can pick on <a href="/admin/google_field_mapping">Google Field Mapping</a> —
   so a mapping can apply to every Staff org unit, every Student org unit, or one specific org unit, instead
-  of always applying to everyone.
+  of always applying to everyone. Tagging a Site here also corrects location automatically: running a sync
+  updates a matched Person's or device's Site to whatever's tagged on its org unit (or the closest tagged
+  ancestor), no mapping needed.
 </p>
 
 <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;">
@@ -43,6 +45,7 @@
           <th>Org Unit Path</th>
           <th>Name</th>
           <th style="width:200px;">Category</th>
+          <th style="width:180px;">Site (location)</th>
         </tr>
       </thead>
       <tbody>
@@ -57,9 +60,17 @@
               <option value="student" {{ 'selected' if ou.category == 'student' }}>🎓 Student</option>
             </select>
           </td>
+          <td>
+            <select name="site_{{ ou.id }}">
+              <option value="">— None —</option>
+              {% for site in sites %}
+              <option value="{{ site.id }}" {{ 'selected' if ou.site_id == site.id }}>{{ site.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">
+        <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">
           No org units yet — click "Refresh from Google" above to pull them in.
         </td></tr>
         {% endfor %}
@@ -67,7 +78,7 @@
     </table>
   </div>
   {% if org_units %}
-  <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Save Classifications</button>
+  <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Save Changes</button>
   {% endif %}
 </form>
 {% endblock %}

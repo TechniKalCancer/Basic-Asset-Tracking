@@ -31,6 +31,7 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Type</label>
       <select name="field_type">
         <option value="text" {{ 'selected' if form and form.field_type == 'text' }}>Text</option>
+        <option value="email" {{ 'selected' if form and form.field_type == 'email' }}>Email</option>
         <option value="number" {{ 'selected' if form and form.field_type == 'number' }}>Number</option>
         <option value="date" {{ 'selected' if form and form.field_type == 'date' }}>Date</option>
         <option value="boolean" {{ 'selected' if form and form.field_type == 'boolean' }}>Yes / No</option>

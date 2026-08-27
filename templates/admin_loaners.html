@@ -118,13 +118,20 @@
         <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
         {% endif %}
         <td>
-          {% if checkout %}
+          {% if checkout and checkout.repair_id %}
+            <span class="badge badge-purple" title="Covering a device out for repair">🛠️ Repair Loaner</span>
+          {% elif checkout %}
             <span class="badge {{ 'badge-red' if checkout.due_date and checkout.due_date < today else 'badge-blue' }}">Checked Out</span>
           {% else %}
             <span class="badge badge-green">Available</span>
           {% endif %}
         </td>
-        <td style="color:var(--muted);">{{ checkout.person_name if checkout else '—' }}</td>
+        <td style="color:var(--muted);">
+          {{ checkout.person_name if checkout else '—' }}
+          {% if checkout and checkout.repair_id and checkout.repair %}
+          <br><a href="/admin/assets/{{ checkout.repair.asset_tag }}/assign" style="font-size:.75rem;text-decoration:none;">covering <code>{{ checkout.repair.asset_tag }}</code></a>
+          {% endif %}
+        </td>
         <td style="color:{{ 'var(--danger)' if checkout and checkout.due_date and checkout.due_date < today else 'var(--muted)' }};">
           {{ checkout.due_date.strftime('%Y-%m-%d') if checkout and checkout.due_date else '—' }}
         </td>

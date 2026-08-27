@@ -12,6 +12,46 @@
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">⚡ Quick Add</h2>
+  <p style="color:var(--muted);font-size:.82rem;margin-bottom:1rem;">
+    For entering a short roster by hand — add one, land right back here with the next entry ready to go.
+    Role and site carry over between entries.
+  </p>
+  <form method="POST" action="/admin/people/quick_add" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">First Name</label>
+      <input name="first_name" autocomplete="off" autofocus required />
+    </div>
+    <div style="min-width:160px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Last Name</label>
+      <input name="last_name" autocomplete="off" required />
+    </div>
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Email</label>
+      <input type="email" name="email" autocomplete="off" required />
+    </div>
+    <div style="min-width:130px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Role</label>
+      <select name="role">
+        <option value="student" {{ 'selected' if quick_role == 'student' }}>Student</option>
+        <option value="staff"   {{ 'selected' if quick_role == 'staff' }}>Staff</option>
+      </select>
+    </div>
+    <div style="min-width:180px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+      <select name="site_id" required>
+        <option value="">Choose…</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if s.id == quick_site_id }}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Add &amp; Next</button>
+  </form>
+</div>
+
 <form method="GET" style="margin-bottom:1.2rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
   <input type="hidden" name="sort" value="{{ sort }}">
   <input type="hidden" name="dir" value="{{ sort_dir }}">

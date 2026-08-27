@@ -36,7 +36,8 @@
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="google_loaner_autodisable_enabled" style="width:auto;"
              {{ 'checked' if (form.get('google_loaner_autodisable_enabled') if form else (site and site.google_loaner_autodisable_enabled)) }} />
-      Auto-disable loaner Chromebooks in Google when checked in, re-enable on checkout
+      Auto-manage Chromebooks in Google for this site: disable when checked in; on checkout or assignment,
+      re-enable and move into whichever org unit the recipient's own Google account is in
       <span style="color:var(--muted);">(requires Google sync + GOOGLE_LOANER_AUTO_DISABLE_ENABLED configured)</span>
     </label>
 

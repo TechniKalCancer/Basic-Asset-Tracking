@@ -14,6 +14,41 @@
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
+{% if can('devices_manage') %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">⚡ Quick Add</h2>
+  <p style="color:var(--muted);font-size:.82rem;margin-bottom:1rem;">
+    For unboxing a shipment — scan a serial and hit Enter, it's added and this stays right here ready
+    for the next one. Asset tag is auto-generated; edit any of the details afterward from the list below.
+  </p>
+  <form method="POST" action="/admin/registry/quick_add" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:220px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Serial Number</label>
+      <input name="serial_number" placeholder="Scan or type…" autocomplete="off" autofocus required />
+    </div>
+    <div style="min-width:150px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Type</label>
+      <select name="device_type">
+        {% for t in device_types %}
+        <option value="{{ t }}" {{ 'selected' if t == quick_device_type }}>{{ t|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:180px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Site</label>
+      <select name="site_id" required>
+        <option value="">Choose…</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if s.id == quick_site_id }}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Add &amp; Next</button>
+  </form>
+</div>
+{% endif %}
+
 {% if person_filter_name %}
 <div class="card" style="display:flex;align-items:center;gap:.8rem;padding:.8rem 1.2rem;margin-bottom:1.2rem;background:var(--surface2);">
   <span>📌 Showing devices assigned to <strong>{{ person_filter_name }}</strong></span>

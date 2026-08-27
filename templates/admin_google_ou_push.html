@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% block title %}Push to Google Org Units{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">📤 Push to Google Org Units</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/google_org_units" class="btn btn-ghost">🗂️ Org Units</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  The reverse of tagging an org unit with a Site on <a href="/admin/google_org_units">Org Units</a> — there,
+  Google's org unit decides FoxDesk's Site. Here, FoxDesk's own data decides where something belongs in
+  Google, and pushing moves it there for real.
+</p>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">🎒 Loaner Chromebooks by Site</h2>
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">
+    Set each site's target org unit under <a href="/admin/sites">Sites</a>, then push — every loaner-pool
+    device at that site with a serial number gets moved there. Items with no matching Chrome device in
+    Google (chargers, hotspots) are skipped and reported.
+  </p>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>Site</th><th>Loaner Org Unit</th><th>Loaners with a serial</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for site in sites %}
+      <tr>
+        <td>{{ site.name }}</td>
+        <td>
+          {% if site.loaner_org_unit_path %}<code>{{ site.loaner_org_unit_path }}</code>
+          {% else %}<span style="color:var(--muted);">Not set — <a href="/admin/sites/{{ site.id }}/edit">configure</a></span>{% endif %}
+        </td>
+        <td>{{ loaner_counts.get(site.id, 0) }}</td>
+        <td style="text-align:right;">
+          <form method="POST" action="/admin/google_ou_push/loaners/{{ site.id }}"
+                onsubmit="return confirm('Move {{ loaner_counts.get(site.id, 0) }} loaner Chromebook(s) at {{ site.name }} to {{ site.loaner_org_unit_path or "(not set)" }}? This changes their Chrome policies in Google Workspace right away.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary" style="padding:.3rem .8rem;"
+                    {{ 'disabled' if not google_sync_enabled or not site.loaner_org_unit_path or not loaner_counts.get(site.id) }}>
+              Push Now
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No sites yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">🎓 Students by Graduation Year</h2>
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">
+    Moves every student's Google account with that graduation year set in FoxDesk to the mapped org unit.
+    This changes an account's own policies (filtering, apps, groups) right away — double-check the mapping
+    before pushing. Requires the additional
+    <code>admin.directory.user</code> scope authorized on your service account's Domain-wide Delegation
+    (separate from the read-only scopes used elsewhere) — a push will fail with a clear error if it isn't yet.
+  </p>
+
+  <form method="POST" action="/admin/google_ou_push/grad_year_mapping/new"
+        style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;margin-bottom:1.5rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:140px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year</label>
+      <input type="number" name="grad_year" placeholder="e.g. 2031" required />
+    </div>
+    <div style="min-width:260px;flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Org Unit</label>
+      <select name="org_unit_path" required>
+        <option value="">Choose…</option>
+        {% for ou in org_units %}
+        <option value="{{ ou.org_unit_path }}">{{ ou.org_unit_path }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Mapping</button>
+  </form>
+
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>Graduation Year</th><th>Org Unit</th><th>Matching Students</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for m in mappings %}
+      <tr>
+        <td>{{ m.grad_year }}</td>
+        <td><code>{{ m.org_unit_path }}</code></td>
+        <td>{{ student_counts.get(m.grad_year, 0) }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/google_ou_push/students/{{ m.id }}" style="display:inline;"
+                onsubmit="return confirm('Move {{ student_counts.get(m.grad_year, 0) }} student account(s) (grad year {{ m.grad_year }}) to {{ m.org_unit_path }}? This changes their Google account policies right away.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary" style="padding:.3rem .8rem;"
+                    {{ 'disabled' if not google_sync_enabled or not student_counts.get(m.grad_year) }}>
+              Push Now
+            </button>
+          </form>
+          <form method="POST" action="/admin/google_ou_push/grad_year_mapping/{{ m.id }}/delete" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">No mappings yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

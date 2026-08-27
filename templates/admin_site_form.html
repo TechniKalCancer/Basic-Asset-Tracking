@@ -39,6 +39,23 @@
       Auto-disable loaner Chromebooks in Google when checked in, re-enable on checkout
       <span style="color:var(--muted);">(requires Google sync + GOOGLE_LOANER_AUTO_DISABLE_ENABLED configured)</span>
     </label>
+
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Org Unit (optional)</label>
+      <select name="loaner_org_unit_path">
+        <option value="">— None —</option>
+        {% set current = form.get('loaner_org_unit_path') if form else (site.loaner_org_unit_path if site else '') %}
+        {% for ou in org_units %}
+        <option value="{{ ou.org_unit_path }}" {{ 'selected' if current == ou.org_unit_path }}>{{ ou.org_unit_path }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Where this site's loaner Chromebooks should live in Google Workspace. Push them there anytime from
+        <a href="/admin/google_ou_push">Push to Google Org Units</a>. Refresh the org unit list first at
+        <a href="/admin/google_org_units">Org Units</a> if the one you want isn't listed.
+      </span>
+    </div>
+
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if site else 'Add Site' }}</button>
   </form>
 </div>

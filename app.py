@@ -109,6 +109,7 @@ GOOGLE_SCOPE_READONLY      = 'https://www.googleapis.com/auth/admin.directory.de
 GOOGLE_SCOPE_MANAGE        = 'https://www.googleapis.com/auth/admin.directory.device.chromeos'
 GOOGLE_SCOPE_USER_READONLY = 'https://www.googleapis.com/auth/admin.directory.user.readonly'
 GOOGLE_SCOPE_ORGUNIT_READONLY = 'https://www.googleapis.com/auth/admin.directory.orgunit.readonly'
+GOOGLE_SCOPE_USER_MANAGE = 'https://www.googleapis.com/auth/admin.directory.user'
 
 # Remotely disabling a live device is a much bigger blast radius than the
 # read-only sync above, so it gets its own separate opt-in on top of
@@ -165,6 +166,7 @@ class Site(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     name       = db.Column(db.String(120), unique=True, nullable=False, index=True)
     google_loaner_autodisable_enabled = db.Column(db.Boolean, nullable=False, default=False)  # per-site opt-in pilot gate, see _sync_loaner_google_state
+    loaner_org_unit_path = db.Column(db.String(255), nullable=True)  # where this site's loaner Chromebooks should live in Google Workspace — see _push_loaners_to_ou
     logo_filename = db.Column(db.String(255), nullable=True)  # overrides BrandingSettings.logo_filename in the nav for this site's users; falls back when unset
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -278,6 +280,21 @@ class GoogleOrgUnit(db.Model):
     updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     site = db.relationship('Site')
+
+
+class GradYearOuMapping(db.Model):
+    """
+    The reverse of GoogleOrgUnit.site_id: instead of reading a student's org
+    unit to correct their Site, this says which org unit a student's Google
+    account should be PUSHED to based on their grad_year here in FoxDesk —
+    see _push_students_to_ou() at /admin/google_ou_push. One row per
+    graduation year, e.g. 2031 -> '/Students/Class of 2031'.
+    """
+    __tablename__ = 'grad_year_ou_mapping'
+    id            = db.Column(db.Integer, primary_key=True)
+    grad_year     = db.Column(db.Integer, unique=True, nullable=False)
+    org_unit_path = db.Column(db.String(255), nullable=False)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class UserSite(db.Model):
@@ -1244,6 +1261,77 @@ def _fetch_google_org_units():
     return len(org_units)
 
 
+# ─── Pushing FoxDesk's own data back onto Google org units ─────────────────
+# The inverse of the pull-based site correction above: here FoxDesk's Site
+# (for loaner Chromebooks) or grad_year (for students) decides where a
+# device/account belongs, and we move it in Google to match. Devices move in
+# one batch call each (moveDevicesToOu); Users have no equivalent bulk
+# endpoint, so each account is patched individually.
+
+def _push_loaners_to_ou(site):
+    """Moves every loaner-pool device at `site` with a serial number into
+    site.loaner_org_unit_path in Google Workspace. Returns (moved, not_found)
+    — not_found counts loaner rows whose serial has no matching Chrome
+    device in Google (e.g. it's actually a charger, not a Chromebook).
+    Raises on auth/API failure so the caller can flash the real error."""
+    if not site.loaner_org_unit_path:
+        return 0, 0
+    rows = AssetRegistry.query.filter_by(is_loaner=True, site_id=site.id) \
+        .filter(AssetRegistry.serial_number.isnot(None)).all()
+    if not rows:
+        return 0, 0
+    target_serials = {r.serial_number for r in rows}
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    found = {}
+    page_token = None
+    while True:
+        response = service.chromeosdevices().list(
+            customerId='my_customer', maxResults=200, pageToken=page_token, projection='BASIC',
+        ).execute()
+        for d in response.get('chromeosdevices', []):
+            sn = d.get('serialNumber')
+            if sn in target_serials:
+                found[sn] = d['deviceId']
+        page_token = response.get('nextPageToken')
+        if not page_token:
+            break
+    not_found = len(target_serials) - len(found)
+    device_ids = list(found.values())
+    for i in range(0, len(device_ids), 50):  # moveDevicesToOu caps out well under this per call
+        service.chromeosdevices().moveDevicesToOu(
+            customerId='my_customer', orgUnitPath=site.loaner_org_unit_path,
+            body={'deviceIds': device_ids[i:i + 50]},
+        ).execute()
+    return len(device_ids), not_found
+
+
+def _push_students_to_ou(mapping):
+    """Moves every student Person's Google account matching mapping.grad_year
+    into mapping.org_unit_path. Requires GOOGLE_SCOPE_USER_MANAGE (write) —
+    a heavier scope than the readonly one used for the People sync, since
+    this changes a live account's policies, not just FoxDesk's own data.
+    Returns (moved, unmatched) — unmatched counts people whose email has no
+    matching Google account (a 404 from the API). Raises on other failures
+    so the caller can flash the real error (e.g. scope not authorized yet)."""
+    from googleapiclient.errors import HttpError
+    people = Person.query.filter_by(role='student', grad_year=mapping.grad_year) \
+        .filter(Person.email.isnot(None)).all()
+    if not people:
+        return 0, 0
+    service = _google_directory_service([GOOGLE_SCOPE_USER_MANAGE])
+    moved = unmatched = 0
+    for p in people:
+        try:
+            service.users().patch(userKey=p.email, body={'orgUnitPath': mapping.org_unit_path}).execute()
+            moved += 1
+        except HttpError as e:
+            if e.resp.status == 404:
+                unmatched += 1
+            else:
+                raise
+    return moved, unmatched
+
+
 def _run_google_people_sync():
     """Pulls every Google Workspace user, matches to an existing Person by
     email, and applies each entity_type='person' GoogleFieldMapping onto the
@@ -1815,6 +1903,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/google_setup', 'admin'),
     ('/admin/custom_fields', 'admin'),
     ('/admin/google_org_units', 'admin'),
+    ('/admin/google_ou_push', 'admin'),
     ('/admin/google_field_mapping', 'admin'),
     ('/admin', 'admin'),
     ('/checkin', 'home'),
@@ -3978,6 +4067,100 @@ def admin_google_org_units_save():
     return redirect(url_for('admin_google_org_units'))
 
 
+@app.route('/admin/google_ou_push')
+@require_super_admin
+def admin_google_ou_push():
+    """The reverse of Org Units' site-tagging: here FoxDesk's own Site (for
+    loaner Chromebooks) or grad_year (for students) decides where something
+    belongs in Google, and this page pushes it there — see
+    _push_loaners_to_ou/_push_students_to_ou."""
+    sites = Site.query.order_by(Site.name).all()
+    loaner_counts = {
+        row[0]: row[1] for row in db.session.query(AssetRegistry.site_id, db.func.count(AssetRegistry.id))
+        .filter(AssetRegistry.is_loaner.is_(True), AssetRegistry.serial_number.isnot(None))
+        .group_by(AssetRegistry.site_id)
+    }
+    mappings = GradYearOuMapping.query.order_by(GradYearOuMapping.grad_year).all()
+    student_counts = {
+        row[0]: row[1] for row in db.session.query(Person.grad_year, db.func.count(Person.id))
+        .filter(Person.role == 'student', Person.grad_year.isnot(None), Person.email.isnot(None))
+        .group_by(Person.grad_year)
+    }
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
+    return render_template('admin_google_ou_push.html', sites=sites, loaner_counts=loaner_counts,
+                           mappings=mappings, student_counts=student_counts, org_units=org_units,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/google_ou_push/loaners/<int:site_id>', methods=['POST'])
+@require_super_admin
+def admin_google_ou_push_loaners(site_id):
+    site = Site.query.get_or_404(site_id)
+    if not site.loaner_org_unit_path:
+        flash(f'Set a Loaner Org Unit on {site.name} first (under Sites) before pushing.', 'error')
+        return redirect(url_for('admin_google_ou_push'))
+    try:
+        moved, not_found = _push_loaners_to_ou(site)
+        _log_activity('loaner_ou_push', f'Pushed {moved} loaner(s) from {site.name} to {site.loaner_org_unit_path}.',
+                       site_id=site.id)
+        msg = f'Moved {moved} device(s) to {site.loaner_org_unit_path}.'
+        if not_found:
+            msg += f' {not_found} loaner(s) had no matching Chrome device in Google (e.g. a charger, not a Chromebook).'
+        flash(msg, 'success' if moved else 'info')
+    except Exception as e:
+        flash(f'Push failed: {e}', 'error')
+    return redirect(url_for('admin_google_ou_push'))
+
+
+@app.route('/admin/google_ou_push/grad_year_mapping/new', methods=['POST'])
+@require_super_admin
+def admin_grad_year_mapping_new():
+    grad_year = request.form.get('grad_year', type=int)
+    org_unit_path = request.form.get('org_unit_path', '').strip()
+    if not grad_year:
+        flash('Enter a graduation year.', 'error')
+        return redirect(url_for('admin_google_ou_push'))
+    if not org_unit_path:
+        flash('Choose an org unit.', 'error')
+        return redirect(url_for('admin_google_ou_push'))
+    if GradYearOuMapping.query.filter_by(grad_year=grad_year).first():
+        flash(f'A mapping for {grad_year} already exists — delete it first to change it.', 'error')
+        return redirect(url_for('admin_google_ou_push'))
+
+    db.session.add(GradYearOuMapping(grad_year=grad_year, org_unit_path=org_unit_path))
+    _log_activity('grad_year_mapping_add', f'Mapped grad year {grad_year} -> {org_unit_path}.')
+    db.session.commit()
+    flash('Mapping added.', 'success')
+    return redirect(url_for('admin_google_ou_push'))
+
+
+@app.route('/admin/google_ou_push/grad_year_mapping/<int:mapping_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_grad_year_mapping_delete(mapping_id):
+    mapping = GradYearOuMapping.query.get_or_404(mapping_id)
+    _log_activity('grad_year_mapping_delete', f'Removed grad year mapping {mapping.grad_year} -> {mapping.org_unit_path}.')
+    db.session.delete(mapping)
+    db.session.commit()
+    flash('Mapping removed.', 'success')
+    return redirect(url_for('admin_google_ou_push'))
+
+
+@app.route('/admin/google_ou_push/students/<int:mapping_id>', methods=['POST'])
+@require_super_admin
+def admin_google_ou_push_students(mapping_id):
+    mapping = GradYearOuMapping.query.get_or_404(mapping_id)
+    try:
+        moved, unmatched = _push_students_to_ou(mapping)
+        _log_activity('student_ou_push', f'Pushed {moved} student(s) from grad year {mapping.grad_year} to {mapping.org_unit_path}.')
+        msg = f'Moved {moved} account(s) to {mapping.org_unit_path}.'
+        if unmatched:
+            msg += f' {unmatched} had no matching Google account.'
+        flash(msg, 'success' if moved else 'info')
+    except Exception as e:
+        flash(f'Push failed: {e}', 'error')
+    return redirect(url_for('admin_google_ou_push'))
+
+
 @app.route('/admin/google_field_mapping')
 @require_super_admin
 def admin_google_field_mapping():
@@ -4497,16 +4680,18 @@ def admin_sites():
 @app.route('/admin/sites/new', methods=['GET', 'POST'])
 @require_super_admin
 def admin_site_new():
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         if not name:
             flash('Site name is required.', 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
         if Site.query.filter(db.func.lower(Site.name) == name.lower()).first():
             flash(f'A site named "{name}" already exists.', 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
 
-        site = Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled')))
+        site = Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled')),
+                    loaner_org_unit_path=request.form.get('loaner_org_unit_path', '').strip() or None)
         db.session.add(site)
         db.session.flush()  # assigns site.id, used as the logo filename prefix below
 
@@ -4515,7 +4700,7 @@ def admin_site_new():
         except ValueError as e:
             db.session.rollback()
             flash(str(e), 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
         if new_logo:
             site.logo_filename = new_logo
 
@@ -4524,31 +4709,33 @@ def admin_site_new():
         flash(f'Added site "{name}".', 'success')
         return redirect(url_for('admin_sites'))
 
-    return render_template('admin_site_form.html', site=None, form=None)
+    return render_template('admin_site_form.html', site=None, form=None, org_units=org_units)
 
 
 @app.route('/admin/sites/<int:site_id>/edit', methods=['GET', 'POST'])
 @require_super_admin
 def admin_site_edit(site_id):
     site = Site.query.get_or_404(site_id)
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         if not name:
             flash('Site name is required.', 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
         dupe = Site.query.filter(db.func.lower(Site.name) == name.lower(), Site.id != site_id).first()
         if dupe:
             flash(f'A site named "{name}" already exists.', 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
 
         try:
             new_logo = _save_branding_logo(request.files.get('logo'), f'site{site.id}')
         except ValueError as e:
             flash(str(e), 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
 
         site.name = name
         site.google_loaner_autodisable_enabled = bool(request.form.get('google_loaner_autodisable_enabled'))
+        site.loaner_org_unit_path = request.form.get('loaner_org_unit_path', '').strip() or None
         if new_logo:
             _delete_branding_logo(site.logo_filename)
             site.logo_filename = new_logo
@@ -4561,7 +4748,7 @@ def admin_site_edit(site_id):
         flash(f'Updated site "{name}".', 'success')
         return redirect(url_for('admin_sites'))
 
-    return render_template('admin_site_form.html', site=site, form=None)
+    return render_template('admin_site_form.html', site=site, form=None, org_units=org_units)
 
 
 @app.route('/admin/sites/<int:site_id>/delete', methods=['POST'])
@@ -6393,6 +6580,7 @@ ACTIVITY_LOG_ACTIONS = [
     'custom_field_add', 'custom_field_delete',
     'google_field_mapping_add', 'google_field_mapping_delete', 'google_field_sync',
     'org_unit_refresh', 'org_unit_classify',
+    'loaner_ou_push', 'student_ou_push', 'grad_year_mapping_add', 'grad_year_mapping_delete',
 ]
 
 

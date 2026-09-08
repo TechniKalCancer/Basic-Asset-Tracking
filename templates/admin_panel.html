@@ -100,7 +100,76 @@
     </div>
   </a>
   {% endif %}
+  {% if open_repairs_count is not none %}
+  <a href="/admin/repairs" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num" style="color:{{ 'var(--warning)' if open_repairs_count else 'var(--success)' }}">{{ open_repairs_count }}</div>
+      <div class="lbl">Open Repairs</div>
+    </div>
+  </a>
+  {% endif %}
+  {% if active_loaners_count is not none %}
+  <a href="/admin/loaners" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num">{{ active_loaners_count }}</div>
+      <div class="lbl">Active Loaners</div>
+    </div>
+  </a>
+  {% endif %}
 </div>
+
+{% if person_schedule and device_schedule %}
+<!-- Sync status -->
+<div class="card">
+  <h2 style="display:flex;align-items:center;gap:.6rem;">
+    🔄 Sync Status
+    <a href="/admin/sync_schedule" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">Manage →</a>
+  </h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:1rem;">
+    {% for label, schedule in [('👤 People', person_schedule), ('💻 Device', device_schedule)] %}
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.9rem 1rem;">
+      <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">
+        <strong>{{ label }}</strong>
+        {% if schedule.enabled %}<span class="badge badge-green">On · {{ sync_intervals.get(schedule.interval_hours, schedule.interval_hours) }}</span>
+        {% else %}<span class="badge badge-yellow">Off</span>{% endif %}
+      </div>
+      {% if schedule.last_run_at %}
+      <div style="color:var(--muted);font-size:.83rem;">
+        Last ran {{ schedule.last_run_at.strftime('%Y-%m-%d %H:%M') }} UTC
+        {% if schedule.last_run_summary %} — {{ schedule.last_run_summary }}{% endif %}
+      </div>
+      {% else %}
+      <div style="color:var(--muted);font-size:.83rem;">Hasn't run on a schedule yet.</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if recent_activity %}
+<!-- Recent activity -->
+<div class="card">
+  <h2 style="display:flex;align-items:center;gap:.6rem;">
+    🕒 Recent Activity
+    <a href="/admin/activity" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">View Full Log →</a>
+  </h2>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+    <tbody>
+      {% for entry in recent_activity %}
+      <tr>
+        <td style="color:var(--muted);white-space:nowrap;">{{ entry.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td style="white-space:nowrap;">{{ entry.actor_label }}</td>
+        <td>{{ entry.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
 
 {% if can('devices') %}
 <!-- Status breakdown -->

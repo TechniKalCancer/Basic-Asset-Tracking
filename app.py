@@ -2130,6 +2130,31 @@ def admin_panel():
         open_tickets_count = _scope_tickets(Ticket.query, site_ids) \
             .filter(Ticket.status.in_(['open', 'in_progress'])).count()
 
+    open_repairs_count = None
+    if _has_permission('repairs'):
+        open_repairs_count = _scope_repairs(Repair.query, site_ids).filter(Repair.returned_at.is_(None)).count()
+
+    active_loaners_count = None
+    if _has_permission('loaners'):
+        loaner_query = LoanerCheckout.query.filter(LoanerCheckout.checked_in_at.is_(None))
+        if site_ids is not None:
+            loaner_query = loaner_query.join(AssetRegistry, AssetRegistry.asset_tag == LoanerCheckout.asset_tag) \
+                .filter(AssetRegistry.site_id.in_(site_ids))
+        active_loaners_count = loaner_query.count()
+
+    recent_activity = None
+    if _has_permission('admin'):
+        recent_activity = _scope_activity_log(ActivityLog.query, site_ids) \
+            .order_by(ActivityLog.timestamp.desc()).limit(8).all()
+
+    # Sync status is a super-admin-only surface (same gate as /admin/sync_schedule
+    # itself) — a scoped site admin can't view or change it either.
+    person_schedule = None
+    device_schedule = None
+    if site_ids is None:
+        person_schedule = _get_or_create_sync_schedule('person')
+        device_schedule = _get_or_create_sync_schedule('device')
+
     # Orphans have no site to attribute, and a per-site breakdown only makes
     # sense district-wide — both super-admin-only, along with the onboarding
     # banners below (a scoped site admin can't act on either anyway).
@@ -2172,6 +2197,12 @@ def admin_panel():
                            overdue_count=overdue_count,
                            warranty_expiring_count=warranty_expiring_count,
                            open_tickets_count=open_tickets_count,
+                           open_repairs_count=open_repairs_count,
+                           active_loaners_count=active_loaners_count,
+                           recent_activity=recent_activity,
+                           person_schedule=person_schedule,
+                           device_schedule=device_schedule,
+                           sync_intervals=SYNC_SCHEDULE_INTERVALS,
                            site_breakdown=site_breakdown,
                            unassigned_devices=unassigned_devices,
                            fresh_install=fresh_install,

@@ -1160,7 +1160,12 @@ def _fetch_kace_devices():
     """
     import requests
     session = _kace_login_session()
-    fields = list(KACE_DEVICE_FIELDS.keys()) + ['CSP_ID_NUMBER']
+    # CSP_ID_NUMBER (serial) and ASSIGNEE_EMAIL are always fetched regardless
+    # of which mappings are configured — CSP_ID_NUMBER (with SYSTEM_NAME,
+    # already in KACE_DEVICE_FIELDS as the Hostname mapping option) is needed
+    # for matching, ASSIGNEE_EMAIL for the independent assignment sync in
+    # _run_kace_device_sync — neither is itself a mappable target field.
+    fields = list(KACE_DEVICE_FIELDS.keys()) + ['CSP_ID_NUMBER', 'ASSIGNEE_EMAIL']
     devices = []
     start, length = 0, 200
     while True:
@@ -1181,28 +1186,60 @@ def _fetch_kace_devices():
     return devices
 
 
+def _match_kace_device(d):
+    """Matches one cleaned KACE device record to an AssetRegistry row.
+    Tries the real hardware serial first (KACE's CSP_ID_NUMBER against
+    AssetRegistry.serial_number), then falls back to hostname (KACE's
+    SYSTEM_NAME against the same column). The fallback exists because a
+    large share of this district's non-Chromebook devices were bulk-
+    imported with their hostname in the serial_number column rather than a
+    true hardware serial — confirmed directly against production data (0
+    matches by real serial, 325 of 347 KACE devices matched by hostname).
+    Returns the AssetRegistry row, or None."""
+    serial = d.get('CSP_ID_NUMBER')
+    if serial:
+        row = AssetRegistry.query.filter_by(serial_number=serial).first()
+        if row:
+            return row
+    hostname = d.get('SYSTEM_NAME')
+    if hostname:
+        return AssetRegistry.query.filter_by(serial_number=hostname).first()
+    return None
+
+
 def _run_kace_device_sync():
-    """Pulls every device from KACE SMA, matches to an existing
-    AssetRegistry row by serial number (KACE's CSP_ID_NUMBER field), and
-    applies each KaceFieldMapping onto the match. Same match-only
-    philosophy as _run_google_device_sync — never creates a new
-    AssetRegistry row from KACE data alone, since KACE's inventory includes
-    plenty of non-Chromebook equipment (staff laptops, servers) this
-    district's registry deliberately doesn't track. Returns
+    """Pulls every device from KACE SMA and matches each one to an existing
+    AssetRegistry row (see _match_kace_device). Applies each
+    KaceFieldMapping onto the match — same match-only philosophy as
+    _run_google_device_sync, never creates a new AssetRegistry row from
+    KACE data alone, since KACE's inventory includes plenty of equipment
+    (staff laptops, servers) this district's registry deliberately doesn't
+    track. Independently of any mapping, also assigns a matched device to
+    whichever Person's email matches KACE's ASSIGNEE_EMAIL for it — same
+    "independently of any mapping" pattern _run_google_device_sync uses to
+    correct site_id from org unit. Silently skips (doesn't count as
+    updated) when there's no Person with that email, or the device can't be
+    assigned (e.g. it's in the loaner pool) — _assign_asset_to_person
+    already handles both cases without raising. Returns
     (matched, updated, unmatched)."""
     mappings = KaceFieldMapping.query.all()
-    if not mappings:
-        return 0, 0, 0
     devices = _fetch_kace_devices()
     matched = updated = unmatched = 0
     for d in devices:
-        serial = d.get('CSP_ID_NUMBER')
-        row = AssetRegistry.query.filter_by(serial_number=serial).first() if serial else None
+        row = _match_kace_device(d)
         if not row:
             unmatched += 1
             continue
         matched += 1
-        if _apply_kace_field_mappings(d, row, mappings):
+        row_changed = _apply_kace_field_mappings(d, row, mappings) if mappings else False
+        assignee_email = d.get('ASSIGNEE_EMAIL')
+        if assignee_email:
+            person = Person.query.filter(db.func.lower(Person.email) == assignee_email.lower()).first()
+            if person:
+                status, _ = _assign_asset_to_person(row.asset_tag, person)
+                if status == 'assigned':
+                    row_changed = True
+        if row_changed:
             updated += 1
     db.session.commit()
     return matched, updated, unmatched

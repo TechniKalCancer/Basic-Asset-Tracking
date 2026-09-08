@@ -16,8 +16,11 @@
   Map a KACE device inventory field onto a field here — a built-in column, or one you define under
   <a href="/admin/custom_fields?entity=device">Custom Fields</a>. Running a sync pulls every device
   from KACE and applies these mappings onto whichever <a href="/admin/registry">Asset Registry</a> row
-  matches by serial number — it never creates new registry rows, only fills in extra data on ones that
-  already exist here.
+  matches (by hardware serial number, or by hostname when a device was bulk-imported with its hostname
+  in the serial number field) — it never creates new registry rows, only fills in extra data on ones
+  that already exist here. Independently of any mapping below, a sync also assigns each matched device
+  to whichever <a href="/admin/people">Person</a> KACE lists as its assignee, matched by email —
+  same as manually using "Assign" on the device page.
 </p>
 
 <div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">

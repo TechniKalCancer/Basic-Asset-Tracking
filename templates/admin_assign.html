@@ -27,7 +27,9 @@
 {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
                         'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
 
-<div class="card" style="max-width:480px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(520px, 1fr));gap:1.5rem;align-items:start;">
+
+<div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
     Status
     <span class="badge {{ status_badge.get(status, 'badge-blue') }}">{{ status }}</span>
@@ -43,7 +45,7 @@
   </form>
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     {{ registry_row.description or 'No description on file.' }}
     {% if asset and asset.assigned_to %}
@@ -115,9 +117,10 @@
   {% endif %}
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h2>📜 Assignment &amp; Loaner History</h2>
   {% if combined_history %}
+  <div style="overflow-x:auto;">
   <table>
     <thead>
       <tr><th></th><th>Person</th><th>Started</th><th>Due</th><th>Returned</th><th>Acknowledged By</th><th>Notes</th></tr>
@@ -140,14 +143,16 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p style="color:var(--muted);font-size:.88rem;">No assignment or loaner history yet.</p>
   {% endif %}
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h2>🔄 Check-In/Out Log</h2>
   {% if events %}
+  <div style="overflow-x:auto;">
   <table>
     <thead>
       <tr><th>When</th><th>Action</th><th>Person</th></tr>
@@ -166,12 +171,13 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p style="color:var(--muted);font-size:.88rem;">No check-in/out scans yet.</p>
   {% endif %}
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <div style="display:flex;align-items:center;gap:.6rem;">
     <h2 style="margin:0;">🛠️ Incidents / Damage Reports</h2>
     {% if incidents %}
@@ -241,6 +247,7 @@
   </script>
 
   {% if incidents %}
+  <div style="overflow-x:auto;">
   <table>
     <thead>
       <tr><th>Date</th><th>Person</th><th>Description</th><th>Fee</th><th></th></tr>
@@ -291,13 +298,14 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <p style="color:var(--muted);font-size:.88rem;">No incidents logged for this asset.</p>
   {% endif %}
 </div>
 
 {% if can('repairs') %}
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h2>🛠️ Repair</h2>
   {% if open_repair %}
     <p style="color:var(--muted);font-size:.88rem;margin-bottom:.5rem;">
@@ -386,6 +394,7 @@
 
   {% if closed_repairs %}
   <h3 style="margin-top:1.5rem;font-size:.9rem;color:var(--muted);">Past Repairs</h3>
+  <div style="overflow-x:auto;">
   <table>
     <thead>
       <tr><th>Sent</th><th>Returned</th><th>Outcome</th><th>Category</th></tr>
@@ -401,11 +410,12 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 </div>
 {% endif %}
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
     🔗 Google Workspace Info
     <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}" style="font-size:.7rem;">
@@ -446,7 +456,7 @@
   {% endif %}
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h2>🖨️ Print Label</h2>
   <p style="color:var(--muted);font-size:.78rem;margin-bottom:1rem;">
     Requires DYMO Connect installed and running on this device. Label stock: 30252 Address.
@@ -464,6 +474,8 @@
     </label>
     <button id="printLabelBtn" type="button" class="btn btn-primary">Print Label</button>
   </div>
+</div>
+
 </div>
 
 <script>

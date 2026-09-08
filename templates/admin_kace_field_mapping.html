@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}KACE Field Mapping{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🖥️ KACE Field Mapping</h1>
+  <span class="badge {{ 'badge-green' if kace_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if kace_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/custom_fields?entity=device" class="btn btn-ghost">🧩 Custom Fields</a>
+  <a href="/admin/kace_setup" class="btn btn-ghost">KACE Setup</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Map a KACE device inventory field onto a field here — a built-in column, or one you define under
+  <a href="/admin/custom_fields?entity=device">Custom Fields</a>. Running a sync pulls every device
+  from KACE and applies these mappings onto whichever <a href="/admin/registry">Asset Registry</a> row
+  matches by serial number — it never creates new registry rows, only fills in extra data on ones that
+  already exist here.
+</p>
+
+<div class="card" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+  <div>
+    <strong>Run this sync now</strong>
+    <p style="color:var(--muted);font-size:.82rem;margin-top:.2rem;">
+      Pulls all KACE devices and applies the mappings below. Can take a minute on a large fleet.
+    </p>
+  </div>
+  <span class="spacer" style="flex:1;"></span>
+  <form method="POST" action="/admin/kace_field_mapping/sync">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not kace_sync_enabled or not mappings }}>
+      ▶️ Run Sync Now{{ '' if kace_sync_enabled else ' (set up KACE Sync first)' }}
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">➕ Add a Mapping</h2>
+  <form method="POST" action="/admin/kace_field_mapping/new" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="min-width:200px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">KACE Field</label>
+      <select name="kace_field" required>
+        {% for key, label in kace_fields.items() %}
+        <option value="{{ key }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:200px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Target Field</label>
+      <select name="target_field" required>
+        <optgroup label="Built-in">
+          {% for key, label in real_fields.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% if custom_fields %}
+        <optgroup label="Custom Fields">
+          {% for c in custom_fields %}
+          <option value="custom:{{ c.field_key }}">{{ c.label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Mapping</button>
+    {% if not custom_fields %}
+    <a href="/admin/custom_fields/new?entity=device" class="btn btn-ghost">+ New Custom Field</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>KACE Field</th>
+        <th>Target Field</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in mappings %}
+      <tr>
+        <td>{{ kace_fields.get(m.kace_field, m.kace_field) }}</td>
+        <td>
+          {% if m.target_field.startswith('custom:') %}
+            🧩 {{ custom_fields|selectattr('field_key', 'equalto', m.target_field[7:])|map(attribute='label')|first or m.target_field }}
+          {% else %}
+            {{ real_fields.get(m.target_field, m.target_field) }}
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/kace_field_mapping/{{ m.id }}/delete" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">No mappings yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

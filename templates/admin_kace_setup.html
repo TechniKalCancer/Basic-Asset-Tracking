@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}KACE Setup{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">🖥️ KACE SMA Sync Setup</h1>
+  <span class="badge {{ 'badge-green' if kace_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if kace_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+  <p style="color:var(--muted);font-size:.9rem;margin-bottom:0;">
+    Pulls device inventory (hostname, OS, manufacturer/model, last-seen time, and more) from a
+    KACE Systems Management Appliance, matching devices onto <a href="/admin/registry">Asset Registry</a>
+    rows by serial number — same match-only approach as
+    <a href="/admin/google_setup">Google Workspace sync</a>: it never creates new registry rows on its
+    own, since KACE's inventory includes plenty of equipment (staff laptops, servers) this district's
+    registry deliberately doesn't track. Logs in through the same session KACE's own admin console
+    uses, so no separate API token is needed — just a KACE account.
+  </p>
+</div>
+
+<div class="card">
+  <h2>Setup</h2>
+  <ol style="line-height:2;padding-left:1.2rem;">
+    <li>
+      In the KACE admin console, create (or reuse) a user account for this app — a dedicated
+      account with just enough access is safer than reusing your own admin login long-term, though
+      any valid console account with the <strong>Administrator</strong> role works.
+    </li>
+    <li>
+      Set these in <code>.env</code> on the server this app runs on:
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.8rem 1rem;margin:.5rem 0;font-family:monospace;font-size:.82rem;word-break:break-all;">
+        KACE_URL=https://&lt;your KACE appliance address&gt;<br>
+        KACE_USERNAME=&lt;that account's login name&gt;<br>
+        KACE_PASSWORD=&lt;that account's password&gt;<br>
+        KACE_ORGANIZATION=Default<span style="color:var(--muted);"> (only change this if your KACE has more than one organization configured)</span>
+      </div>
+      Then restart the container (<code>docker compose up -d --force-recreate web</code>).
+    </li>
+    <li>Click <strong>Test Connection</strong> below.</li>
+    <li>
+      Once connected, head to <a href="/admin/kace_field_mapping">KACE Field Mapping</a> to choose
+      which KACE fields (hostname, OS, model, etc.) get written onto matched registry rows, then run
+      a sync — manually, or on a timer from <a href="/admin/sync_schedule">Scheduled Syncs</a>.
+    </li>
+  </ol>
+</div>
+
+<div class="card">
+  <h2>Current Status</h2>
+  <table style="margin-bottom:1rem;">
+    <tr><td style="color:var(--muted);">KACE_URL</td><td>{{ kace_url or '(not set)' }}</td></tr>
+    <tr><td style="color:var(--muted);">KACE_USERNAME</td><td>{{ kace_username or '(not set)' }}</td></tr>
+    <tr><td style="color:var(--muted);">KACE_ORGANIZATION</td><td>{{ kace_organization }}</td></tr>
+  </table>
+  <form method="POST" action="/admin/kace_setup/test">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not kace_sync_enabled }}>
+      Test Connection{{ '' if kace_sync_enabled else ' (set the env vars above first)' }}
+    </button>
+  </form>
+</div>
+{% endblock %}

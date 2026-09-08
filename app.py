@@ -115,6 +115,17 @@ GOOGLE_SCOPE_ORGUNIT_READONLY = 'https://www.googleapis.com/auth/admin.directory
 # GOOGLE_SYNC_ENABLED — and a per-site flag on top of that (see Site.google_loaner_autodisable_enabled).
 GOOGLE_LOANER_AUTO_DISABLE_ENABLED = os.environ.get('GOOGLE_LOANER_AUTO_DISABLE_ENABLED', '').lower() in ('1', 'true', 'yes')
 
+# ─── KACE SMA sync config ───────────────────────────────────────────────────────
+# KACE SMA has no stable public REST API for local console accounts (the
+# /ams/shared/api/ JSON endpoint that name suggests is actually unrelated —
+# it's for a different subsystem entirely). Reads go through the same
+# session-cookie login the admin console itself uses (see _kace_login_session).
+KACE_URL         = (os.environ.get('KACE_URL') or '').rstrip('/')
+KACE_USERNAME    = os.environ.get('KACE_USERNAME')
+KACE_PASSWORD    = os.environ.get('KACE_PASSWORD')
+KACE_ORGANIZATION = os.environ.get('KACE_ORGANIZATION', 'Default')
+KACE_SYNC_ENABLED = bool(KACE_URL and KACE_USERNAME and KACE_PASSWORD)
+
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──
 # SMTP_USERNAME/SMTP_PASSWORD are optional: a Google Workspace SMTP relay
 # (smtp-relay.gmail.com) is commonly set up IP-allowlisted with no login
@@ -253,6 +264,26 @@ class GoogleFieldMapping(db.Model):
     google_field = db.Column(db.String(120), nullable=False)
     target_field = db.Column(db.String(80), nullable=False)
     org_unit_scope = db.Column(db.String(255), nullable=True)  # None=all; '__staff__'/'__student__'=category; else an exact org unit path — see _mapping_applies_to_org_unit()
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class KaceFieldMapping(db.Model):
+    """
+    Maps one field from a KACE SMA device inventory record onto one target
+    field on AssetRegistry, applied by _run_kace_device_sync() at
+    /admin/kace_field_mapping. kace_field is a key from
+    KACE_DEVICE_FIELDS (e.g. 'SYSTEM_NAME', 'OS_NAME') — flat, unlike
+    GoogleFieldMapping.google_field, since KACE's inventory grid returns a
+    flat record with no nesting. target_field is either a real column name
+    (from DEVICE_SYNC_TARGET_FIELDS) or 'custom:<key>' referencing a
+    CustomField, same convention as GoogleFieldMapping. Always maps onto
+    AssetRegistry — KACE has no Person-equivalent data, so unlike
+    GoogleFieldMapping there's no entity_type to track.
+    """
+    __tablename__ = 'kace_field_mapping'
+    id           = db.Column(db.Integer, primary_key=True)
+    kace_field   = db.Column(db.String(80), nullable=False)
+    target_field = db.Column(db.String(80), nullable=False)
     created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
@@ -1063,6 +1094,120 @@ def _find_chromeos_device_by_serial(service, serial_number):
             return None
 
 
+def _kace_login_session():
+    """
+    Logs into the KACE SMA admin console the same way a browser does: GET
+    the welcome page for a CSRF token, POST credentials to check_login.php,
+    and return the resulting requests.Session (its cookies are what
+    authorizes every later request). There's no stable JSON REST API for
+    local console accounts on this appliance — /ams/shared/api/security/login
+    looks like one but belongs to an unrelated subsystem and rejects every
+    real account identically to a fake one, confirmed against this
+    installation directly. verify=False matches the appliance's self-signed
+    cert, same as every other on-prem admin console in this district.
+    Raises RuntimeError with a message safe to flash to the admin UI.
+    """
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    session = requests.Session()
+    try:
+        welcome = session.get(f'{KACE_URL}/adminui/welcome.php', verify=False, timeout=15)
+        welcome.raise_for_status()
+    except requests.RequestException as e:
+        raise RuntimeError(f'Could not reach KACE at {KACE_URL}: {e}')
+    match = re.search(r'CSRF_TOKEN"\s+value="([^"]*)"', welcome.text)
+    if not match:
+        raise RuntimeError('Could not find a login form on the KACE welcome page — is KACE_URL correct?')
+    try:
+        resp = session.post(f'{KACE_URL}/adminui/check_login.php', data={
+            'CSRF_TOKEN': match.group(1),
+            'LOGIN_NAME': KACE_USERNAME,
+            'LOGIN_PASSWORD': KACE_PASSWORD,
+            'ORGANIZATION': KACE_ORGANIZATION,
+            'save': 'Login',
+        }, verify=False, timeout=15, allow_redirects=False)
+    except requests.RequestException as e:
+        raise RuntimeError(f'KACE login request failed: {e}')
+    if 'ERROR_NBR' in resp.headers.get('Location', '') or resp.status_code != 302:
+        raise RuntimeError('KACE login failed — check KACE_USERNAME/KACE_PASSWORD/KACE_ORGANIZATION.')
+    return session
+
+
+def _kace_strip_html(value):
+    """KACE's inventory grid returns each cell as an HTML fragment like
+    '<span title="the real value">the real value, maybe <wbr>-broken</span>'
+    rather than a plain value — the title attribute always holds the
+    untruncated, unbroken original, so that's what gets extracted. Falls
+    back to the raw value for the handful of columns (IDs, booleans) that
+    come back as plain strings with no markup at all."""
+    if not isinstance(value, str):
+        return value
+    match = re.search(r'title="([^"]*)"', value)
+    return match.group(1) if match else value
+
+
+def _fetch_kace_devices():
+    """
+    Pulls every device from the KACE SMA inventory grid
+    (/adminui/computer_inventory.php — the same endpoint the admin
+    console's own Devices page uses; there's no separate export API),
+    paginated via its DataTables-style params. Returns a list of cleaned
+    dicts, one per device, each carrying every KACE_DEVICE_FIELDS key plus
+    'CSP_ID_NUMBER' (serial number, used for matching — always fetched
+    regardless of which mappings are configured, since without it nothing
+    can match at all). Raises RuntimeError on any failure.
+    """
+    import requests
+    session = _kace_login_session()
+    fields = list(KACE_DEVICE_FIELDS.keys()) + ['CSP_ID_NUMBER']
+    devices = []
+    start, length = 0, 200
+    while True:
+        try:
+            resp = session.get(f'{KACE_URL}/adminui/computer_inventory.php', params={
+                'draw': 1, 'start': start, 'length': length,
+            }, headers={'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
+               verify=False, timeout=30)
+            resp.raise_for_status()
+            payload = resp.json()
+        except (requests.RequestException, ValueError) as e:
+            raise RuntimeError(f'Failed to read KACE device inventory: {e}')
+        rows = payload.get('data', [])
+        devices.extend({key: _kace_strip_html(row.get(key)) for key in fields} for row in rows)
+        start += length
+        if not rows or start >= payload.get('iTotalRecords', 0):
+            break
+    return devices
+
+
+def _run_kace_device_sync():
+    """Pulls every device from KACE SMA, matches to an existing
+    AssetRegistry row by serial number (KACE's CSP_ID_NUMBER field), and
+    applies each KaceFieldMapping onto the match. Same match-only
+    philosophy as _run_google_device_sync — never creates a new
+    AssetRegistry row from KACE data alone, since KACE's inventory includes
+    plenty of non-Chromebook equipment (staff laptops, servers) this
+    district's registry deliberately doesn't track. Returns
+    (matched, updated, unmatched)."""
+    mappings = KaceFieldMapping.query.all()
+    if not mappings:
+        return 0, 0, 0
+    devices = _fetch_kace_devices()
+    matched = updated = unmatched = 0
+    for d in devices:
+        serial = d.get('CSP_ID_NUMBER')
+        row = AssetRegistry.query.filter_by(serial_number=serial).first() if serial else None
+        if not row:
+            unmatched += 1
+            continue
+        matched += 1
+        if _apply_kace_field_mappings(d, row, mappings):
+            updated += 1
+    db.session.commit()
+    return matched, updated, unmatched
+
+
 def sync_chromeos_device_from_google(serial_number):
     """
     Looks up a Chromebook by serial number via the Google Admin SDK Directory API
@@ -1170,6 +1315,20 @@ DEVICE_SYNC_TARGET_FIELDS = {
     'description': 'Description', 'device_type': 'Device Type',
 }
 
+# The KACE inventory grid returns dozens of columns per device — this is
+# just the useful subset exposed as mappable sources, picked from a live
+# /adminui/computer_inventory.php pull (see _fetch_kace_devices). Unlike
+# Google's free-text dotted-path field, KACE fields are offered as a fixed
+# dropdown since there's no nesting to traverse and the full column list
+# isn't documented anywhere stable enough to expect an admin to type it in.
+KACE_DEVICE_FIELDS = {
+    'SYSTEM_NAME': 'Hostname', 'OS_NAME': 'Operating System',
+    'CS_MANUFACTURER': 'Manufacturer', 'CS_MODEL': 'Model',
+    'IP': 'IP Address', 'CHASSIS_TYPE': 'Chassis Type', 'RAM_TOTAL': 'RAM',
+    'LAST_INVENTORY': 'Last Inventory (KACE)', 'LAST_SYNC': 'Last Agent Sync (KACE)',
+    'ASSET_STATUS': 'Asset Status (KACE)', 'LOCATION': 'Location (KACE)',
+}
+
 
 def _get_nested_value(data, dotted_path):
     """Resolves a dotted path like 'name.givenName' or 'phones.0.value'
@@ -1263,6 +1422,32 @@ def _apply_field_mappings(google_record, obj, mappings):
         if value is None:
             continue
         value = str(value)
+        if m.target_field.startswith('custom:'):
+            key = m.target_field.split(':', 1)[1]
+            if custom.get(key) != value:
+                custom[key] = value
+                changed = True
+        elif hasattr(obj, m.target_field) and getattr(obj, m.target_field) != value:
+            setattr(obj, m.target_field, value)
+            changed = True
+    if changed:
+        obj.custom_fields = custom
+    return changed
+
+
+def _apply_kace_field_mappings(kace_record, obj, mappings):
+    """Applies every KaceFieldMapping onto obj (an AssetRegistry instance)
+    from a cleaned KACE device record (see _fetch_kace_devices — already a
+    flat dict, no dotted-path resolution needed). Same real-column vs
+    'custom:<key>' convention as _apply_field_mappings, minus org-unit
+    scoping (KACE has no org-unit concept). Returns True if anything
+    actually changed. Does not commit."""
+    changed = False
+    custom = dict(obj.custom_fields or {})
+    for m in mappings:
+        value = kace_record.get(m.kace_field)
+        if not value:
+            continue
         if m.target_field.startswith('custom:'):
             key = m.target_field.split(':', 1)[1]
             if custom.get(key) != value:
@@ -2151,9 +2336,11 @@ def admin_panel():
     # itself) — a scoped site admin can't view or change it either.
     person_schedule = None
     device_schedule = None
+    kace_schedule = None
     if site_ids is None:
         person_schedule = _get_or_create_sync_schedule('person')
         device_schedule = _get_or_create_sync_schedule('device')
+        kace_schedule = _get_or_create_sync_schedule('kace')
 
     # Orphans have no site to attribute, and a per-site breakdown only makes
     # sense district-wide — both super-admin-only, along with the onboarding
@@ -2202,6 +2389,7 @@ def admin_panel():
                            recent_activity=recent_activity,
                            person_schedule=person_schedule,
                            device_schedule=device_schedule,
+                           kace_schedule=kace_schedule,
                            sync_intervals=SYNC_SCHEDULE_INTERVALS,
                            site_breakdown=site_breakdown,
                            unassigned_devices=unassigned_devices,
@@ -4428,6 +4616,95 @@ def admin_google_sync_devices():
     return redirect(url_for('admin_google_field_mapping', entity='device'))
 
 
+@app.route('/admin/kace_setup')
+@require_super_admin
+def admin_kace_setup():
+    """Status page for the KACE SMA integration — env-var-driven, no OAuth/
+    service-account dance like Google, so this is simpler than
+    /admin/google_setup: just confirms KACE_URL/KACE_USERNAME/KACE_PASSWORD
+    are set and offers a live connectivity test."""
+    return render_template('admin_kace_setup.html', kace_sync_enabled=KACE_SYNC_ENABLED,
+                           kace_url=KACE_URL, kace_username=KACE_USERNAME,
+                           kace_organization=KACE_ORGANIZATION)
+
+
+@app.route('/admin/kace_setup/test', methods=['POST'])
+@require_super_admin
+def admin_kace_setup_test():
+    """A live round-trip against KACE — the only way to actually confirm
+    the credentials/URL/org are correct. KACE_SYNC_ENABLED (used everywhere
+    else) is just an env-var-presence check, not proof they're valid."""
+    if not KACE_SYNC_ENABLED:
+        flash('Set KACE_URL, KACE_USERNAME, and KACE_PASSWORD in .env and restart before testing.', 'error')
+        return redirect(url_for('admin_kace_setup'))
+    try:
+        devices = _fetch_kace_devices()
+        with_serial = sum(1 for d in devices if d.get('CSP_ID_NUMBER'))
+        flash(f'Connected to KACE successfully — found {len(devices)} device(s) in inventory '
+              f'({with_serial} with a serial number on file).', 'success')
+    except Exception as e:
+        flash(f'Connection failed: {e}', 'error')
+    return redirect(url_for('admin_kace_setup'))
+
+
+@app.route('/admin/kace_field_mapping')
+@require_super_admin
+def admin_kace_field_mapping():
+    mappings = KaceFieldMapping.query.order_by(KaceFieldMapping.kace_field).all()
+    custom_fields = CustomField.query.filter_by(entity_type='device').order_by(CustomField.label).all()
+    return render_template('admin_kace_field_mapping.html', mappings=mappings,
+                           custom_fields=custom_fields, real_fields=DEVICE_SYNC_TARGET_FIELDS,
+                           kace_fields=KACE_DEVICE_FIELDS, kace_sync_enabled=KACE_SYNC_ENABLED)
+
+
+@app.route('/admin/kace_field_mapping/new', methods=['POST'])
+@require_super_admin
+def admin_kace_field_mapping_new():
+    kace_field = request.form.get('kace_field', '').strip()
+    target_field = request.form.get('target_field', '').strip()
+    valid_targets = set(DEVICE_SYNC_TARGET_FIELDS.keys())
+    valid_targets |= {f'custom:{c.field_key}' for c in CustomField.query.filter_by(entity_type='device').all()}
+
+    if kace_field not in KACE_DEVICE_FIELDS:
+        flash('Choose a valid KACE field.', 'error')
+    elif target_field not in valid_targets:
+        flash('Choose a valid target field.', 'error')
+    else:
+        db.session.add(KaceFieldMapping(kace_field=kace_field, target_field=target_field))
+        _log_activity('kace_field_mapping_add', f'Mapped KACE "{kace_field}" -> "{target_field}".')
+        db.session.commit()
+        flash('Mapping added.', 'success')
+    return redirect(url_for('admin_kace_field_mapping'))
+
+
+@app.route('/admin/kace_field_mapping/<int:mapping_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_kace_field_mapping_delete(mapping_id):
+    mapping = KaceFieldMapping.query.get_or_404(mapping_id)
+    _log_activity('kace_field_mapping_delete', f'Removed mapping "{mapping.kace_field}" -> "{mapping.target_field}".')
+    db.session.delete(mapping)
+    db.session.commit()
+    flash('Mapping removed.', 'success')
+    return redirect(url_for('admin_kace_field_mapping'))
+
+
+@app.route('/admin/kace_field_mapping/sync', methods=['POST'])
+@require_super_admin
+def admin_kace_sync_devices():
+    if not KACE_SYNC_ENABLED:
+        flash('KACE sync isn\'t configured yet — see /admin/kace_setup.', 'info')
+        return redirect(url_for('admin_kace_field_mapping'))
+    try:
+        matched, updated, unmatched = _run_kace_device_sync()
+        _log_activity('kace_field_sync', f'Synced Devices from KACE: {matched} matched, {updated} updated.')
+        db.session.commit()
+        flash(f'{matched} matched, {updated} updated. {unmatched} KACE device(s) had no matching registry serial number.',
+              'success' if matched else 'info')
+    except Exception as e:
+        flash(f'Sync failed: {e}', 'error')
+    return redirect(url_for('admin_kace_field_mapping'))
+
+
 SYNC_SCHEDULE_INTERVALS = {
     1: 'Every hour', 3: 'Every 3 hours', 6: 'Every 6 hours', 12: 'Every 12 hours',
     24: 'Once a day', 168: 'Once a week',
@@ -4448,14 +4725,16 @@ def _get_or_create_sync_schedule(sync_type):
 def admin_sync_schedule():
     person_schedule = _get_or_create_sync_schedule('person')
     device_schedule = _get_or_create_sync_schedule('device')
+    kace_schedule = _get_or_create_sync_schedule('kace')
     return render_template('admin_sync_schedule.html', person_schedule=person_schedule, device_schedule=device_schedule,
-                           intervals=SYNC_SCHEDULE_INTERVALS, google_sync_enabled=GOOGLE_SYNC_ENABLED)
+                           kace_schedule=kace_schedule, intervals=SYNC_SCHEDULE_INTERVALS,
+                           google_sync_enabled=GOOGLE_SYNC_ENABLED, kace_sync_enabled=KACE_SYNC_ENABLED)
 
 
 @app.route('/admin/sync_schedule/<string:sync_type>', methods=['POST'])
 @require_super_admin
 def admin_sync_schedule_update(sync_type):
-    if sync_type not in ('person', 'device'):
+    if sync_type not in ('person', 'device', 'kace'):
         flash('Unknown sync type.', 'error')
         return redirect(url_for('admin_sync_schedule'))
     schedule = _get_or_create_sync_schedule(sync_type)
@@ -5191,10 +5470,14 @@ def _run_due_scheduled_syncs():
     due at once — same accepted-risk idempotency approach as the loaner
     reminder loop, just applied via a timestamp column instead of a
     per-row resend gate."""
-    if not GOOGLE_SYNC_ENABLED:
+    if not GOOGLE_SYNC_ENABLED and not KACE_SYNC_ENABLED:
         return
     now = datetime.utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
+        if schedule.sync_type in ('person', 'device') and not GOOGLE_SYNC_ENABLED:
+            continue
+        if schedule.sync_type == 'kace' and not KACE_SYNC_ENABLED:
+            continue
         if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
             continue
         schedule.last_run_at = now
@@ -5202,8 +5485,10 @@ def _run_due_scheduled_syncs():
         try:
             if schedule.sync_type == 'person':
                 matched, updated, unmatched = _run_google_people_sync()
-            else:
+            elif schedule.sync_type == 'device':
                 matched, updated, unmatched = _run_google_device_sync()
+            else:
+                matched, updated, unmatched = _run_kace_device_sync()
             schedule.last_run_summary = f'{matched} matched, {updated} updated, {unmatched} unmatched'
             _log_activity('scheduled_sync', f'Scheduled {schedule.sync_type} sync ran: {schedule.last_run_summary}')
         except Exception as e:
@@ -6844,6 +7129,7 @@ ACTIVITY_LOG_ACTIONS = [
     'branding_edit', 'email_template_edit',
     'custom_field_add', 'custom_field_delete',
     'google_field_mapping_add', 'google_field_mapping_delete', 'google_field_sync',
+    'kace_field_mapping_add', 'kace_field_mapping_delete', 'kace_field_sync',
     'org_unit_refresh', 'org_unit_classify',
     'loaner_ou_push',
     'scheduled_sync', 'scheduled_sync_edit',

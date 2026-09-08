@@ -126,7 +126,7 @@
     <a href="/admin/sync_schedule" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">Manage →</a>
   </h2>
   <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:1rem;">
-    {% for label, schedule in [('👤 People', person_schedule), ('💻 Device', device_schedule)] %}
+    {% for label, schedule in [('👤 People', person_schedule), ('💻 Device', device_schedule), ('🖥️ KACE', kace_schedule)] %}
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.9rem 1rem;">
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">
         <strong>{{ label }}</strong>

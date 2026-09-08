@@ -2310,6 +2310,8 @@ def inject_permission_helper():
         'nav_open_tickets_count': nav_open_tickets_count,
         'branding': _current_branding(),
         'active_section': _active_nav_section(),
+        'google_sync_enabled': GOOGLE_SYNC_ENABLED,
+        'kace_sync_enabled': KACE_SYNC_ENABLED,
     }
 
 

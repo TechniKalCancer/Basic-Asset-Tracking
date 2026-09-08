@@ -87,6 +87,20 @@
     .nav-sub a { font-size: .85rem; }
     .nav-sub a:hover { color: var(--accent); }
     .nav-sub-divider { width: 1px; align-self: stretch; background: var(--border); }
+    /* Nav-bar dropdown (e.g. "Syncs ▾") — reuses .row-menu/.row-menu-items
+       (see the table row-action-menu styles below) for the click-toggle
+       and positioning JS, just restyled here to sit flush in a text-link
+       nav row instead of looking like a standalone table button. */
+    .nav-dropdown > button {
+      background: none; border: none; color: var(--muted); font-size: .85rem; font-family: inherit;
+      padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: .3rem;
+    }
+    .nav-dropdown > button:hover { color: var(--accent); }
+    .nav-dropdown-label {
+      font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+      padding: .5rem .7rem .2rem; display: flex; align-items: center; gap: .4rem;
+    }
+    .nav-dropdown-divider { height: 1px; background: var(--border); margin: .4rem .2rem; }
     nav .nav-search input {
       width: 220px;
       padding: .35rem .7rem;
@@ -365,17 +379,34 @@
         <a href="/admin/users">Users</a>
         {% endif %}
         {% if is_super_admin() %}
+        <span class="nav-sub-divider"></span>
         <a href="/admin/sites">Sites</a>
         <a href="/admin/branding">Branding</a>
         <a href="/admin/emails">Email</a>
-        <a href="/admin/google_setup">Google Sync Setup</a>
-        <a href="/admin/google_org_units">Org Units</a>
-        <a href="/admin/google_ou_push">Push to Google Org Units</a>
-        <a href="/admin/google_field_mapping">Google Field Mapping</a>
-        <a href="/admin/sync_schedule">Scheduled Syncs</a>
-        <a href="/admin/kace_setup">KACE Setup</a>
-        <a href="/admin/kace_field_mapping">KACE Field Mapping</a>
         <a href="/admin/custom_fields">Custom Fields</a>
+        <div class="row-menu nav-dropdown">
+          <button type="button">🔄 Syncs {% if google_sync_enabled or kace_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
+          <div class="row-menu-items">
+            <a href="/admin/sync_schedule">⏰ Scheduled Syncs</a>
+            <div class="nav-dropdown-label">Google Sync {% if google_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
+            {% if google_sync_enabled %}
+            <a href="/admin/google_setup">Setup / Status</a>
+            <a href="/admin/google_field_mapping">Field Mapping</a>
+            <a href="/admin/google_org_units">Org Units</a>
+            <a href="/admin/google_ou_push">Push to Org Units</a>
+            {% else %}
+            <a href="/admin/google_setup">Set Up Google Sync</a>
+            {% endif %}
+            <div class="nav-dropdown-divider"></div>
+            <div class="nav-dropdown-label">KACE Sync {% if kace_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
+            {% if kace_sync_enabled %}
+            <a href="/admin/kace_setup">Setup / Status</a>
+            <a href="/admin/kace_field_mapping">Field Mapping</a>
+            {% else %}
+            <a href="/admin/kace_setup">Set Up KACE Sync</a>
+            {% endif %}
+          </div>
+        </div>
         {% endif %}
       {% endif %}
     </div>

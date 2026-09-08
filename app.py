@@ -4214,6 +4214,7 @@ def admin_google_org_units_refresh():
     try:
         count = _fetch_google_org_units()
         _log_activity('org_unit_refresh', f'Refreshed org unit list from Google: {count} found.')
+        db.session.commit()  # _fetch_google_org_units() already committed its own changes; this just persists the log entry above, added after that commit
         flash(f'Pulled {count} org unit(s) from Google Workspace.', 'success')
     except Exception as e:
         flash(f'Refresh failed: {e}', 'error')
@@ -4276,6 +4277,7 @@ def admin_google_ou_push_loaners(site_id):
         moved, not_found = _push_loaners_to_ou(site)
         _log_activity('loaner_ou_push', f'Pushed {moved} loaner(s) from {site.name} to {site.loaner_org_unit_path}.',
                        site_id=site.id)
+        db.session.commit()  # _push_loaners_to_ou() makes no local DB changes (it only calls the Google API); this persists the log entry above
         msg = f'Moved {moved} device(s) to {site.loaner_org_unit_path}.'
         if not_found:
             msg += f' {not_found} loaner(s) had no matching Chrome device in Google (e.g. a charger, not a Chromebook).'
@@ -4370,6 +4372,7 @@ def admin_google_sync_people():
     try:
         matched, updated, unmatched = _run_google_people_sync()
         _log_activity('google_field_sync', f'Synced People from Google: {matched} matched, {updated} updated.')
+        db.session.commit()  # _run_google_people_sync() already committed its own changes; this just persists the log entry above, added after that commit
         flash(f'{matched} matched, {updated} updated. {unmatched} Google account(s) had no matching Person by email.',
               'success' if matched else 'info')
     except Exception as e:
@@ -4386,6 +4389,7 @@ def admin_google_sync_devices():
     try:
         matched, updated, unmatched = _run_google_device_sync()
         _log_activity('google_field_sync', f'Synced Devices from Google: {matched} matched, {updated} updated.')
+        db.session.commit()  # _run_google_device_sync() already committed its own changes; this just persists the log entry above, added after that commit
         flash(f'{matched} matched, {updated} updated. {unmatched} Google device(s) had no matching registry serial number.',
               'success' if matched else 'info')
     except Exception as e:

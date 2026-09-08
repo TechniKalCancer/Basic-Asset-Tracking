@@ -62,7 +62,7 @@
       <tr>
         <th style="width:2rem;"><input type="checkbox" id="selectAll" style="width:auto;" /></th>
         <th>Asset Tag</th>
-        <th>Assigned To</th>
+        <th>Assigned To / Loaner Label</th>
       </tr>
     </thead>
     <tbody>
@@ -70,10 +70,17 @@
       <tr>
         <td>
           <input type="checkbox" class="asset-select" style="width:auto;" checked
-                 data-asset-tag="{{ c.asset_tag }}" data-person-name="{{ c.person_name }}" />
+                 data-asset-tag="{{ c.asset_tag }}" data-person-name="{{ c.person_name }}"
+                 data-is-loaner="{{ 'true' if c.is_loaner else 'false' }}" data-loaner-label="{{ c.loaner_label }}" />
         </td>
         <td><code>{{ c.asset_tag }}</code></td>
-        <td style="color:var(--muted);">{{ c.person_name or 'Unassigned' }}</td>
+        <td style="color:var(--muted);">
+          {% if c.is_loaner %}
+            <span class="badge badge-yellow" style="font-size:.7rem;">🎒 LOANER{{ ': ' + c.loaner_label if c.loaner_label }}</span>
+          {% else %}
+            {{ c.person_name or 'Unassigned' }}
+          {% endif %}
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:2rem;">No matching assets.</td></tr>

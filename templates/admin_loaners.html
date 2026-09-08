@@ -88,6 +88,7 @@
       <tr>
         <th style="width:2rem;"><input type="checkbox" id="selectAllLoaners" onclick="toggleAllLoanerCheckboxes(this)" title="Select all checked-out loaners" /></th>
         <th class="sortable">{{ macros.sort_link('asset_tag', 'Asset Tag') }}</th>
+        <th>Label</th>
         <th class="sortable">{{ macros.sort_link('serial_number', 'Serial') }}</th>
         <th class="sortable">{{ macros.sort_link('description', 'Description') }}</th>
         {% if current_site_ids() is none or current_site_ids()|length > 1 %}<th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>{% endif %}
@@ -108,6 +109,10 @@
           {% endif %}
         </td>
         <td><button type="button" class="tag-link" onclick="fillLoanerTag('{{ row.asset_tag }}')" title="Use this in the Check Out form above"><code>{{ row.asset_tag }}</code></button></td>
+        <td style="color:var(--muted);">
+          {{ row.loaner_label or '—' }}
+          <a href="/admin/assets/{{ row.asset_tag }}/assign" style="font-size:.75rem;text-decoration:none;margin-left:.4rem;" title="Edit label">✏️</a>
+        </td>
         <td>
           {% if row.serial_number %}
           <button type="button" class="tag-link" onclick="fillLoanerTag('{{ row.serial_number }}')" title="Use this in the Check Out form above"><code>{{ row.serial_number }}</code></button>
@@ -152,7 +157,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="{{ 9 if (current_site_ids() is none or current_site_ids()|length > 1) else 8 }}" style="text-align:center;color:var(--muted);padding:2rem;">
+      <tr><td colspan="{{ 10 if (current_site_ids() is none or current_site_ids()|length > 1) else 9 }}" style="text-align:center;color:var(--muted);padding:2rem;">
         No devices are marked as loaners yet. Mark one from the <a href="/admin/registry">Asset Registry</a>.
       </td></tr>
       {% endfor %}

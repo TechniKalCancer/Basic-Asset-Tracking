@@ -94,12 +94,19 @@ var DYMO_LABEL_XML = '<?xml version="1.0" encoding="utf-8"?>' +
  * @param {string} assetTag
  * @param {string} personName - empty string if unassigned
  * @param {boolean} isCharger - true to mark this as the charger's label
+ * @param {boolean} [isLoaner] - true prints "LOANER[: label]" instead of the
+ *   assigned-to/unassigned line, so a loaner's physical label identifies it
+ *   as one at a glance instead of just saying "Unassigned"
+ * @param {string} [loanerLabel] - e.g. "Front Office #3", only used when isLoaner
  * @returns {*} a DYMO label object (has .render(), .print(printerName))
  */
-function buildAssetLabel(assetTag, personName, isCharger) {
+function buildAssetLabel(assetTag, personName, isCharger, isLoaner, loanerLabel) {
     var label = dymo.label.framework.openLabelXml(DYMO_LABEL_XML);
     label.setObjectText('AssetTag', assetTag + (isCharger ? ' — CHARGER' : ''));
-    label.setObjectText('PersonName', personName ? 'Assigned to: ' + personName : 'Unassigned');
+    var secondLine = isLoaner
+        ? ('LOANER' + (loanerLabel ? ': ' + loanerLabel : ''))
+        : (personName ? 'Assigned to: ' + personName : 'Unassigned');
+    label.setObjectText('PersonName', secondLine);
     try {
         // Barcode always encodes the plain asset tag (not the "— CHARGER" suffix)
         // so scanning either label — device or charger — resolves the same asset.

@@ -65,7 +65,12 @@
         var boxes = document.querySelectorAll('.asset-select:checked');
         var rows = [];
         boxes.forEach(function (box) {
-            rows.push({ assetTag: box.dataset.assetTag, personName: box.dataset.personName || '' });
+            rows.push({
+                assetTag: box.dataset.assetTag,
+                personName: box.dataset.personName || '',
+                isLoaner: box.dataset.isLoaner === 'true',
+                loanerLabel: box.dataset.loanerLabel || '',
+            });
         });
         return rows;
     }
@@ -82,11 +87,11 @@
         var row = rows[index];
         progressEl.textContent = 'Printing ' + (index + 1) + ' of ' + rows.length + ': ' + row.assetTag + '…';
         try {
-            buildAssetLabel(row.assetTag, row.personName, false).print(printerName);
+            buildAssetLabel(row.assetTag, row.personName, false, row.isLoaner, row.loanerLabel).print(printerName);
             if (includeCharger) {
                 setTimeout(function () {
                     try {
-                        buildAssetLabel(row.assetTag, row.personName, true).print(printerName);
+                        buildAssetLabel(row.assetTag, row.personName, true, row.isLoaner, row.loanerLabel).print(printerName);
                     } catch (e) {
                         // Keep going even if one charger label fails.
                     }

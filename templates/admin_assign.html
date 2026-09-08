@@ -11,8 +11,11 @@
   {% if not registry_row.is_loaner and asset and asset.assigned_to %}
   <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">🎒 Mark as Loaner</button>
   {% else %}
-  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/toggle_loaner" style="display:inline;">
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/toggle_loaner" style="display:inline-flex;gap:.4rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if not registry_row.is_loaner %}
+    <input name="loaner_label" placeholder="Label (optional), e.g. Front Office #3" style="width:220px;" />
+    {% endif %}
     <button type="submit" class="btn btn-ghost">{{ '🎒 Unmark Loaner' if registry_row.is_loaner else '🎒 Mark as Loaner' }}</button>
   </form>
   {% endif %}
@@ -53,6 +56,18 @@
     🎒 This device is in the loaner pool, so it can't be permanently assigned here — check it out via
     <a href="/loaner_checkinout">Loaner Check In / Out</a> instead, or unmark it as a loaner above first.
   </p>
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/loaner_label"
+        style="display:flex;gap:.6rem;align-items:flex-end;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="flex:1;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Loaner Label</label>
+      <input name="loaner_label" value="{{ registry_row.loaner_label or '' }}" placeholder="e.g. Front Office #3" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Prints on this device's Dymo label in place of "Unassigned", so you can tell your loaners apart at a glance.
+      </span>
+    </div>
+    <button type="submit" class="btn btn-ghost">Save Label</button>
+  </form>
   {% elif has_people %}
   <form method="POST">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -454,6 +469,8 @@
 <script>
   window.PRINT_LABEL_ASSET_TAG = {{ registry_row.asset_tag|tojson }};
   window.PRINT_LABEL_PERSON_NAME = {{ (asset.assigned_to.full_name if asset and asset.assigned_to else '')|tojson }};
+  window.PRINT_LABEL_IS_LOANER = {{ registry_row.is_loaner|tojson }};
+  window.PRINT_LABEL_LOANER_LABEL = {{ (registry_row.loaner_label or '')|tojson }};
 </script>
 <script src="/static/js/dymo.connect.framework.js"></script>
 <script src="/static/js/dymo_label_core.js"></script>

@@ -354,6 +354,7 @@ class AssetRegistry(db.Model):
     device_type   = db.Column(db.String(40), nullable=False, default='chromebook', index=True)
     device_model_id = db.Column(db.Integer, db.ForeignKey('device_model.id'), nullable=True, index=True)
     is_loaner     = db.Column(db.Boolean, nullable=False, default=False, index=True)  # part of the short-term loaner pool, not permanently assigned to anyone
+    loaner_label  = db.Column(db.String(80), nullable=True)  # e.g. "Front Office #3" — physically identifies this specific loaner, printed on its Dymo label instead of "Unassigned"
     site_id       = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
     purchase_date = db.Column(db.Date, nullable=True)
     purchase_cost = db.Column(db.Numeric(10, 2), nullable=True)
@@ -3969,7 +3970,8 @@ def admin_bulk_print():
     for row in rows:
         asset = assets_by_tag.get(row.asset_tag)
         person = asset.assigned_to if asset else None
-        candidates.append({'asset_tag': row.asset_tag, 'person_name': person.full_name if person else ''})
+        candidates.append({'asset_tag': row.asset_tag, 'person_name': person.full_name if person else '',
+                           'is_loaner': row.is_loaner, 'loaner_label': row.loaner_label or ''})
 
     return render_template('admin_bulk_print.html', candidates=candidates,
                            status_filter=status_filter, type_filter=type_filter,
@@ -4969,10 +4971,28 @@ def admin_toggle_loaner(asset_tag):
             flash(f'{asset_tag} is currently assigned to {asset.assigned_to.full_name} — unassign it first before marking it a loaner.', 'error')
             return redirect(request.referrer or url_for('admin_loaners'))
     row.is_loaner = not row.is_loaner
-    _log_activity('loaner_toggle', f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.', site_id=row.site_id)
+    loaner_label = request.form.get('loaner_label', '').strip()
+    if loaner_label:
+        row.loaner_label = loaner_label
+    label_note = f' Labeled "{row.loaner_label}".' if row.is_loaner and row.loaner_label else ''
+    _log_activity('loaner_toggle', f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.{label_note}', site_id=row.site_id)
     db.session.commit()
     flash(f'{asset_tag} is {"now" if row.is_loaner else "no longer"} in the loaner pool.', 'success')
     return redirect(request.referrer or url_for('admin_loaners'))
+
+
+@app.route('/admin/assets/<string:asset_tag>/loaner_label', methods=['POST'])
+@require_permission('devices_manage')
+def admin_update_loaner_label(asset_tag):
+    """Edits a loaner's tracking label without touching is_loaner — for
+    relabeling a device that's already in the pool (the toggle route above
+    only saves a label at the moment of marking something a loaner)."""
+    row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+    row.loaner_label = request.form.get('loaner_label', '').strip() or None
+    _log_activity('loaner_label_edit', f'Set loaner label for {asset_tag}: "{row.loaner_label or ""}".', site_id=row.site_id)
+    db.session.commit()
+    flash('Loaner label updated.', 'success')
+    return redirect(request.referrer or url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
 def _overdue_loaners(site_ids=None):
@@ -6667,7 +6687,7 @@ ACTIVITY_LOG_ACTIONS = [
     'device_add', 'device_edit', 'device_delete', 'device_assign', 'device_unassign', 'device_status',
     'registry_csv_import', 'registry_set_sites',
     'person_add', 'person_edit', 'person_delete', 'person_reactivate', 'people_csv_import', 'people_graduate',
-    'loaner_toggle', 'loaner_checkout', 'loaner_checkin', 'reminders_send',
+    'loaner_toggle', 'loaner_label_edit', 'loaner_checkout', 'loaner_checkin', 'reminders_send',
     'incident_add', 'incident_delete', 'fee_paid', 'fee_edit',
     'repair_send', 'repair_return', 'repair_edit',
     'kiosk_enroll', 'kiosk_revoke',

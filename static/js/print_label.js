@@ -13,7 +13,8 @@
 
     function showPreview() {
         try {
-            var label = buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, false);
+            var label = buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, false,
+                window.PRINT_LABEL_IS_LOANER, window.PRINT_LABEL_LOANER_LABEL);
             var png = label.render();
             previewImg.src = 'data:image/png;base64,' + png;
             previewImg.style.display = 'block';
@@ -83,7 +84,8 @@
     printBtn.addEventListener('click', function () {
         var printerName = selectEl.value;
         try {
-            buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, false).print(printerName);
+            buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, false,
+                window.PRINT_LABEL_IS_LOANER, window.PRINT_LABEL_LOANER_LABEL).print(printerName);
         } catch (e) {
             alert('Print failed: ' + (e.message || e));
             return;
@@ -93,7 +95,8 @@
             // Small delay so the two jobs don't hit the print spooler simultaneously.
             setTimeout(function () {
                 try {
-                    buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, true).print(printerName);
+                    buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, true,
+                        window.PRINT_LABEL_IS_LOANER, window.PRINT_LABEL_LOANER_LABEL).print(printerName);
                 } catch (e) {
                     alert('Charger label print failed: ' + (e.message || e));
                 }

@@ -1160,12 +1160,13 @@ def _fetch_kace_devices():
     """
     import requests
     session = _kace_login_session()
-    # CSP_ID_NUMBER (serial) and ASSIGNEE_EMAIL are always fetched regardless
-    # of which mappings are configured — CSP_ID_NUMBER (with SYSTEM_NAME,
-    # already in KACE_DEVICE_FIELDS as the Hostname mapping option) is needed
-    # for matching, ASSIGNEE_EMAIL for the independent assignment sync in
-    # _run_kace_device_sync — neither is itself a mappable target field.
-    fields = list(KACE_DEVICE_FIELDS.keys()) + ['CSP_ID_NUMBER', 'ASSIGNEE_EMAIL']
+    # CSP_ID_NUMBER (serial), ASSIGNEE_EMAIL, and VIRTUAL are always fetched
+    # regardless of which mappings are configured — CSP_ID_NUMBER (with
+    # SYSTEM_NAME, already in KACE_DEVICE_FIELDS as the Hostname mapping
+    # option) is needed for matching, ASSIGNEE_EMAIL for the independent
+    # assignment sync, VIRTUAL to exclude VMs from auto-create — none of the
+    # three is itself a mappable target field.
+    fields = list(KACE_DEVICE_FIELDS.keys()) + ['CSP_ID_NUMBER', 'ASSIGNEE_EMAIL', 'VIRTUAL']
     devices = []
     start, length = 0, 200
     while True:
@@ -1207,29 +1208,63 @@ def _match_kace_device(d):
     return None
 
 
+def _auto_create_kace_registry_row(d, existing_tags):
+    """Creates a new AssetRegistry row from an unmatched KACE device, for
+    _run_kace_device_sync's auto-create path. Skips virtual machines (KACE's
+    VIRTUAL field) — a VM isn't a physical asset this tracker has any use
+    for. device_type is inferred from KACE's CHASSIS_TYPE: 'laptop' maps
+    directly, everything else (desktop, tablet, blank, etc.) falls back to
+    'other' rather than guessing a more specific category that isn't
+    actually known. description is set to the device's hostname for
+    immediate recognizability — safe to set here (unlike the field-mapping
+    path onto an EXISTING row) since this is a brand new row with nothing
+    to overwrite. existing_tags is mutated by the caller as rows are
+    created, so a single sync run never hands out the same generated tag
+    twice. Returns the new (added, uncommitted) AssetRegistry row, or None
+    if it doesn't qualify (VM, or no usable serial/hostname at all)."""
+    if (d.get('VIRTUAL') or '').strip().lower() == 'yes':
+        return None
+    serial = d.get('CSP_ID_NUMBER') or d.get('SYSTEM_NAME')
+    if not serial:
+        return None
+    device_type = 'laptop' if d.get('CHASSIS_TYPE') == 'laptop' else 'other'
+    tag = _generate_asset_tag(existing_tags)
+    hostname = d.get('SYSTEM_NAME')
+    row = AssetRegistry(asset_tag=tag, serial_number=serial, device_type=device_type, description=hostname)
+    db.session.add(row)
+    _log_activity('device_add', f'Auto-added {tag} ({hostname or serial}) from KACE inventory.')
+    return row
+
+
 def _run_kace_device_sync():
     """Pulls every device from KACE SMA and matches each one to an existing
     AssetRegistry row (see _match_kace_device). Applies each
     KaceFieldMapping onto the match — same match-only philosophy as
-    _run_google_device_sync, never creates a new AssetRegistry row from
-    KACE data alone, since KACE's inventory includes plenty of equipment
-    (staff laptops, servers) this district's registry deliberately doesn't
-    track. Independently of any mapping, also assigns a matched device to
-    whichever Person's email matches KACE's ASSIGNEE_EMAIL for it — same
-    "independently of any mapping" pattern _run_google_device_sync uses to
-    correct site_id from org unit. Silently skips (doesn't count as
-    updated) when there's no Person with that email, or the device can't be
-    assigned (e.g. it's in the loaner pool) — _assign_asset_to_person
-    already handles both cases without raising. Returns
-    (matched, updated, unmatched)."""
+    _run_google_device_sync for the mapping/enrichment half. Unlike Google
+    device sync, an unmatched KACE device IS auto-created as a new registry
+    row (see _auto_create_kace_registry_row) rather than left unmatched,
+    per an explicit choice made when this was built — Google's Chrome
+    device sync stays match-only. Independently of any mapping, also
+    assigns a matched (or newly-created) device to whichever Person's email
+    matches KACE's ASSIGNEE_EMAIL for it — same "independently of any
+    mapping" pattern _run_google_device_sync uses to correct site_id from
+    org unit. Silently skips (doesn't count as updated) when there's no
+    Person with that email, or the device can't be assigned (e.g. it's in
+    the loaner pool) — _assign_asset_to_person already handles both cases
+    without raising. Returns (matched, updated, unmatched, created)."""
     mappings = KaceFieldMapping.query.all()
     devices = _fetch_kace_devices()
-    matched = updated = unmatched = 0
+    existing_tags = {r.asset_tag for r in AssetRegistry.query.with_entities(AssetRegistry.asset_tag).all()}
+    matched = updated = unmatched = created = 0
     for d in devices:
         row = _match_kace_device(d)
         if not row:
-            unmatched += 1
-            continue
+            row = _auto_create_kace_registry_row(d, existing_tags)
+            if not row:
+                unmatched += 1
+                continue
+            existing_tags.add(row.asset_tag)
+            created += 1
         matched += 1
         row_changed = _apply_kace_field_mappings(d, row, mappings) if mappings else False
         assignee_email = d.get('ASSIGNEE_EMAIL')
@@ -1242,7 +1277,7 @@ def _run_kace_device_sync():
         if row_changed:
             updated += 1
     db.session.commit()
-    return matched, updated, unmatched
+    return matched, updated, unmatched, created
 
 
 def sync_chromeos_device_from_google(serial_number):
@@ -1565,6 +1600,34 @@ def _push_loaners_to_ou(site):
     return len(device_ids), not_found
 
 
+def _auto_create_person_from_google(u, org_unit_path):
+    """Creates a new Person from an unmatched Google user record, for
+    _run_google_people_sync's auto-create path. Only creates when the
+    account is active (not suspended — a suspended account is usually
+    departed or was never really enrolled, not a live roster gap) AND its
+    org unit classifies cleanly as staff or student via _classify_org_unit
+    — role is a required column, and guessing it for an unclassified org
+    unit risks misfiling a real person, so those are left unmatched instead
+    of guessed. Returns the new (added, uncommitted) Person, or None if the
+    account doesn't qualify."""
+    if u.get('suspended'):
+        return None
+    role = _classify_org_unit(org_unit_path)
+    if role not in ('staff', 'student'):
+        return None
+    email = u.get('primaryEmail')
+    first_name = (u.get('name') or {}).get('givenName') or ''
+    last_name = (u.get('name') or {}).get('familyName') or ''
+    if not first_name or not last_name or not email:
+        return None
+    person = Person(first_name=first_name, last_name=last_name, email=email, role=role,
+                     site_id=_org_unit_site_id(org_unit_path))
+    db.session.add(person)
+    _log_activity('person_add', f'Auto-added {person.full_name} from Google Workspace ({email}).',
+                   site_id=person.site_id)
+    return person
+
+
 def _run_google_people_sync():
     """Pulls every Google Workspace user, matches to an existing Person by
     email, and applies each entity_type='person' GoogleFieldMapping onto the
@@ -1573,14 +1636,16 @@ def _run_google_people_sync():
     at /admin/google_org_units (see _org_unit_site_id), and caches the org
     unit itself onto Person.google_org_unit so the person edit page can show
     it without a live lookup (see admin_person_google_sync for the
-    single-person on-demand version of the same cache). Returns (matched,
-    updated, unmatched_google_accounts)."""
+    single-person on-demand version of the same cache). An unmatched
+    account is auto-created (see _auto_create_person_from_google) when it
+    qualifies; otherwise it's counted as unmatched exactly as before.
+    Returns (matched, updated, unmatched_google_accounts, created)."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='person').all()
     has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
     if not mappings and not has_site_rules:
-        return 0, 0, 0
+        return 0, 0, 0, 0
     service = _google_directory_service([GOOGLE_SCOPE_USER_READONLY])
-    matched = updated = unmatched = 0
+    matched = updated = unmatched = created = 0
     page_token = None
     while True:
         response = service.users().list(
@@ -1588,12 +1653,16 @@ def _run_google_people_sync():
         ).execute()
         for u in response.get('users', []):
             email = u.get('primaryEmail')
+            org_unit_path = u.get('orgUnitPath')
             person = Person.query.filter_by(email=email).first() if email else None
             if not person:
-                unmatched += 1
-                continue
+                person = _auto_create_person_from_google(u, org_unit_path)
+                if person:
+                    created += 1
+                else:
+                    unmatched += 1
+                    continue
             matched += 1
-            org_unit_path = u.get('orgUnitPath')
             row_changed = _apply_field_mappings(u, person, mappings)
             site_id = _org_unit_site_id(org_unit_path)
             if site_id and person.site_id != site_id:
@@ -1609,7 +1678,7 @@ def _run_google_people_sync():
         if not page_token:
             break
     db.session.commit()
-    return matched, updated, unmatched
+    return matched, updated, unmatched, created
 
 
 def _run_google_device_sync():
@@ -4626,10 +4695,13 @@ def admin_google_sync_people():
         flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
         return redirect(url_for('admin_google_field_mapping', entity='person'))
     try:
-        matched, updated, unmatched = _run_google_people_sync()
-        _log_activity('google_field_sync', f'Synced People from Google: {matched} matched, {updated} updated.')
+        matched, updated, unmatched, created = _run_google_people_sync()
+        _log_activity('google_field_sync',
+                       f'Synced People from Google: {matched} matched, {updated} updated, {created} auto-created.')
         db.session.commit()  # _run_google_people_sync() already committed its own changes; this just persists the log entry above, added after that commit
-        flash(f'{matched} matched, {updated} updated. {unmatched} Google account(s) had no matching Person by email.',
+        flash(f'{matched} matched, {updated} updated, {created} auto-created. '
+              f'{unmatched} Google account(s) had no matching Person and didn\'t qualify to auto-create '
+              f'(suspended, or an unclassified org unit).',
               'success' if matched else 'info')
     except Exception as e:
         flash(f'Sync failed: {e}', 'error')
@@ -4732,10 +4804,12 @@ def admin_kace_sync_devices():
         flash('KACE sync isn\'t configured yet — see /admin/kace_setup.', 'info')
         return redirect(url_for('admin_kace_field_mapping'))
     try:
-        matched, updated, unmatched = _run_kace_device_sync()
-        _log_activity('kace_field_sync', f'Synced Devices from KACE: {matched} matched, {updated} updated.')
+        matched, updated, unmatched, created = _run_kace_device_sync()
+        _log_activity('kace_field_sync',
+                       f'Synced Devices from KACE: {matched} matched, {updated} updated, {created} auto-created.')
         db.session.commit()
-        flash(f'{matched} matched, {updated} updated. {unmatched} KACE device(s) had no matching registry serial number.',
+        flash(f'{matched} matched, {updated} updated, {created} auto-created. '
+              f'{unmatched} KACE device(s) skipped (virtual machines, or no usable serial/hostname).',
               'success' if matched else 'info')
     except Exception as e:
         flash(f'Sync failed: {e}', 'error')
@@ -5521,12 +5595,14 @@ def _run_due_scheduled_syncs():
         db.session.commit()
         try:
             if schedule.sync_type == 'person':
-                matched, updated, unmatched = _run_google_people_sync()
+                matched, updated, unmatched, created = _run_google_people_sync()
+                schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
             elif schedule.sync_type == 'device':
                 matched, updated, unmatched = _run_google_device_sync()
+                schedule.last_run_summary = f'{matched} matched, {updated} updated, {unmatched} unmatched'
             else:
-                matched, updated, unmatched = _run_kace_device_sync()
-            schedule.last_run_summary = f'{matched} matched, {updated} updated, {unmatched} unmatched'
+                matched, updated, unmatched, created = _run_kace_device_sync()
+                schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
             _log_activity('scheduled_sync', f'Scheduled {schedule.sync_type} sync ran: {schedule.last_run_summary}')
         except Exception as e:
             schedule.last_run_summary = f'Failed: {e}'

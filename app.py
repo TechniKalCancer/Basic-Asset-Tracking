@@ -281,6 +281,24 @@ class GoogleOrgUnit(db.Model):
     site = db.relationship('Site')
 
 
+class SyncSchedule(db.Model):
+    """
+    One row per Google sync type ('person'/'device'), configuring whether
+    _run_google_people_sync()/_run_google_device_sync() should also run on
+    their own on a timer, not just via the manual "Run Sync Now" button on
+    /admin/google_field_mapping. Checked/run by the background loop started
+    at the bottom of this file (see _scheduled_sync_loop) — same
+    once-an-hour-check pattern as the loaner reminder loop, with
+    last_run_at doubling as the idempotency gate across gunicorn workers.
+    """
+    __tablename__ = 'sync_schedule'
+    id                = db.Column(db.Integer, primary_key=True)
+    sync_type         = db.Column(db.String(20), unique=True, nullable=False)  # 'person' | 'device'
+    enabled           = db.Column(db.Boolean, nullable=False, default=False)
+    interval_hours    = db.Column(db.Integer, nullable=False, default=24)
+    last_run_at       = db.Column(db.DateTime, nullable=True)
+    last_run_summary  = db.Column(db.String(255), nullable=True)
+
 
 class UserSite(db.Model):
     """Join table: which sites a (non-super-admin) User account can see/manage."""
@@ -1945,6 +1963,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/google_org_units', 'admin'),
     ('/admin/google_ou_push', 'admin'),
     ('/admin/google_field_mapping', 'admin'),
+    ('/admin/sync_schedule', 'admin'),
     ('/admin', 'admin'),
     ('/checkin', 'home'),
     ('/checkout', 'home'),
@@ -4374,6 +4393,48 @@ def admin_google_sync_devices():
     return redirect(url_for('admin_google_field_mapping', entity='device'))
 
 
+SYNC_SCHEDULE_INTERVALS = {
+    1: 'Every hour', 3: 'Every 3 hours', 6: 'Every 6 hours', 12: 'Every 12 hours',
+    24: 'Once a day', 168: 'Once a week',
+}
+
+
+def _get_or_create_sync_schedule(sync_type):
+    schedule = SyncSchedule.query.filter_by(sync_type=sync_type).first()
+    if not schedule:
+        schedule = SyncSchedule(sync_type=sync_type, enabled=False, interval_hours=24)
+        db.session.add(schedule)
+        db.session.commit()
+    return schedule
+
+
+@app.route('/admin/sync_schedule')
+@require_super_admin
+def admin_sync_schedule():
+    person_schedule = _get_or_create_sync_schedule('person')
+    device_schedule = _get_or_create_sync_schedule('device')
+    return render_template('admin_sync_schedule.html', person_schedule=person_schedule, device_schedule=device_schedule,
+                           intervals=SYNC_SCHEDULE_INTERVALS, google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/sync_schedule/<string:sync_type>', methods=['POST'])
+@require_super_admin
+def admin_sync_schedule_update(sync_type):
+    if sync_type not in ('person', 'device'):
+        flash('Unknown sync type.', 'error')
+        return redirect(url_for('admin_sync_schedule'))
+    schedule = _get_or_create_sync_schedule(sync_type)
+    schedule.enabled = bool(request.form.get('enabled'))
+    interval_hours = request.form.get('interval_hours', type=int)
+    if interval_hours in SYNC_SCHEDULE_INTERVALS:
+        schedule.interval_hours = interval_hours
+    _log_activity('scheduled_sync_edit',
+                   f'{"Enabled" if schedule.enabled else "Disabled"} scheduled {sync_type} sync ({SYNC_SCHEDULE_INTERVALS.get(schedule.interval_hours, schedule.interval_hours)}).')
+    db.session.commit()
+    flash('Schedule saved.', 'success')
+    return redirect(url_for('admin_sync_schedule'))
+
+
 # ─── Kiosk Devices ──────────────────────────────────────────────────────────────
 
 @app.route('/admin/kiosk')
@@ -5086,6 +5147,52 @@ def _loaner_reminder_loop():
 
 if EMAIL_ENABLED:
     threading.Thread(target=_loaner_reminder_loop, daemon=True).start()
+
+
+def _run_due_scheduled_syncs():
+    """Runs any enabled SyncSchedule whose interval has elapsed. Claims a
+    schedule (stamps last_run_at and commits) BEFORE doing the actual sync
+    work, narrowing the window where two gunicorn workers both see it as
+    due at once — same accepted-risk idempotency approach as the loaner
+    reminder loop, just applied via a timestamp column instead of a
+    per-row resend gate."""
+    if not GOOGLE_SYNC_ENABLED:
+        return
+    now = datetime.utcnow()
+    for schedule in SyncSchedule.query.filter_by(enabled=True).all():
+        if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
+            continue
+        schedule.last_run_at = now
+        db.session.commit()
+        try:
+            if schedule.sync_type == 'person':
+                matched, updated, unmatched = _run_google_people_sync()
+            else:
+                matched, updated, unmatched = _run_google_device_sync()
+            schedule.last_run_summary = f'{matched} matched, {updated} updated, {unmatched} unmatched'
+            _log_activity('scheduled_sync', f'Scheduled {schedule.sync_type} sync ran: {schedule.last_run_summary}')
+        except Exception as e:
+            schedule.last_run_summary = f'Failed: {e}'
+            logger.error('Scheduled %s sync failed: %s', schedule.sync_type, e)
+        db.session.commit()
+
+
+def _scheduled_sync_loop():
+    """Background daemon: checks every 15 minutes whether a People or
+    Device sync is due per its SyncSchedule (see /admin/sync_schedule),
+    and runs it if so. Same multi-worker-safe pattern as
+    _loaner_reminder_loop above."""
+    while True:
+        time.sleep(900)
+        try:
+            with app.app_context():
+                _run_due_scheduled_syncs()
+        except Exception as e:
+            logger.error('Scheduled sync background loop error: %s', e)
+
+
+if GOOGLE_SYNC_ENABLED:
+    threading.Thread(target=_scheduled_sync_loop, daemon=True).start()
 
 
 LOANER_POOL_SORT_COLUMNS = {
@@ -6704,6 +6811,7 @@ ACTIVITY_LOG_ACTIONS = [
     'google_field_mapping_add', 'google_field_mapping_delete', 'google_field_sync',
     'org_unit_refresh', 'org_unit_classify',
     'loaner_ou_push',
+    'scheduled_sync', 'scheduled_sync_edit',
 ]
 
 

@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Scheduled Syncs{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">⏰ Scheduled Syncs</h1>
+  <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
+    {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+  </span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/google_field_mapping" class="btn btn-ghost">🔗 Google Field Mapping</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  Runs People and/or Device syncs automatically on a timer, instead of only when someone clicks
+  "Run Sync Now" on <a href="/admin/google_field_mapping">Google Field Mapping</a>. Uses whatever
+  mappings and org-unit rules are already configured there — this page only controls when it runs.
+  {% if not google_sync_enabled %}
+  <br><strong style="color:var(--warning);">Google Sync isn't configured yet</strong> — schedules save, but won't run until it is. See <a href="/admin/google_setup">Google Sync Setup</a>.
+  {% endif %}
+</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));gap:1.5rem;">
+  {% for label, entity, schedule in [('👤 People Sync', 'person', person_schedule), ('💻 Device Sync', 'device', device_schedule)] %}
+  <div class="card">
+    <h2 style="display:flex;align-items:center;gap:.6rem;">
+      {{ label }}
+      {% if schedule.enabled %}<span class="badge badge-green">On</span>{% else %}<span class="badge badge-yellow">Off</span>{% endif %}
+    </h2>
+
+    {% if schedule.last_run_at %}
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">
+      Last ran {{ schedule.last_run_at.strftime('%Y-%m-%d %H:%M') }} UTC
+      {% if schedule.last_run_summary %} — {{ schedule.last_run_summary }}{% endif %}
+    </p>
+    {% else %}
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">Hasn't run on a schedule yet.</p>
+    {% endif %}
+
+    <form method="POST" action="/admin/sync_schedule/{{ entity }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" name="enabled" style="width:auto;" {{ 'checked' if schedule.enabled }} />
+        Run this sync automatically
+      </label>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">How often</label>
+        <select name="interval_hours">
+          {% for hours, text in intervals.items() %}
+          <option value="{{ hours }}" {{ 'selected' if schedule.interval_hours == hours }}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+
+<p style="color:var(--muted);font-size:.78rem;margin-top:1.5rem;">
+  Checked every 15 minutes in the background, so an interval takes effect on the next check after it's due —
+  times aren't exact to the minute. Runs land in the <a href="/admin/activity">Activity Log</a> as "Scheduled sync".
+</p>
+{% endblock %}

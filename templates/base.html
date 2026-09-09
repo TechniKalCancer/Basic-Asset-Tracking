@@ -314,12 +314,15 @@
           <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
           <button type="submit" title="Search">🔎</button>
         </form>
+        <a href="/help" title="Help">❓ Help</a>
         <a href="/admin/logout" class="logout">Logout</a>
       {% else %}
         <a href="/">Home</a>
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
         <a href="/report_problem">Report a Problem</a>
+        <a href="/submit_ticket">Submit a Ticket</a>
+        <a href="/help">❓ Help</a>
         <span class="spacer"></span>
         <a href="/admin/login">Admin</a>
       {% endif %}
@@ -331,6 +334,7 @@
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
         <a href="/report_problem">Report a Problem</a>
+        <a href="/submit_ticket">Submit a Ticket</a>
       {% elif active_section == 'devices' and can('devices') %}
         <a href="/admin/registry">Registry</a>
         <a href="/admin/bulk_assign">Bulk Assign</a>
@@ -373,6 +377,7 @@
         <a href="/admin/kiosk">Kiosk Devices</a>
         <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
         <a href="/admin/activity">Activity Log</a>
+        <a href="/admin/help">Manage Help Content</a>
         {% endif %}
         {% if can('manage_users') %}
         <span class="nav-sub-divider"></span>

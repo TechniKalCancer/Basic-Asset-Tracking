@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Manage Help Content{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">❓ Manage Help Content</h1>
+  <span class="badge badge-blue">{{ articles|length }} total</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/help" class="btn btn-ghost" target="_blank">👀 View Help Page</a>
+  <a href="/admin/help/new" class="btn btn-primary">+ Add Article</a>
+  <a href="/admin" class="btn btn-ghost">← Back</a>
+</div>
+
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
+  What shows up on <a href="/help">/help</a> for everyone using the app — FAQ entries and How-To guides.
+  Inactive articles stay here for editing but are hidden from that page. Order controls where an article
+  sorts within its own type (FAQ or How-To) — lower numbers first, ties broken alphabetically by title.
+</p>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Title</th>
+        <th>Order</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in articles %}
+      <tr>
+        <td><span class="badge {{ 'badge-blue' if a.article_type == 'faq' else 'badge-purple' }}">{{ article_types.get(a.article_type, a.article_type) }}</span></td>
+        <td>{{ a.title }}</td>
+        <td style="color:var(--muted);">{{ a.sort_order }}</td>
+        <td><span class="badge {{ 'badge-green' if a.is_active else 'badge-red' }}">{{ 'Active' if a.is_active else 'Inactive' }}</span></td>
+        <td style="text-align:right;white-space:nowrap;">
+          <a href="/admin/help/{{ a.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
+          <form method="POST" action="/admin/help/{{ a.id }}/delete" style="display:inline;"
+                onsubmit="return confirm('Delete &quot;{{ a.title }}&quot;?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger" style="padding:.3rem .7rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No help articles yet — add one to get started.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

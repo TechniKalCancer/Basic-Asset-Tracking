@@ -715,6 +715,31 @@ class TicketCategory(db.Model):
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
 
 
+HELP_ARTICLE_TYPES = {'faq': 'FAQ', 'howto': 'How-To Guide'}
+
+
+class HelpArticle(db.Model):
+    """
+    One entry in the in-app Help page (/help) — either a short FAQ
+    question/answer or a longer How-To guide, distinguished by article_type.
+    Admin-editable at /admin/help so the content stays current as features
+    change, rather than being hardcoded into a template. is_active=False
+    hides an entry from /help without losing it (e.g. seasonal content, or
+    a draft not ready yet). sort_order controls display order within its
+    type — ties break by title, so a fresh entry (sort_order=0) is usable
+    immediately without an admin having to renumber anything.
+    """
+    __tablename__ = 'help_article'
+    id           = db.Column(db.Integer, primary_key=True)
+    article_type = db.Column(db.String(20), nullable=False)  # 'faq' | 'howto'
+    title        = db.Column(db.String(200), nullable=False)  # the question (FAQ) or guide title (How-To)
+    body         = db.Column(db.Text, nullable=False)  # the answer (FAQ) or step-by-step content (How-To)
+    sort_order   = db.Column(db.Integer, nullable=False, default=0)
+    is_active    = db.Column(db.Boolean, nullable=False, default=True)
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Ticket(db.Model):
     """
     A general IT help-desk request — unlike Incident (damage/fee reports)
@@ -2251,6 +2276,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/emails', 'admin'),
     ('/admin/google_setup', 'admin'),
     ('/admin/custom_fields', 'admin'),
+    ('/admin/help', 'admin'),
     ('/admin/google_org_units', 'admin'),
     ('/admin/google_ou_push', 'admin'),
     ('/admin/google_field_mapping', 'admin'),
@@ -7259,6 +7285,100 @@ def admin_ticket_category_delete(category_id):
     return redirect(url_for('admin_ticket_categories'))
 
 
+# ─── Help (FAQ / How-To) ────────────────────────────────────────────────────────
+
+@app.route('/help')
+@kiosk_or_login_required
+def help_page():
+    """
+    Public-facing FAQ + How-To page — same access level as Check In/Check
+    Out/Home (any admin session or enrolled kiosk device), since it's a
+    help resource for everyone using the app, not an admin-only feature.
+    Only shows active articles; management (including drafts) is at
+    /admin/help.
+    """
+    faqs = HelpArticle.query.filter_by(article_type='faq', is_active=True) \
+        .order_by(HelpArticle.sort_order, HelpArticle.title).all()
+    howtos = HelpArticle.query.filter_by(article_type='howto', is_active=True) \
+        .order_by(HelpArticle.sort_order, HelpArticle.title).all()
+    return render_template('help.html', faqs=faqs, howtos=howtos)
+
+
+@app.route('/admin/help')
+@require_permission('admin')
+def admin_help():
+    articles = HelpArticle.query.order_by(HelpArticle.article_type, HelpArticle.sort_order, HelpArticle.title).all()
+    return render_template('admin_help.html', articles=articles, article_types=HELP_ARTICLE_TYPES)
+
+
+def _help_article_form_values():
+    return {
+        'article_type': request.form.get('article_type', 'faq').strip(),
+        'title': request.form.get('title', '').strip(),
+        'body': request.form.get('body', '').strip(),
+        'sort_order': request.form.get('sort_order', type=int) or 0,
+        'is_active': bool(request.form.get('is_active')),
+    }
+
+
+@app.route('/admin/help/new', methods=['GET', 'POST'])
+@require_permission('admin')
+def admin_help_new():
+    if request.method == 'POST':
+        values = _help_article_form_values()
+        if values['article_type'] not in HELP_ARTICLE_TYPES:
+            values['article_type'] = 'faq'
+        if not values['title'] or not values['body']:
+            flash('Title and body are both required.', 'error')
+            return render_template('admin_help_form.html', article=None, form=values, article_types=HELP_ARTICLE_TYPES)
+
+        article = HelpArticle(**values)
+        db.session.add(article)
+        _log_activity('help_article_add', f'Added {HELP_ARTICLE_TYPES[values["article_type"]]} "{values["title"]}".')
+        db.session.commit()
+        flash(f'Added "{values["title"]}".', 'success')
+        return redirect(url_for('admin_help'))
+
+    return render_template('admin_help_form.html', article=None, form=None, article_types=HELP_ARTICLE_TYPES)
+
+
+@app.route('/admin/help/<int:article_id>/edit', methods=['GET', 'POST'])
+@require_permission('admin')
+def admin_help_edit(article_id):
+    article = HelpArticle.query.get_or_404(article_id)
+    if request.method == 'POST':
+        values = _help_article_form_values()
+        if values['article_type'] not in HELP_ARTICLE_TYPES:
+            values['article_type'] = article.article_type
+        if not values['title'] or not values['body']:
+            flash('Title and body are both required.', 'error')
+            return render_template('admin_help_form.html', article=article, form=values, article_types=HELP_ARTICLE_TYPES)
+
+        article.article_type = values['article_type']
+        article.title = values['title']
+        article.body = values['body']
+        article.sort_order = values['sort_order']
+        article.is_active = values['is_active']
+        _log_activity('help_article_edit', f'Edited {HELP_ARTICLE_TYPES[article.article_type]} "{article.title}".')
+        db.session.commit()
+        flash(f'Updated "{article.title}".', 'success')
+        return redirect(url_for('admin_help'))
+
+    return render_template('admin_help_form.html', article=article, form=None, article_types=HELP_ARTICLE_TYPES)
+
+
+@app.route('/admin/help/<int:article_id>/delete', methods=['POST'])
+@require_permission('admin')
+def admin_help_delete(article_id):
+    article = HelpArticle.query.get_or_404(article_id)
+    title, article_type = article.title, article.article_type
+    db.session.delete(article)
+    _log_activity('help_article_delete', f'Deleted {HELP_ARTICLE_TYPES[article_type]} "{title}".')
+    db.session.commit()
+    flash(f'Deleted "{title}".', 'success')
+    return redirect(url_for('admin_help'))
+
+
 # ─── Activity Log ─────────────────────────────────────────────────────────────
 
 ACTIVITY_LOG_ACTIONS = [
@@ -7274,6 +7394,7 @@ ACTIVITY_LOG_ACTIONS = [
     'ticket_add', 'ticket_edit', 'ticket_status', 'ticket_assign', 'ticket_comment',
     'ticket_charge_add', 'ticket_charge_delete',
     'ticket_category_add', 'ticket_category_edit', 'ticket_category_delete',
+    'help_article_add', 'help_article_edit', 'help_article_delete',
     'device_model_add', 'device_model_edit', 'device_model_delete',
     'asset_number_range_add', 'asset_number_range_edit', 'asset_number_range_delete',
     'repair_category_add', 'repair_category_edit', 'repair_category_delete',

@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Help{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">❓ Help</h1>
+  {% if can('admin') %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/help" class="btn btn-ghost">✏️ Manage Help Content</a>
+  {% endif %}
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));gap:1.5rem;align-items:start;">
+  <div class="card">
+    <h2 style="margin-top:0;">💬 Frequently Asked Questions</h2>
+    {% for a in faqs %}
+    <details style="margin-bottom:.8rem;border-bottom:1px solid var(--border);padding-bottom:.8rem;">
+      <summary style="cursor:pointer;font-weight:600;">{{ a.title }}</summary>
+      <p style="margin-top:.6rem;color:var(--muted);white-space:pre-wrap;">{{ a.body }}</p>
+    </details>
+    {% else %}
+    <p style="color:var(--muted);font-size:.85rem;">No FAQ entries yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">📖 How-To Guides</h2>
+    {% for a in howtos %}
+    <details style="margin-bottom:.8rem;border-bottom:1px solid var(--border);padding-bottom:.8rem;">
+      <summary style="cursor:pointer;font-weight:600;">{{ a.title }}</summary>
+      <p style="margin-top:.6rem;color:var(--muted);white-space:pre-wrap;">{{ a.body }}</p>
+    </details>
+    {% else %}
+    <p style="color:var(--muted);font-size:.85rem;">No How-To guides yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

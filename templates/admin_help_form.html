@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Help Article' if article else 'Add Help Article' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Help Article' if article else 'Add Help Article' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/help" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Type</label>
+      <select name="article_type">
+        {% for value, label in article_types.items() %}
+        <option value="{{ value }}" {{ 'selected' if (form.article_type if form else (article.article_type if article else 'faq')) == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        FAQ = a short question and answer. How-To Guide = longer step-by-step instructions.
+      </span>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Title</label>
+      <input name="title" value="{{ (form.title if form else (article.title if article else '')) }}"
+             placeholder="e.g. How do I check a device in or out?" required />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        For an FAQ, phrase this as the question. For a How-To, this is the guide's name.
+      </span>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Body</label>
+      <textarea name="body" rows="12" placeholder="For a How-To, one step per line works well — line breaks are preserved as written." required>{{ (form.body if form else (article.body if article else '')) }}</textarea>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Plain text — line breaks show up exactly as typed, but no other formatting (bold, links, etc.) is applied.
+      </span>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Order</label>
+      <input name="sort_order" type="number" value="{{ (form.sort_order if form else (article.sort_order if article else 0)) }}" style="max-width:120px;" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Lower numbers show first within this article's type. Ties break alphabetically by title.
+      </span>
+    </div>
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="is_active" style="width:auto;" {{ 'checked' if (article.is_active if article else true) }} />
+      Active (shows up on the Help page)
+    </label>
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if article else 'Add Article' }}</button>
+  </form>
+</div>
+{% endblock %}

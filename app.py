@@ -5053,6 +5053,14 @@ def admin_user_edit(user_id):
 def admin_user_delete(user_id):
     user = _scope_users(User.query, _current_site_ids()).filter_by(id=user_id).first_or_404()
     username = user.username
+    # ActivityLog.actor_user_id and Ticket.assigned_to_user_id are plain FK
+    # columns with no ON DELETE rule, so deleting a User who's ever logged
+    # an action (virtually every real user) or been assigned a ticket would
+    # otherwise fail with a ForeignKeyViolation. Both are best-effort links
+    # only — actor_label already has the actor's name snapshotted
+    # permanently — so clearing them first is lossless.
+    ActivityLog.query.filter_by(actor_user_id=user.id).update({'actor_user_id': None})
+    Ticket.query.filter_by(assigned_to_user_id=user.id).update({'assigned_to_user_id': None})
     db.session.delete(user)
     _log_activity('user_delete', f'Deleted user "{username}".')
     db.session.commit()

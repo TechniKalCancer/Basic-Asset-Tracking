@@ -3773,9 +3773,10 @@ def admin_person_history(person_id):
 def admin_person_delete(person_id):
     """
     Permanently deletes a person record. Any assets currently assigned to them
-    are unassigned first, not blocked. AssignmentHistory/Incident/LoanerCheckout
-    rows are kept (person_name is a snapshot) but their person_id link is
-    cleared so the foreign key doesn't block the delete.
+    are unassigned first, not blocked. AssignmentHistory/Incident/LoanerCheckout/
+    Ticket rows are kept (person_name/requester_name are snapshots) but their
+    person_id/requester_person_id link is cleared so the foreign key doesn't
+    block the delete.
 
     For students leaving at graduation, prefer /admin/people/graduate instead —
     it archives (is_active=False) rather than deleting, so history/incidents
@@ -3789,6 +3790,7 @@ def admin_person_delete(person_id):
         AssignmentHistory.query.filter_by(person_id=person.id).update({'person_id': None})
         Incident.query.filter_by(person_id=person.id).update({'person_id': None})
         LoanerCheckout.query.filter_by(person_id=person.id).update({'person_id': None})
+        Ticket.query.filter_by(requester_person_id=person.id).update({'requester_person_id': None})
         db.session.delete(person)
         _log_activity('person_delete', f'Deleted {person_name}.', site_id=person_site_id)
         db.session.commit()
@@ -5378,6 +5380,13 @@ def admin_site_delete(site_id):
         site_name = site.name
         site_logo = site.logo_filename
         UserSite.query.filter_by(site_id=site.id).delete()
+        # Ticket/ActivityLog/GoogleOrgUnit.site_id are all nullable, best-effort
+        # tags (not blocked by the in_use check above, unlike Person/AssetRegistry/
+        # KioskDevice) — clear them so a site with any ticket/log/org-unit history
+        # doesn't hit a ForeignKeyViolation on delete.
+        Ticket.query.filter_by(site_id=site.id).update({'site_id': None})
+        ActivityLog.query.filter_by(site_id=site.id).update({'site_id': None})
+        GoogleOrgUnit.query.filter_by(site_id=site.id).update({'site_id': None})
         db.session.delete(site)
         _log_activity('site_delete', f'Deleted site "{site_name}".')
         db.session.commit()
@@ -6439,9 +6448,18 @@ def admin_repair_category_edit(category_id):
 @require_permission('devices')
 def admin_repair_category_delete(category_id):
     category = RepairCategory.query.get_or_404(category_id)
-    in_use = Incident.query.filter_by(repair_category_id=category_id).count()
-    if in_use:
-        flash(f'Cannot delete "{category.name}" — {in_use} incident(s) still reference it. Deactivate it instead.', 'error')
+    # Both Incident and Repair reuse this same category catalog (see
+    # RepairCategory's docstring) — checking only one would let the other's
+    # reference through to a ForeignKeyViolation on delete.
+    incident_count = Incident.query.filter_by(repair_category_id=category_id).count()
+    repair_count = Repair.query.filter_by(repair_category_id=category_id).count()
+    if incident_count or repair_count:
+        parts = []
+        if incident_count:
+            parts.append(f'{incident_count} incident(s)')
+        if repair_count:
+            parts.append(f'{repair_count} repair(s)')
+        flash(f'Cannot delete "{category.name}" — {" and ".join(parts)} still reference it. Deactivate it instead.', 'error')
         return redirect(url_for('admin_repair_categories'))
     name = category.name
     db.session.delete(category)

@@ -12,7 +12,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Name</label>
-      <input name="name" value="{{ (form.name if form else (site.name if site else '')) }}" placeholder="e.g. Fox Creek Middle School" required />
+      <input name="name" value="{{ (form.name if form else (site.name if site else '')) }}" placeholder="e.g. Central Middle School" required />
     </div>
 
     <div style="margin-bottom:1.5rem;">

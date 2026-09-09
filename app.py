@@ -5053,18 +5053,28 @@ def admin_user_edit(user_id):
 def admin_user_delete(user_id):
     user = _scope_users(User.query, _current_site_ids()).filter_by(id=user_id).first_or_404()
     username = user.username
-    # ActivityLog.actor_user_id and Ticket.assigned_to_user_id are plain FK
-    # columns with no ON DELETE rule, so deleting a User who's ever logged
-    # an action (virtually every real user) or been assigned a ticket would
-    # otherwise fail with a ForeignKeyViolation. Both are best-effort links
-    # only — actor_label already has the actor's name snapshotted
-    # permanently — so clearing them first is lossless.
-    ActivityLog.query.filter_by(actor_user_id=user.id).update({'actor_user_id': None})
-    Ticket.query.filter_by(assigned_to_user_id=user.id).update({'assigned_to_user_id': None})
-    db.session.delete(user)
-    _log_activity('user_delete', f'Deleted user "{username}".')
-    db.session.commit()
-    flash(f'Deleted user "{username}".', 'success')
+    try:
+        # ActivityLog.actor_user_id and Ticket.assigned_to_user_id are plain FK
+        # columns with no ON DELETE rule, so deleting a User who's ever logged
+        # an action (virtually every real user) or been assigned a ticket would
+        # otherwise fail with a ForeignKeyViolation. Both are best-effort links
+        # only — actor_label already has the actor's name snapshotted
+        # permanently — so clearing them is lossless. Cleared both BEFORE and
+        # AFTER _log_activity below: an admin deleting their own account
+        # resolves _log_activity's own current-actor lookup back to this same
+        # user, inserting a fresh ActivityLog row that references the id
+        # we're about to delete — a single clear-before pass would still
+        # leave that one dangling in the self-delete case.
+        ActivityLog.query.filter_by(actor_user_id=user.id).update({'actor_user_id': None})
+        Ticket.query.filter_by(assigned_to_user_id=user.id).update({'assigned_to_user_id': None})
+        _log_activity('user_delete', f'Deleted user "{username}".')
+        ActivityLog.query.filter_by(actor_user_id=user.id).update({'actor_user_id': None})
+        db.session.delete(user)
+        db.session.commit()
+        flash(f'Deleted user "{username}".', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not delete user: {e}', 'error')
     return redirect(url_for('admin_users'))
 
 

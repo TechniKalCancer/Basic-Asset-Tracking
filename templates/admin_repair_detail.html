@@ -82,8 +82,12 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="position:relative;margin-bottom:.8rem;">
         <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Person to loan to</label>
-        <input type="hidden" name="person_id" id="repairLoanerPersonId" />
-        <input type="text" id="repairLoanerPersonSearch" autocomplete="off" placeholder="Type a name, email, or site…" style="width:100%;" />
+        <input type="hidden" name="person_id" id="repairLoanerPersonId" value="{{ default_loaner_person.id if default_loaner_person else '' }}" />
+        <input type="text" id="repairLoanerPersonSearch" autocomplete="off" placeholder="Type a name, email, or site…" style="width:100%;"
+               value="{{ default_loaner_person.full_name if default_loaner_person else '' }}" />
+        {% if default_loaner_person %}
+        <span style="display:block;margin-top:.3rem;color:var(--muted);font-size:.78rem;">Defaulted to who this repair's ticket was filed for — search above to pick someone else.</span>
+        {% endif %}
         <div id="repairLoanerPersonResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;
              background:var(--surface2);border:1px solid var(--border);border-radius:7px;margin-top:.3rem;
              max-height:220px;overflow-y:auto;"></div>

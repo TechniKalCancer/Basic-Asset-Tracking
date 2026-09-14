@@ -5960,7 +5960,7 @@ def admin_loaners_checkin():
     asset_tag = request.form.get('asset_tag', '').strip()
     status, message = _checkin_loaner(asset_tag, site_ids=_current_site_ids())
     flash(message, 'success' if status == 'ok' else 'error')
-    return redirect(url_for('admin_loaners'))
+    return redirect(request.referrer or url_for('admin_loaners'))
 
 
 @app.route('/loaner_checkout', methods=['GET', 'POST'])
@@ -6622,8 +6622,10 @@ def admin_repair_detail(repair_id):
     repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
     active_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
+    default_loaner_person = repair.ticket.requester if repair.ticket else None
     return render_template('admin_repair_detail.html', repair=repair, repair_categories=repair_categories,
-                           repair_outcomes=REPAIR_OUTCOMES, active_loaner=active_loaner)
+                           repair_outcomes=REPAIR_OUTCOMES, active_loaner=active_loaner,
+                           default_loaner_person=default_loaner_person)
 
 
 @app.route('/admin/repairs/<int:repair_id>/return', methods=['POST'])

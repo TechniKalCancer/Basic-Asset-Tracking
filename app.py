@@ -448,7 +448,7 @@ class Asset(db.Model):
     google_org_unit    = db.Column(db.String(255), nullable=True)
     google_recent_user = db.Column(db.String(255), nullable=True)
     google_last_sync_at = db.Column(db.DateTime, nullable=True)
-    google_enabled     = db.Column(db.Boolean, nullable=True)  # last known enabled/disabled state, set by the loaner auto-disable sync
+    google_enabled     = db.Column(db.Boolean, nullable=True)  # last known enabled/disabled state — set by the loaner auto-disable sync, the per-device/bulk Google sync, and the manual toggle button
 
     assigned_to = db.relationship('Person', backref='assets')
 
@@ -463,6 +463,7 @@ class Asset(db.Model):
             'google_model':        self.google_model,
             'google_org_unit':     self.google_org_unit,
             'google_recent_user':  self.google_recent_user,
+            'google_enabled':      self.google_enabled,
             'google_last_sync_at': self.google_last_sync_at.isoformat() if self.google_last_sync_at else None,
         }
 
@@ -1319,7 +1320,8 @@ def sync_chromeos_device_from_google(serial_number):
         serial_number: The device's manufacturer serial number.
 
     Returns:
-        A dict with keys 'model', 'org_unit', 'recent_user'.
+        A dict with keys 'model', 'org_unit', 'recent_user', 'enabled' (True
+        when Google's status is 'ACTIVE', False for 'DISABLED'/anything else).
 
     Raises:
         LookupError: No Chrome device with this serial number exists in the domain.
@@ -1333,6 +1335,7 @@ def sync_chromeos_device_from_google(serial_number):
         'model': device.get('model'),
         'org_unit': device.get('orgUnitPath'),
         'recent_user': recent_users[0].get('email') if recent_users else None,
+        'enabled': device.get('status') == 'ACTIVE',
     }
 
 
@@ -1391,6 +1394,36 @@ def set_chromeos_device_enabled(serial_number, enabled):
         customerId='my_customer', resourceId=device['deviceId'],
         body={'action': 'reenable' if enabled else 'disable'},
     ).execute()
+
+
+def toggle_chromeos_device_enabled(serial_number):
+    """
+    Flips a Chromebook's enabled/disabled state to whatever it currently
+    isn't — reads Google's live status (not FoxDesk's cached google_enabled,
+    which could be stale if the device was changed directly in the Admin
+    console) in the same round trip already needed to resolve the device
+    ID, then acts on it. Backs the one-click toggle button on the device
+    page, so an admin never has to check state before clicking.
+
+    Args:
+        serial_number: The device's manufacturer serial number.
+
+    Returns:
+        The new enabled state (True/False).
+
+    Raises:
+        LookupError: No Chrome device with this serial number exists in the domain.
+    """
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    device = _find_chromeos_device_by_serial(service, serial_number)
+    if not device:
+        raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
+    currently_enabled = device.get('status') == 'ACTIVE'
+    service.chromeosdevices().action(
+        customerId='my_customer', resourceId=device['deviceId'],
+        body={'action': 'disable' if currently_enabled else 'reenable'},
+    ).execute()
+    return not currently_enabled
 
 
 # ─── Configurable Google field sync (People + Devices) ─────────────────────────
@@ -1711,15 +1744,26 @@ def _run_google_device_sync():
     AssetRegistry row by serial number, and applies each entity_type='device'
     GoogleFieldMapping onto the match — plus, independently of any mapping,
     corrects site_id from the device's org unit the same way
-    _run_google_people_sync does for People. Returns (matched, updated,
-    unmatched)."""
+    _run_google_people_sync does for People.
+
+    Also caches model/org unit/recent user/enabled-disabled state onto each
+    matched device's Asset row, same fields the per-device 'Sync from
+    Google' button fills in — so that info shows up fleet-wide from the
+    regular bulk/scheduled sync instead of requiring a click into every
+    device one at a time. This runs regardless of whether any field
+    mappings or org-unit site rules are configured, since caching this
+    snapshot is this sync's job on its own, not just a side effect of
+    mapping-driven updates.
+
+    Returns (matched, updated, unmatched) — updated counts AssetRegistry
+    rows actually changed by a mapping or site correction; the Asset
+    snapshot cache refreshes on every matched device regardless and isn't
+    counted here, same as the per-device sync never counts as an 'update'."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='device').all()
-    has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
-    if not mappings and not has_site_rules:
-        return 0, 0, 0
     service = _google_directory_service([GOOGLE_SCOPE_READONLY])
     matched = updated = unmatched = 0
     page_token = None
+    now = datetime.utcnow()
     while True:
         response = service.chromeosdevices().list(
             customerId='my_customer', maxResults=200, pageToken=page_token,
@@ -1738,6 +1782,17 @@ def _run_google_device_sync():
                 row_changed = True
             if row_changed:
                 updated += 1
+
+            asset = Asset.query.filter_by(asset_tag=row.asset_tag).first()
+            if not asset:
+                asset = Asset(asset_tag=row.asset_tag, is_valid=True)
+                db.session.add(asset)
+            recent_users = d.get('recentUsers') or []
+            asset.google_model       = d.get('model')
+            asset.google_org_unit    = d.get('orgUnitPath')
+            asset.google_recent_user = recent_users[0].get('email') if recent_users else None
+            asset.google_enabled     = d.get('status') == 'ACTIVE'
+            asset.google_last_sync_at = now
         page_token = response.get('nextPageToken')
         if not page_token:
             break
@@ -4432,6 +4487,7 @@ def admin_asset_google_sync(asset_tag):
         asset.google_model        = info.get('model')
         asset.google_org_unit     = info.get('org_unit')
         asset.google_recent_user  = info.get('recent_user')
+        asset.google_enabled      = info.get('enabled')
         asset.google_last_sync_at = datetime.utcnow()
         db.session.commit()
         flash(f'Synced {asset_tag} from Google.', 'success')
@@ -4440,6 +4496,45 @@ def admin_asset_google_sync(asset_tag):
     except Exception as e:
         db.session.rollback()
         flash(f'Google sync failed: {e}', 'error')
+
+    return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+
+@app.route('/admin/assets/<string:asset_tag>/google_toggle', methods=['POST'])
+@require_permission('devices')
+def admin_asset_google_toggle(asset_tag):
+    """One-click flip of a device's Google Workspace enabled/disabled state —
+    always the opposite of whatever it currently is, so the button on the
+    device page never requires checking state first."""
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+
+    if not GOOGLE_SYNC_ENABLED:
+        flash('Google Workspace sync isn\'t configured yet. Set GOOGLE_SERVICE_ACCOUNT_FILE '
+              'and GOOGLE_ADMIN_IMPERSONATE_EMAIL in .env to enable it.', 'info')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+    if not registry_row.serial_number:
+        flash(f'{asset_tag} has no serial number on file to look up.', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+    try:
+        new_enabled = toggle_chromeos_device_enabled(registry_row.serial_number)
+        asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+        if not asset:
+            asset = Asset(asset_tag=asset_tag, is_valid=True)
+            db.session.add(asset)
+        asset.google_enabled = new_enabled
+        asset.google_last_sync_at = datetime.utcnow()
+        _log_activity('device_google_toggle',
+                       f'{"Enabled" if new_enabled else "Disabled"} {asset_tag} in Google Workspace.',
+                       site_id=registry_row.site_id)
+        db.session.commit()
+        flash(f'{asset_tag} is now {"enabled" if new_enabled else "disabled"} in Google Workspace.', 'success')
+    except LookupError as e:
+        flash(str(e), 'info')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not update Google Workspace status: {e}', 'error')
 
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
@@ -7385,6 +7480,7 @@ def admin_help_delete(article_id):
 
 ACTIVITY_LOG_ACTIONS = [
     'device_add', 'device_edit', 'device_delete', 'device_assign', 'device_unassign', 'device_status',
+    'device_google_toggle',
     'registry_csv_import', 'registry_set_sites',
     'person_add', 'person_edit', 'person_delete', 'person_reactivate', 'people_csv_import', 'people_graduate',
     'loaner_toggle', 'loaner_label_edit', 'loaner_checkout', 'loaner_checkin', 'reminders_send',

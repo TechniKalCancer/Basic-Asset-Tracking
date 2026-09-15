@@ -1739,7 +1739,7 @@ def _run_google_people_sync():
     return matched, updated, unmatched, created
 
 
-def _run_google_device_sync():
+def _run_google_device_sync(deadline=None):
     """Pulls every Google Workspace ChromeOS device, matches to an existing
     AssetRegistry row by serial number, and applies each entity_type='device'
     GoogleFieldMapping onto the match — plus, independently of any mapping,
@@ -1767,22 +1767,39 @@ def _run_google_device_sync():
     recentUsers/annotatedAssetId are reliably present regardless of the
     API's undocumented default projection.
 
-    Returns (matched, updated, unmatched, pushed) — updated counts
-    AssetRegistry rows actually changed by a mapping or site correction;
-    pushed counts devices whose annotatedAssetId was corrected in Google.
-    The Asset snapshot cache refreshes on every matched device regardless
-    and isn't counted in either, same as the per-device sync never counts
-    as an 'update'."""
+    deadline: an optional time.monotonic() cutoff. A first-ever run against
+    an existing fleet can need one push per device (nothing has an
+    annotatedAssetId yet) — thousands of individual write calls, easily
+    minutes of wall-clock time, which blows straight through gunicorn's
+    request timeout if triggered from the manual "Sync Devices Now" button.
+    When set, the loop stops picking up new devices once past the deadline
+    (whatever's already staged is still committed) and reports itself
+    truncated rather than getting killed mid-request. The scheduled
+    background sync (no HTTP request, no timeout) passes no deadline and
+    always finishes the job in one pass, picking up wherever a capped
+    manual run left off. Commits every 50 processed devices too, so a
+    crash mid-run doesn't lose all progress back to zero.
+
+    Returns (matched, updated, unmatched, pushed, truncated) — updated
+    counts AssetRegistry rows actually changed by a mapping or site
+    correction; pushed counts devices whose annotatedAssetId was corrected
+    in Google. The Asset snapshot cache refreshes on every matched device
+    regardless and isn't counted in either, same as the per-device sync
+    never counts as an 'update'."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='device').all()
     service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
-    matched = updated = unmatched = pushed = 0
+    matched = updated = unmatched = pushed = processed = 0
     page_token = None
     now = datetime.utcnow()
+    truncated = False
     while True:
         response = service.chromeosdevices().list(
             customerId='my_customer', maxResults=200, pageToken=page_token, projection='FULL',
         ).execute()
         for d in response.get('chromeosdevices', []):
+            if deadline and time.monotonic() > deadline:
+                truncated = True
+                break
             serial = d.get('serialNumber')
             row = AssetRegistry.query.filter_by(serial_number=serial).first() if serial else None
             if not row:
@@ -1817,11 +1834,17 @@ def _run_google_device_sync():
                     pushed += 1
                 except Exception as e:
                     logger.error('Failed to push asset tag for %s to Google: %s', row.asset_tag, e)
+
+            processed += 1
+            if processed % 50 == 0:
+                db.session.commit()
+        if truncated:
+            break
         page_token = response.get('nextPageToken')
         if not page_token:
             break
     db.session.commit()
-    return matched, updated, unmatched, pushed
+    return matched, updated, unmatched, pushed, truncated
 
 
 def _move_device_to_persons_ou(registry_row, person):
@@ -4898,11 +4921,18 @@ def admin_google_sync_devices():
         flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
         return redirect(url_for('admin_google_field_mapping', entity='device'))
     try:
-        matched, updated, unmatched, pushed = _run_google_device_sync()
+        # Capped well under gunicorn's request timeout — a first-ever run
+        # against an existing fleet can need one push per device, which
+        # can't finish inside a single request. The scheduled background
+        # sync (see SyncSchedule) has no such cap and will finish the job.
+        deadline = time.monotonic() + 45
+        matched, updated, unmatched, pushed, truncated = _run_google_device_sync(deadline=deadline)
         _log_activity('google_field_sync', f'Synced Devices from Google: {matched} matched, {updated} updated, {pushed} asset tag(s) pushed to Google.')
         db.session.commit()  # _run_google_device_sync() already committed its own changes; this just persists the log entry above, added after that commit
-        flash(f'{matched} matched, {updated} updated, {pushed} asset tag(s) pushed to Google. {unmatched} Google device(s) had no matching registry serial number.',
-              'success' if matched else 'info')
+        message = f'{matched} matched, {updated} updated, {pushed} asset tag(s) pushed to Google. {unmatched} Google device(s) had no matching registry serial number.'
+        if truncated:
+            message += ' Stopped early to stay within the request time limit — click "Run Sync Now" again to continue, or let the scheduled sync finish it overnight.'
+        flash(message, 'success' if matched else 'info')
     except Exception as e:
         flash(f'Sync failed: {e}', 'error')
     return redirect(url_for('admin_google_field_mapping', entity='device'))
@@ -5806,7 +5836,9 @@ def _run_due_scheduled_syncs():
                 matched, updated, unmatched, created = _run_google_people_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
             elif schedule.sync_type == 'device':
-                matched, updated, unmatched, pushed = _run_google_device_sync()
+                # No deadline — this runs in the background thread, not an
+                # HTTP request, so it can take as long as a full backfill needs.
+                matched, updated, unmatched, pushed, _truncated = _run_google_device_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {pushed} pushed, {unmatched} unmatched'
             else:
                 matched, updated, unmatched, created = _run_kace_device_sync()

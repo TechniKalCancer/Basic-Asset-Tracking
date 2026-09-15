@@ -1755,18 +1755,32 @@ def _run_google_device_sync():
     snapshot is this sync's job on its own, not just a side effect of
     mapping-driven updates.
 
-    Returns (matched, updated, unmatched) — updated counts AssetRegistry
-    rows actually changed by a mapping or site correction; the Asset
-    snapshot cache refreshes on every matched device regardless and isn't
-    counted here, same as the per-device sync never counts as an 'update'."""
+    And pushes the other direction too: whenever a matched device's
+    annotatedAssetId in Google doesn't match FoxDesk's own asset_tag, it's
+    corrected in Google. This is the reconciliation half of the write-back
+    that _push_asset_tag_to_google does immediately on Add/Edit Device — it
+    catches devices added before that existed, a push that failed at add
+    time, or a tag that was later changed directly in Google.
+
+    Uses the write (MANAGE) scope rather than READONLY since it now writes
+    annotatedAssetId, and requests projection='FULL' explicitly so
+    recentUsers/annotatedAssetId are reliably present regardless of the
+    API's undocumented default projection.
+
+    Returns (matched, updated, unmatched, pushed) — updated counts
+    AssetRegistry rows actually changed by a mapping or site correction;
+    pushed counts devices whose annotatedAssetId was corrected in Google.
+    The Asset snapshot cache refreshes on every matched device regardless
+    and isn't counted in either, same as the per-device sync never counts
+    as an 'update'."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='device').all()
-    service = _google_directory_service([GOOGLE_SCOPE_READONLY])
-    matched = updated = unmatched = 0
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    matched = updated = unmatched = pushed = 0
     page_token = None
     now = datetime.utcnow()
     while True:
         response = service.chromeosdevices().list(
-            customerId='my_customer', maxResults=200, pageToken=page_token,
+            customerId='my_customer', maxResults=200, pageToken=page_token, projection='FULL',
         ).execute()
         for d in response.get('chromeosdevices', []):
             serial = d.get('serialNumber')
@@ -1793,11 +1807,21 @@ def _run_google_device_sync():
             asset.google_recent_user = recent_users[0].get('email') if recent_users else None
             asset.google_enabled     = d.get('status') == 'ACTIVE'
             asset.google_last_sync_at = now
+
+            if d.get('annotatedAssetId') != row.asset_tag:
+                try:
+                    service.chromeosdevices().patch(
+                        customerId='my_customer', deviceId=d['deviceId'],
+                        body={'annotatedAssetId': row.asset_tag},
+                    ).execute()
+                    pushed += 1
+                except Exception as e:
+                    logger.error('Failed to push asset tag for %s to Google: %s', row.asset_tag, e)
         page_token = response.get('nextPageToken')
         if not page_token:
             break
     db.session.commit()
-    return matched, updated, unmatched
+    return matched, updated, unmatched, pushed
 
 
 def _move_device_to_persons_ou(registry_row, person):
@@ -1866,6 +1890,37 @@ def _sync_device_google_state(registry_row, enabled, person=None):
             _move_device_to_persons_ou(registry_row, person)
         except Exception as e:
             logger.error('Failed to move %s into %s\'s org unit: %s', registry_row.asset_tag, person.email, e)
+
+
+def _push_asset_tag_to_google(registry_row):
+    """
+    Best-effort write-back of FoxDesk's asset tag into a Chromebook's
+    annotatedAssetId field in Google Workspace, by serial number — the push
+    half of Google device sync (_run_google_device_sync is the pull half,
+    and also reconciles this same field for every device on its own
+    schedule, so one added before this existed, or whose push failed here,
+    catches up there instead of staying out of sync forever).
+
+    No-ops unless GOOGLE_SYNC_ENABLED and the device has a serial number on
+    file — most callers here run right after the registry row's own add/edit
+    has already committed, so a Google-side failure shouldn't roll back or
+    block that save. Never raises.
+    """
+    if not (GOOGLE_SYNC_ENABLED and registry_row.serial_number):
+        return
+    try:
+        service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+        device = _find_chromeos_device_by_serial(service, registry_row.serial_number)
+        if not device:
+            return
+        if device.get('annotatedAssetId') == registry_row.asset_tag:
+            return
+        service.chromeosdevices().patch(
+            customerId='my_customer', deviceId=device['deviceId'],
+            body={'annotatedAssetId': registry_row.asset_tag},
+        ).execute()
+    except Exception as e:
+        logger.error('Failed to push asset tag for %s to Google: %s', registry_row.asset_tag, e)
 
 
 def send_email(to_email, subject, body):
@@ -2848,12 +2903,13 @@ def admin_registry_new():
                 tag = _generate_asset_tag(existing_tags)
 
         try:
-            db.session.add(AssetRegistry(
+            new_row = AssetRegistry(
                 asset_tag=tag, serial_number=serial,
                 description=description, device_type=device_type, device_model_id=device_model_id, site_id=site_id,
                 purchase_date=purchase_date, purchase_cost=purchase_cost,
                 warranty_expiration=warranty_expiration,
-            ))
+            )
+            db.session.add(new_row)
             _log_activity('device_add', f'Added device {tag} to the registry.', site_id=site_id)
             db.session.commit()
             # Heals a matching orphan scan record immediately, same effect as
@@ -2864,6 +2920,7 @@ def admin_registry_new():
             if orphan:
                 orphan.is_valid = True
                 db.session.commit()
+            _push_asset_tag_to_google(new_row)
             flash(f'Added device {tag} to the registry.', 'success')
             return redirect(url_for('admin_asset_assign', asset_tag=tag))
         except IntegrityError as e:
@@ -2973,6 +3030,7 @@ def admin_registry_edit(asset_tag):
             registry_row.warranty_expiration = warranty_expiration
             _log_activity('device_edit', f'Edited device {asset_tag}.', site_id=site_id)
             db.session.commit()
+            _push_asset_tag_to_google(registry_row)  # cheap no-op if it's already correct in Google; matters when a serial is added/corrected here
             flash(f'Updated {asset_tag}.', 'success')
             return redirect(url_for('admin_registry'))
         except Exception as e:
@@ -4840,10 +4898,10 @@ def admin_google_sync_devices():
         flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
         return redirect(url_for('admin_google_field_mapping', entity='device'))
     try:
-        matched, updated, unmatched = _run_google_device_sync()
-        _log_activity('google_field_sync', f'Synced Devices from Google: {matched} matched, {updated} updated.')
+        matched, updated, unmatched, pushed = _run_google_device_sync()
+        _log_activity('google_field_sync', f'Synced Devices from Google: {matched} matched, {updated} updated, {pushed} asset tag(s) pushed to Google.')
         db.session.commit()  # _run_google_device_sync() already committed its own changes; this just persists the log entry above, added after that commit
-        flash(f'{matched} matched, {updated} updated. {unmatched} Google device(s) had no matching registry serial number.',
+        flash(f'{matched} matched, {updated} updated, {pushed} asset tag(s) pushed to Google. {unmatched} Google device(s) had no matching registry serial number.',
               'success' if matched else 'info')
     except Exception as e:
         flash(f'Sync failed: {e}', 'error')
@@ -5748,8 +5806,8 @@ def _run_due_scheduled_syncs():
                 matched, updated, unmatched, created = _run_google_people_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
             elif schedule.sync_type == 'device':
-                matched, updated, unmatched = _run_google_device_sync()
-                schedule.last_run_summary = f'{matched} matched, {updated} updated, {unmatched} unmatched'
+                matched, updated, unmatched, pushed = _run_google_device_sync()
+                schedule.last_run_summary = f'{matched} matched, {updated} updated, {pushed} pushed, {unmatched} unmatched'
             else:
                 matched, updated, unmatched, created = _run_kace_device_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'

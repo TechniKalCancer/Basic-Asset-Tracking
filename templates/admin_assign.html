@@ -23,6 +23,34 @@
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
 </div>
 
+{% if pending_action %}
+<div class="card" style="margin-bottom:1.5rem;border:1px solid var(--warning);">
+  <h2 style="margin-top:0;display:flex;align-items:center;gap:.6rem;">
+    🤖 Automation Pending
+    <span class="badge badge-yellow">Awaiting confirmation</span>
+  </h2>
+  <p style="margin-bottom:1rem;">
+    <strong>{{ action_labels.get(pending_action.action_type, pending_action.action_type) }}</strong>
+    — staged {{ pending_action.created_at.strftime('%Y-%m-%d %H:%M') }}
+    {% if pending_action.ticket_id %}from <a href="/admin/tickets/{{ pending_action.ticket_id }}">ticket #{{ pending_action.ticket_id }}</a>{% endif %}.
+    {% if pending_action.action_type == 'profile_clear' %}
+    This clears <strong>all</strong> local user profiles on the device and can't be undone.
+    {% endif %}
+  </p>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+    <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/confirm"
+          onsubmit="return confirm('Run {{ action_labels.get(pending_action.action_type, pending_action.action_type) }} on {{ registry_row.asset_tag }} now? This can\'t be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">✅ Confirm &amp; Run</button>
+    </form>
+    <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/dismiss">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-ghost">Dismiss</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 {% set status = asset.status if asset else 'available' %}
 {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
                         'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
@@ -459,6 +487,13 @@
       {% else %}
       <button type="submit" class="btn btn-primary">✅ Enable in Google</button>
       {% endif %}
+    </form>
+    {% endif %}
+    {% if google_sync_enabled and registry_row.serial_number %}
+    <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/profile_clear"
+          onsubmit="return confirm('Clear all local user profiles on {{ registry_row.asset_tag }}? This wipes every account\'s local data on the device (not just one) and can\'t be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">🧹 Profile Clear</button>
     </form>
     {% endif %}
   </div>

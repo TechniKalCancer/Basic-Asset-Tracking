@@ -809,6 +809,66 @@ class TicketCharge(db.Model):
 TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed']
 TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
+# Action types a TicketAutomation/PendingDeviceAction can run. Currently just
+# one — structured as a dict (rather than a bare string check) so a second
+# automated action is just one more entry plus one more branch in
+# _execute_device_automation_action, not a schema change.
+AUTOMATION_ACTIONS = {'profile_clear': 'Profile Clear (wipe local users)'}
+
+
+class TicketAutomation(db.Model):
+    """
+    Links a Ticket Category to an automated device action — e.g. selecting
+    "Cryptohome Error" on a ticket that has a device attached can trigger a
+    Google Workspace profile clear on that device, instead of a tech having
+    to remember to do it by hand. One automation per category (unique), so
+    picking the category is unambiguous about what it'll do.
+
+    require_confirmation gates whether the action fires the moment the
+    ticket is created or gets staged as a PendingDeviceAction for a
+    one-click admin confirm first. This is per-automation and
+    admin-configurable rather than a single global on/off switch — the
+    underlying action (WIPE_USERS) clears every local profile on the
+    device and can't be undone, so some districts/categories may want a
+    human to greenlight it and others may not.
+
+    Only ever fires when the triggering ticket has an asset_tag (a device
+    attached) — nothing to act on otherwise.
+    """
+    __tablename__ = 'ticket_automation'
+    id                   = db.Column(db.Integer, primary_key=True)
+    ticket_category_id   = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=False, unique=True)
+    action_type          = db.Column(db.String(30), nullable=False)  # key into AUTOMATION_ACTIONS
+    require_confirmation = db.Column(db.Boolean, nullable=False, default=True)
+    is_active            = db.Column(db.Boolean, nullable=False, default=True)
+    created_at           = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    ticket_category = db.relationship('TicketCategory')
+
+
+class PendingDeviceAction(db.Model):
+    """
+    A device action staged by a TicketAutomation with require_confirmation
+    on, waiting for an admin to confirm or dismiss it before it actually
+    runs. Surfaced on both the triggering ticket's page and the device's
+    own page, since a tech might be looking at either one first. Resolved
+    rows (confirmed/dismissed/failed) are kept rather than deleted, same
+    reasoning as ActivityLog never being trimmed — a resolved automation
+    shouldn't look unhandled after the fact.
+    """
+    __tablename__ = 'pending_device_action'
+    id                = db.Column(db.Integer, primary_key=True)
+    ticket_id         = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
+    asset_tag         = db.Column(db.String(120), nullable=False, index=True)
+    action_type       = db.Column(db.String(30), nullable=False)
+    status            = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'confirmed' | 'dismissed' | 'failed'
+    created_at        = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    resolved_at       = db.Column(db.DateTime, nullable=True)
+    resolved_by_label = db.Column(db.String(160), nullable=True)
+    error_message     = db.Column(db.String(255), nullable=True)
+
+    ticket = db.relationship('Ticket')
+
 
 class ActivityLog(db.Model):
     """
@@ -1424,6 +1484,42 @@ def toggle_chromeos_device_enabled(serial_number):
         body={'action': 'disable' if currently_enabled else 'reenable'},
     ).execute()
     return not currently_enabled
+
+
+def wipe_chromeos_device_users(serial_number):
+    """
+    Issues Google's WIPE_USERS remote command to a Chromebook by serial
+    number — clears every local user profile/cryptohome on the device
+    (the standard remote fix for cryptohome corruption) while leaving it
+    enrolled and managed, unlike REMOTE_POWERWASH which fully factory-
+    resets and de-enrolls it. There's no way to target just one user's
+    profile remotely — this clears all of them on that device.
+
+    Lives under a different Admin SDK resource collection
+    (customer().devices().chromeos().issueCommand) than the rest of this
+    file's Chrome device calls (the chromeosdevices() resource used by
+    list/action/patch), but needs the same write (MANAGE) scope and
+    impersonated credentials, so no separate setup is required.
+
+    Fire-and-forget: Google queues the command and executes it
+    asynchronously once the device next checks in (it must be online).
+    This doesn't poll the returned commandId for completion, matching how
+    set_chromeos_device_enabled doesn't confirm completion either.
+
+    Args:
+        serial_number: The device's manufacturer serial number.
+
+    Raises:
+        LookupError: No Chrome device with this serial number exists in the domain.
+    """
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    device = _find_chromeos_device_by_serial(service, serial_number)
+    if not device:
+        raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
+    service.customer().devices().chromeos().issueCommand(
+        customerId='my_customer', deviceId=device['deviceId'],
+        body={'commandType': 'WIPE_USERS'},
+    ).execute()
 
 
 # ─── Configurable Google field sync (People + Devices) ─────────────────────────
@@ -2399,6 +2495,8 @@ NAV_SECTION_PREFIXES = [
     ('/admin/repairs', 'repairs'),
     ('/admin/tickets', 'tickets'),
     ('/admin/ticket_categories', 'tickets'),
+    ('/admin/automations', 'tickets'),
+    ('/admin/pending_actions', 'tickets'),
     ('/submit_ticket', 'tickets'),
     ('/admin/kiosk', 'admin'),
     ('/admin/reminders', 'admin'),
@@ -4305,6 +4403,7 @@ def admin_asset_assign(asset_tag):
 
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
     custom_field_labels = {f.field_key: f.label for f in CustomField.query.filter_by(entity_type='device').all()}
+    pending_action = PendingDeviceAction.query.filter_by(asset_tag=asset_tag, status='pending').first()
 
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
                            history=history, combined_history=combined_history, events=events, incidents=incidents,
@@ -4312,7 +4411,8 @@ def admin_asset_assign(asset_tag):
                            repair_categories=repair_categories,
                            open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
                            asset_statuses=ASSET_STATUSES, custom_field_labels=custom_field_labels,
-                           now=datetime.utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED)
+                           now=datetime.utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED,
+                           pending_action=pending_action, action_labels=AUTOMATION_ACTIONS)
 
 
 @app.route('/admin/bulk_assign', methods=['GET', 'POST'])
@@ -7024,6 +7124,89 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     return ticket
 
 
+def _execute_device_automation_action(action_type, asset_tag):
+    """
+    Runs one automation action_type against a device by asset_tag —
+    currently only 'profile_clear' (Google WIPE_USERS) is implemented;
+    structured as a dispatch so a second action type is just one more
+    branch here. Never raises — mirrors _checkin_loaner/_checkout_loaner's
+    (status, message) contract so callers don't each need their own
+    try/except around it.
+    """
+    registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+    if not registry_row:
+        return 'error', f'"{asset_tag}" was not found in the asset registry.'
+    if not GOOGLE_SYNC_ENABLED:
+        return 'error', 'Google Workspace sync isn\'t configured yet.'
+    if not registry_row.serial_number:
+        return 'error', f'{asset_tag} has no serial number on file to look up.'
+
+    if action_type == 'profile_clear':
+        try:
+            wipe_chromeos_device_users(registry_row.serial_number)
+            return 'ok', f'Profile clear sent to {asset_tag} — runs next time the device checks in.'
+        except LookupError as e:
+            return 'error', str(e)
+        except Exception as e:
+            return 'error', f'Could not send profile clear: {e}'
+
+    return 'error', f'Unknown automation action "{action_type}".'
+
+
+def _run_pending_device_action(action, resolved_by='Automatic'):
+    """Actually executes a staged PendingDeviceAction — called either
+    immediately (its TicketAutomation skips confirmation) or from the
+    admin confirm route. Updates the row's status/resolved fields and logs
+    the outcome either way, then commits. resolved_by is the confirming
+    admin's actor_label, or 'Automatic' when no human was involved."""
+    status, message = _execute_device_automation_action(action.action_type, action.asset_tag)
+    action.status = 'confirmed' if status == 'ok' else 'failed'
+    action.error_message = None if status == 'ok' else message
+    action.resolved_at = datetime.utcnow()
+    action.resolved_by_label = resolved_by
+    action_label = AUTOMATION_ACTIONS.get(action.action_type, action.action_type)
+    outcome = 'done' if status == 'ok' else f'failed — {message}'
+    _log_activity('automation_run', f'{action_label} on {action.asset_tag}: {outcome}', ticket_id=action.ticket_id)
+    db.session.commit()
+    return status, message
+
+
+def _check_ticket_automation(ticket):
+    """
+    Checks whether the ticket's category has an active TicketAutomation
+    configured, and if so, either stages it as a PendingDeviceAction for
+    an admin to confirm, or fires it immediately — per that automation's
+    own require_confirmation setting. No-ops if there's no device attached
+    to the ticket (nothing to act on) or no matching automation.
+
+    Called by each ticket-creation route AFTER its own db.session.commit()
+    has already succeeded, same reasoning as _sync_device_google_state
+    being called post-commit elsewhere in this file: a Google-side failure
+    here shouldn't affect whether the ticket itself was saved.
+    """
+    if not ticket.asset_tag:
+        return
+    automation = TicketAutomation.query.filter_by(
+        ticket_category_id=ticket.category_id, is_active=True).first()
+    if not automation:
+        return
+
+    action = PendingDeviceAction(
+        ticket_id=ticket.id, asset_tag=ticket.asset_tag,
+        action_type=automation.action_type, status='pending',
+    )
+    db.session.add(action)
+    db.session.flush()
+
+    if automation.require_confirmation:
+        action_label = AUTOMATION_ACTIONS.get(automation.action_type, automation.action_type)
+        _log_activity('automation_staged', f'Staged {action_label} for {ticket.asset_tag} — awaiting confirmation.',
+                       ticket_id=ticket.id)
+        db.session.commit()
+    else:
+        _run_pending_device_action(action, resolved_by='Automatic')
+
+
 @app.route('/submit_ticket', methods=['GET', 'POST'])
 @kiosk_or_permission_required('checkinout')
 def submit_ticket_page():
@@ -7060,9 +7243,10 @@ def submit_ticket_page():
                 asset_tag = scan_value  # fall back to raw value, same as report_problem_page
 
         try:
-            _create_ticket(category_id, subject, description, person=person,
-                            asset_tag=asset_tag, site_id=person.site_id)
+            ticket = _create_ticket(category_id, subject, description, person=person,
+                                     asset_tag=asset_tag, site_id=person.site_id)
             db.session.commit()
+            _check_ticket_automation(ticket)
             flash('Thanks — your ticket has been submitted.', 'success')
         except Exception as e:
             db.session.rollback()
@@ -7169,6 +7353,7 @@ def admin_ticket_new():
             ticket = _create_ticket(category_id, subject, description, person=person,
                                      asset_tag=asset_tag, site_id=site_id, priority=priority)
             db.session.commit()
+            _check_ticket_automation(ticket)
             flash('Ticket created.', 'success')
             return redirect(url_for('admin_ticket_detail', ticket_id=ticket.id))
         except Exception as e:
@@ -7186,10 +7371,12 @@ def admin_ticket_detail(ticket_id):
     registry_row = AssetRegistry.query.filter_by(asset_tag=ticket.asset_tag).first() if ticket.asset_tag else None
     history = ActivityLog.query.filter_by(ticket_id=ticket.id).order_by(ActivityLog.timestamp.desc()).all()
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
+    pending_action = PendingDeviceAction.query.filter_by(ticket_id=ticket.id, status='pending').first()
     return render_template('admin_ticket_detail.html', ticket=ticket, registry_row=registry_row,
                            statuses=TICKET_STATUSES, priorities=TICKET_PRIORITIES,
                            assignees=_ticket_assignees(site_ids), history=history,
-                           repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories)
+                           repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
+                           pending_action=pending_action, action_labels=AUTOMATION_ACTIONS)
 
 
 @app.route('/admin/tickets/<int:ticket_id>/edit', methods=['GET', 'POST'])
@@ -7464,12 +7651,163 @@ def admin_ticket_category_delete(category_id):
     if in_use:
         flash(f'Cannot delete "{category.name}" — {in_use} ticket(s) still reference it. Deactivate it instead.', 'error')
         return redirect(url_for('admin_ticket_categories'))
+    if TicketAutomation.query.filter_by(ticket_category_id=category_id).first():
+        flash(f'Cannot delete "{category.name}" — it has an automation configured. Delete that automation first.', 'error')
+        return redirect(url_for('admin_ticket_categories'))
     name = category.name
     db.session.delete(category)
     _log_activity('ticket_category_delete', f'Deleted ticket category "{name}".')
     db.session.commit()
     flash(f'Deleted category "{name}".', 'success')
     return redirect(url_for('admin_ticket_categories'))
+
+
+# ─── Ticket Automations ─────────────────────────────────────────────────────────
+
+@app.route('/admin/automations')
+@require_super_admin
+def admin_automations():
+    automations = TicketAutomation.query.join(TicketCategory).order_by(TicketCategory.name).all()
+    return render_template('admin_automations.html', automations=automations, action_labels=AUTOMATION_ACTIONS)
+
+
+@app.route('/admin/automations/new', methods=['GET', 'POST'])
+@require_super_admin
+def admin_automation_new():
+    available_categories = TicketCategory.query.filter(
+        ~TicketCategory.id.in_(db.session.query(TicketAutomation.ticket_category_id))
+    ).order_by(TicketCategory.name).all()
+    if request.method == 'POST':
+        ticket_category_id = request.form.get('ticket_category_id', type=int)
+        action_type = request.form.get('action_type', '').strip()
+        require_confirmation = bool(request.form.get('require_confirmation'))
+        if not ticket_category_id or not TicketCategory.query.get(ticket_category_id):
+            flash('Choose a ticket category.', 'error')
+            return render_template('admin_automation_form.html', automation=None, form=request.form,
+                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+        if action_type not in AUTOMATION_ACTIONS:
+            flash('Choose an action.', 'error')
+            return render_template('admin_automation_form.html', automation=None, form=request.form,
+                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+        if TicketAutomation.query.filter_by(ticket_category_id=ticket_category_id).first():
+            flash('That category already has an automation — edit it instead of adding another.', 'error')
+            return render_template('admin_automation_form.html', automation=None, form=request.form,
+                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+
+        category = TicketCategory.query.get(ticket_category_id)
+        db.session.add(TicketAutomation(
+            ticket_category_id=ticket_category_id, action_type=action_type,
+            require_confirmation=require_confirmation,
+        ))
+        _log_activity('automation_add',
+                       f'Added automation: "{category.name}" tickets → {AUTOMATION_ACTIONS[action_type]}'
+                       f' ({"confirm first" if require_confirmation else "runs automatically"}).')
+        db.session.commit()
+        flash('Automation added.', 'success')
+        return redirect(url_for('admin_automations'))
+
+    return render_template('admin_automation_form.html', automation=None, form=None,
+                            categories=available_categories, action_types=AUTOMATION_ACTIONS)
+
+
+@app.route('/admin/automations/<int:automation_id>/edit', methods=['GET', 'POST'])
+@require_super_admin
+def admin_automation_edit(automation_id):
+    automation = TicketAutomation.query.get_or_404(automation_id)
+    if request.method == 'POST':
+        action_type = request.form.get('action_type', '').strip()
+        require_confirmation = bool(request.form.get('require_confirmation'))
+        is_active = bool(request.form.get('is_active'))
+        if action_type not in AUTOMATION_ACTIONS:
+            flash('Choose an action.', 'error')
+            return render_template('admin_automation_form.html', automation=automation, form=None,
+                                    categories=None, action_types=AUTOMATION_ACTIONS)
+
+        automation.action_type = action_type
+        automation.require_confirmation = require_confirmation
+        automation.is_active = is_active
+        _log_activity('automation_edit',
+                       f'Edited automation: "{automation.ticket_category.name}" tickets → '
+                       f'{AUTOMATION_ACTIONS[action_type]} '
+                       f'({"confirm first" if require_confirmation else "runs automatically"}, '
+                       f'{"active" if is_active else "inactive"}).')
+        db.session.commit()
+        flash('Automation updated.', 'success')
+        return redirect(url_for('admin_automations'))
+
+    return render_template('admin_automation_form.html', automation=automation, form=None,
+                            categories=None, action_types=AUTOMATION_ACTIONS)
+
+
+@app.route('/admin/automations/<int:automation_id>/delete', methods=['POST'])
+@require_super_admin
+def admin_automation_delete(automation_id):
+    automation = TicketAutomation.query.get_or_404(automation_id)
+    category_name = automation.ticket_category.name
+    db.session.delete(automation)
+    _log_activity('automation_delete', f'Deleted automation for "{category_name}" tickets.')
+    db.session.commit()
+    flash('Automation deleted.', 'success')
+    return redirect(url_for('admin_automations'))
+
+
+@app.route('/admin/pending_actions/<int:action_id>/confirm', methods=['POST'])
+@require_permission('devices')
+def admin_pending_action_confirm(action_id):
+    """Runs a staged PendingDeviceAction now — the one-click confirm for an
+    automation that was configured to require it. Reachable from both the
+    triggering ticket's page and the device's own page."""
+    action = PendingDeviceAction.query.get_or_404(action_id)
+    fallback_url = url_for('admin_ticket_detail', ticket_id=action.ticket_id) if action.ticket_id \
+        else url_for('admin_asset_assign', asset_tag=action.asset_tag)
+    if action.status != 'pending':
+        flash('This action was already resolved.', 'info')
+        return redirect(request.referrer or fallback_url)
+
+    _, actor_label, _ = _current_actor()
+    status, message = _run_pending_device_action(action, resolved_by=actor_label)
+    flash(message, 'success' if status == 'ok' else 'error')
+    return redirect(request.referrer or fallback_url)
+
+
+@app.route('/admin/pending_actions/<int:action_id>/dismiss', methods=['POST'])
+@require_permission('devices')
+def admin_pending_action_dismiss(action_id):
+    """Declines a staged PendingDeviceAction without running it — e.g. the
+    ticket was mis-categorized, or the device turned out fine."""
+    action = PendingDeviceAction.query.get_or_404(action_id)
+    fallback_url = url_for('admin_ticket_detail', ticket_id=action.ticket_id) if action.ticket_id \
+        else url_for('admin_asset_assign', asset_tag=action.asset_tag)
+    if action.status != 'pending':
+        flash('This action was already resolved.', 'info')
+        return redirect(request.referrer or fallback_url)
+
+    _, actor_label, _ = _current_actor()
+    action.status = 'dismissed'
+    action.resolved_by_label = actor_label
+    action.resolved_at = datetime.utcnow()
+    action_label = AUTOMATION_ACTIONS.get(action.action_type, action.action_type)
+    _log_activity('automation_dismissed', f'Dismissed pending {action_label} for {action.asset_tag}.',
+                   ticket_id=action.ticket_id)
+    db.session.commit()
+    flash('Dismissed.', 'info')
+    return redirect(request.referrer or fallback_url)
+
+
+@app.route('/admin/assets/<string:asset_tag>/profile_clear', methods=['POST'])
+@require_permission('devices')
+def admin_asset_profile_clear(asset_tag):
+    """Manually sends a Google Workspace profile clear (WIPE_USERS) to this
+    device — the same action a Cryptohome Error automation can stage, but
+    available directly any time, without waiting for a matching ticket."""
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+    status, message = _execute_device_automation_action('profile_clear', asset_tag)
+    if status == 'ok':
+        _log_activity('device_profile_clear', f'Sent a profile clear (wipe local users) to {asset_tag}.',
+                       site_id=registry_row.site_id)
+        db.session.commit()
+    flash(message, 'success' if status == 'ok' else 'error')
+    return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
 # ─── Help (FAQ / How-To) ────────────────────────────────────────────────────────
@@ -7570,7 +7908,9 @@ def admin_help_delete(article_id):
 
 ACTIVITY_LOG_ACTIONS = [
     'device_add', 'device_edit', 'device_delete', 'device_assign', 'device_unassign', 'device_status',
-    'device_google_toggle',
+    'device_google_toggle', 'device_profile_clear',
+    'automation_add', 'automation_edit', 'automation_delete',
+    'automation_staged', 'automation_run', 'automation_dismissed',
     'registry_csv_import', 'registry_set_sites',
     'person_add', 'person_edit', 'person_delete', 'person_reactivate', 'people_csv_import', 'people_graduate',
     'loaner_toggle', 'loaner_label_edit', 'loaner_checkout', 'loaner_checkin', 'reminders_send',

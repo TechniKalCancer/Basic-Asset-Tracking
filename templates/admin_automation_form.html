@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit Automation' if automation else 'Add Automation' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;">
+  <h1 style="margin:0;">{{ 'Edit Automation' if automation else 'Add Automation' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/automations" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Ticket Category</label>
+      {% if automation %}
+      <input value="{{ automation.ticket_category.name }}" disabled />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        The category can't be changed here — delete this automation and add a new one on a different category instead.
+      </span>
+      {% else %}
+      <select name="ticket_category_id" required>
+        <option value="">— Choose —</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not categories %}
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--warning);">
+        Every ticket category already has an automation, or none exist yet — add/free up a category first.
+      </span>
+      {% endif %}
+      {% endif %}
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Action</label>
+      <select name="action_type" required>
+        <option value="">— Choose —</option>
+        {% for key, label in action_types.items() %}
+        <option value="{{ key }}" {{ 'selected' if automation and automation.action_type == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <label style="display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="require_confirmation" style="width:auto;margin-top:.2rem;"
+             {{ 'checked' if (automation.require_confirmation if automation else True) }} />
+      <span>
+        Require admin confirmation before running<br>
+        <span style="font-size:.78rem;">
+          Checked: a ticket in this category stages the action for a one-click confirm on the ticket/device page.
+          Unchecked: the action runs the instant a qualifying ticket is submitted, with no review.
+        </span>
+      </span>
+    </label>
+
+    {% if automation %}
+    <label style="display:flex;align-items:center;gap:.5rem;margin:1.5rem 0;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="is_active" style="width:auto;" {{ 'checked' if automation.is_active }} />
+      Active (a new ticket in this category will trigger the automation)
+    </label>
+    {% else %}
+    <div style="margin-bottom:1.5rem;"></div>
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">{{ 'Save Changes' if automation else 'Add Automation' }}</button>
+  </form>
+</div>
+{% endblock %}

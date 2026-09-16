@@ -371,6 +371,7 @@
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>
         <a href="/admin/ticket_categories">Categories</a>
+        {% if is_super_admin() %}<a href="/admin/automations">Automations</a>{% endif %}
       {% elif active_section == 'admin' %}
         <a href="/admin">Dashboard</a>
         {% if can('admin') %}

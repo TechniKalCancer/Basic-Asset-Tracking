@@ -809,11 +809,16 @@ class TicketCharge(db.Model):
 TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed']
 TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent']
 
-# Action types a TicketAutomation/PendingDeviceAction can run. Currently just
-# one — structured as a dict (rather than a bare string check) so a second
-# automated action is just one more entry plus one more branch in
-# _execute_device_automation_action, not a schema change.
-AUTOMATION_ACTIONS = {'profile_clear': 'Profile Clear (wipe local users)'}
+# Action types a TicketAutomation/PendingDeviceAction can run — structured as
+# a dict (rather than a bare string check) so one more automated action is
+# just one more entry plus one more branch in _execute_device_automation_action,
+# not a schema change.
+AUTOMATION_ACTIONS = {
+    'profile_clear': 'Profile Clear (wipe local users)',
+    'disable_google': 'Disable in Google Workspace',
+    'send_to_repair': 'Send to Repair',
+    'move_device': 'Move to Org Unit',
+}
 
 
 class TicketAutomation(db.Model):
@@ -836,14 +841,19 @@ class TicketAutomation(db.Model):
     attached) — nothing to act on otherwise.
     """
     __tablename__ = 'ticket_automation'
-    id                   = db.Column(db.Integer, primary_key=True)
-    ticket_category_id   = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=False, unique=True)
-    action_type          = db.Column(db.String(30), nullable=False)  # key into AUTOMATION_ACTIONS
-    require_confirmation = db.Column(db.Boolean, nullable=False, default=True)
-    is_active            = db.Column(db.Boolean, nullable=False, default=True)
-    created_at           = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    id                    = db.Column(db.Integer, primary_key=True)
+    ticket_category_id    = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=False, unique=True)
+    action_type           = db.Column(db.String(30), nullable=False)  # key into AUTOMATION_ACTIONS
+    require_confirmation  = db.Column(db.Boolean, nullable=False, default=True)
+    is_active             = db.Column(db.Boolean, nullable=False, default=True)
+    created_at            = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    # Only meaningful for specific action_types — nullable/unused otherwise,
+    # same reasoning as Repair.repair_category_id being optional.
+    repair_category_id    = db.Column(db.Integer, db.ForeignKey('repair_category.id'), nullable=True)  # 'send_to_repair'
+    target_org_unit_path  = db.Column(db.String(255), nullable=True)  # 'move_device'
 
-    ticket_category = db.relationship('TicketCategory')
+    ticket_category  = db.relationship('TicketCategory')
+    repair_category  = db.relationship('RepairCategory')
 
 
 class PendingDeviceAction(db.Model):
@@ -1964,6 +1974,25 @@ def _move_device_to_persons_ou(registry_row, person):
     device = _find_chromeos_device_by_serial(service, registry_row.serial_number)
     if not device:
         return
+    service.chromeosdevices().moveDevicesToOu(
+        customerId='my_customer', orgUnitPath=org_unit_path, body={'deviceIds': [device['deviceId']]},
+    ).execute()
+
+
+def move_chromeos_device_to_ou(serial_number, org_unit_path):
+    """
+    Moves a single Chromebook to a specific Google Workspace org unit path,
+    by serial number — the single-device, admin-picked-destination
+    counterpart to _move_device_to_persons_ou (destination = a person's own
+    OU) and _move_devices_to_ou_for_site (destination = a site's whole
+    loaner pool). Backs the 'move_device' automation action.
+
+    Raises LookupError if no matching device exists in the domain.
+    """
+    service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
+    device = _find_chromeos_device_by_serial(service, serial_number)
+    if not device:
+        raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
     service.chromeosdevices().moveDevicesToOu(
         customerId='my_customer', orgUnitPath=org_unit_path, body={'deviceIds': [device['deviceId']]},
     ).execute()
@@ -6764,12 +6793,15 @@ def admin_repair_category_delete(category_id):
     # reference through to a ForeignKeyViolation on delete.
     incident_count = Incident.query.filter_by(repair_category_id=category_id).count()
     repair_count = Repair.query.filter_by(repair_category_id=category_id).count()
-    if incident_count or repair_count:
+    automation_count = TicketAutomation.query.filter_by(repair_category_id=category_id).count()
+    if incident_count or repair_count or automation_count:
         parts = []
         if incident_count:
             parts.append(f'{incident_count} incident(s)')
         if repair_count:
             parts.append(f'{repair_count} repair(s)')
+        if automation_count:
+            parts.append(f'{automation_count} automation(s)')
         flash(f'Cannot delete "{category.name}" — {" and ".join(parts)} still reference it. Deactivate it instead.', 'error')
         return redirect(url_for('admin_repair_categories'))
     name = category.name
@@ -7124,24 +7156,31 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     return ticket
 
 
-def _execute_device_automation_action(action_type, asset_tag):
+def _execute_device_automation_action(action_type, asset_tag, ticket=None, automation=None):
     """
     Runs one automation action_type against a device by asset_tag —
-    currently only 'profile_clear' (Google WIPE_USERS) is implemented;
-    structured as a dispatch so a second action type is just one more
+    structured as a dispatch so one more action type is just one more
     branch here. Never raises — mirrors _checkin_loaner/_checkout_loaner's
     (status, message) contract so callers don't each need their own
     try/except around it.
+
+    ticket and automation are optional extra context some actions need:
+    'send_to_repair' pulls the issue description from the triggering
+    ticket (falling back to a generic one for the manual/no-ticket case),
+    and its repair category — like 'move_device's target org unit — comes
+    from the automation's own config, since neither has anywhere else to
+    come from when this fires automatically with no human filling out a
+    form.
     """
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
     if not registry_row:
         return 'error', f'"{asset_tag}" was not found in the asset registry.'
-    if not GOOGLE_SYNC_ENABLED:
-        return 'error', 'Google Workspace sync isn\'t configured yet.'
-    if not registry_row.serial_number:
-        return 'error', f'{asset_tag} has no serial number on file to look up.'
 
     if action_type == 'profile_clear':
+        if not GOOGLE_SYNC_ENABLED:
+            return 'error', 'Google Workspace sync isn\'t configured yet.'
+        if not registry_row.serial_number:
+            return 'error', f'{asset_tag} has no serial number on file to look up.'
         try:
             wipe_chromeos_device_users(registry_row.serial_number)
             return 'ok', f'Profile clear sent to {asset_tag} — runs next time the device checks in.'
@@ -7150,16 +7189,66 @@ def _execute_device_automation_action(action_type, asset_tag):
         except Exception as e:
             return 'error', f'Could not send profile clear: {e}'
 
+    if action_type == 'disable_google':
+        if not GOOGLE_SYNC_ENABLED:
+            return 'error', 'Google Workspace sync isn\'t configured yet.'
+        if not registry_row.serial_number:
+            return 'error', f'{asset_tag} has no serial number on file to look up.'
+        try:
+            set_chromeos_device_enabled(registry_row.serial_number, False)
+        except LookupError as e:
+            return 'error', str(e)
+        except Exception as e:
+            return 'error', f'Could not disable device: {e}'
+        asset = Asset.query.filter_by(asset_tag=asset_tag).first()
+        if not asset:
+            asset = Asset(asset_tag=asset_tag, is_valid=True)
+            db.session.add(asset)
+        asset.google_enabled = False
+        asset.google_last_sync_at = datetime.utcnow()
+        return 'ok', f'{asset_tag} disabled in Google Workspace.'
+
+    if action_type == 'send_to_repair':
+        repair_category_id = automation.repair_category_id if automation else None
+        if ticket:
+            issue_description = f'Auto-sent to repair via automation from ticket #{ticket.id}: {ticket.subject}'
+        else:
+            issue_description = f'Automated Send to Repair for {asset_tag}.'
+        return _send_device_to_repair(asset_tag, repair_category_id, None, issue_description, None, site_ids=None)
+
+    if action_type == 'move_device':
+        target_ou = automation.target_org_unit_path if automation else None
+        if not target_ou:
+            return 'error', 'No target org unit is configured on this automation.'
+        if not GOOGLE_SYNC_ENABLED:
+            return 'error', 'Google Workspace sync isn\'t configured yet.'
+        if not registry_row.serial_number:
+            return 'error', f'{asset_tag} has no serial number on file to look up.'
+        try:
+            move_chromeos_device_to_ou(registry_row.serial_number, target_ou)
+            return 'ok', f'{asset_tag} moved to {target_ou}.'
+        except LookupError as e:
+            return 'error', str(e)
+        except Exception as e:
+            return 'error', f'Could not move device: {e}'
+
     return 'error', f'Unknown automation action "{action_type}".'
 
 
-def _run_pending_device_action(action, resolved_by='Automatic'):
+def _run_pending_device_action(action, resolved_by='Automatic', automation=None):
     """Actually executes a staged PendingDeviceAction — called either
     immediately (its TicketAutomation skips confirmation) or from the
     admin confirm route. Updates the row's status/resolved fields and logs
     the outcome either way, then commits. resolved_by is the confirming
-    admin's actor_label, or 'Automatic' when no human was involved."""
-    status, message = _execute_device_automation_action(action.action_type, action.asset_tag)
+    admin's actor_label, or 'Automatic' when no human was involved.
+    automation is passed straight through when the immediate-fire caller
+    already has it in hand; the confirm route doesn't, so it's re-derived
+    here from the ticket's category — cheap, and avoids needing a second
+    FK just to remember which automation staged a given action."""
+    if automation is None and action.ticket:
+        automation = TicketAutomation.query.filter_by(ticket_category_id=action.ticket.category_id).first()
+    status, message = _execute_device_automation_action(
+        action.action_type, action.asset_tag, ticket=action.ticket, automation=automation)
     action.status = 'confirmed' if status == 'ok' else 'failed'
     action.error_message = None if status == 'ok' else message
     action.resolved_at = datetime.utcnow()
@@ -7204,7 +7293,7 @@ def _check_ticket_automation(ticket):
                        ticket_id=ticket.id)
         db.session.commit()
     else:
-        _run_pending_device_action(action, resolved_by='Automatic')
+        _run_pending_device_action(action, resolved_by='Automatic', automation=automation)
 
 
 @app.route('/submit_ticket', methods=['GET', 'POST'])
@@ -7671,33 +7760,53 @@ def admin_automations():
     return render_template('admin_automations.html', automations=automations, action_labels=AUTOMATION_ACTIONS)
 
 
+def _automation_form_extras():
+    """Repair categories and org units — only relevant to specific action
+    types (send_to_repair / move_device respectively), same catalogs
+    already used elsewhere (Send to Repair, Site's Loaner Org Unit)."""
+    repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
+    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
+    return repair_categories, org_units
+
+
 @app.route('/admin/automations/new', methods=['GET', 'POST'])
 @require_super_admin
 def admin_automation_new():
     available_categories = TicketCategory.query.filter(
         ~TicketCategory.id.in_(db.session.query(TicketAutomation.ticket_category_id))
     ).order_by(TicketCategory.name).all()
+    repair_categories, org_units = _automation_form_extras()
     if request.method == 'POST':
         ticket_category_id = request.form.get('ticket_category_id', type=int)
         action_type = request.form.get('action_type', '').strip()
         require_confirmation = bool(request.form.get('require_confirmation'))
+        repair_category_id = request.form.get('repair_category_id', type=int)
+        target_org_unit_path = request.form.get('target_org_unit_path', '').strip() or None
+
+        def _redisplay():
+            return render_template('admin_automation_form.html', automation=None, form=request.form,
+                                    categories=available_categories, action_types=AUTOMATION_ACTIONS,
+                                    repair_categories=repair_categories, org_units=org_units)
+
         if not ticket_category_id or not TicketCategory.query.get(ticket_category_id):
             flash('Choose a ticket category.', 'error')
-            return render_template('admin_automation_form.html', automation=None, form=request.form,
-                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+            return _redisplay()
         if action_type not in AUTOMATION_ACTIONS:
             flash('Choose an action.', 'error')
-            return render_template('admin_automation_form.html', automation=None, form=request.form,
-                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+            return _redisplay()
         if TicketAutomation.query.filter_by(ticket_category_id=ticket_category_id).first():
             flash('That category already has an automation — edit it instead of adding another.', 'error')
-            return render_template('admin_automation_form.html', automation=None, form=request.form,
-                                    categories=available_categories, action_types=AUTOMATION_ACTIONS)
+            return _redisplay()
+        if action_type == 'move_device' and not target_org_unit_path:
+            flash('Choose a target org unit for a Move to Org Unit automation.', 'error')
+            return _redisplay()
 
         category = TicketCategory.query.get(ticket_category_id)
         db.session.add(TicketAutomation(
             ticket_category_id=ticket_category_id, action_type=action_type,
             require_confirmation=require_confirmation,
+            repair_category_id=repair_category_id if action_type == 'send_to_repair' else None,
+            target_org_unit_path=target_org_unit_path if action_type == 'move_device' else None,
         ))
         _log_activity('automation_add',
                        f'Added automation: "{category.name}" tickets → {AUTOMATION_ACTIONS[action_type]}'
@@ -7707,25 +7816,37 @@ def admin_automation_new():
         return redirect(url_for('admin_automations'))
 
     return render_template('admin_automation_form.html', automation=None, form=None,
-                            categories=available_categories, action_types=AUTOMATION_ACTIONS)
+                            categories=available_categories, action_types=AUTOMATION_ACTIONS,
+                            repair_categories=repair_categories, org_units=org_units)
 
 
 @app.route('/admin/automations/<int:automation_id>/edit', methods=['GET', 'POST'])
 @require_super_admin
 def admin_automation_edit(automation_id):
     automation = TicketAutomation.query.get_or_404(automation_id)
+    repair_categories, org_units = _automation_form_extras()
     if request.method == 'POST':
         action_type = request.form.get('action_type', '').strip()
         require_confirmation = bool(request.form.get('require_confirmation'))
         is_active = bool(request.form.get('is_active'))
+        repair_category_id = request.form.get('repair_category_id', type=int)
+        target_org_unit_path = request.form.get('target_org_unit_path', '').strip() or None
         if action_type not in AUTOMATION_ACTIONS:
             flash('Choose an action.', 'error')
             return render_template('admin_automation_form.html', automation=automation, form=None,
-                                    categories=None, action_types=AUTOMATION_ACTIONS)
+                                    categories=None, action_types=AUTOMATION_ACTIONS,
+                                    repair_categories=repair_categories, org_units=org_units)
+        if action_type == 'move_device' and not target_org_unit_path:
+            flash('Choose a target org unit for a Move to Org Unit automation.', 'error')
+            return render_template('admin_automation_form.html', automation=automation, form=None,
+                                    categories=None, action_types=AUTOMATION_ACTIONS,
+                                    repair_categories=repair_categories, org_units=org_units)
 
         automation.action_type = action_type
         automation.require_confirmation = require_confirmation
         automation.is_active = is_active
+        automation.repair_category_id = repair_category_id if action_type == 'send_to_repair' else None
+        automation.target_org_unit_path = target_org_unit_path if action_type == 'move_device' else None
         _log_activity('automation_edit',
                        f'Edited automation: "{automation.ticket_category.name}" tickets → '
                        f'{AUTOMATION_ACTIONS[action_type]} '
@@ -7736,7 +7857,8 @@ def admin_automation_edit(automation_id):
         return redirect(url_for('admin_automations'))
 
     return render_template('admin_automation_form.html', automation=automation, form=None,
-                            categories=None, action_types=AUTOMATION_ACTIONS)
+                            categories=None, action_types=AUTOMATION_ACTIONS,
+                            repair_categories=repair_categories, org_units=org_units)
 
 
 @app.route('/admin/automations/<int:automation_id>/delete', methods=['POST'])

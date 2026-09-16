@@ -21,6 +21,7 @@
       <tr>
         <th>Ticket Category</th>
         <th>Action</th>
+        <th>Details</th>
         <th>Confirmation</th>
         <th>Status</th>
         <th></th>
@@ -31,6 +32,15 @@
       <tr>
         <td>{{ a.ticket_category.name }}</td>
         <td>{{ action_labels.get(a.action_type, a.action_type) }}</td>
+        <td style="color:var(--muted);font-size:.85rem;">
+          {% if a.action_type == 'send_to_repair' %}
+            {{ a.repair_category.name if a.repair_category else 'No category' }}
+          {% elif a.action_type == 'move_device' %}
+            {{ a.target_org_unit_path or '—' }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
         <td>
           {% if a.require_confirmation %}
           <span class="badge badge-yellow">Admin confirms first</span>
@@ -49,7 +59,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No automations yet.</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem;">No automations yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -35,12 +35,39 @@
 
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Action</label>
-      <select name="action_type" required>
+      <select name="action_type" id="actionTypeSelect" required onchange="updateAutomationFieldVisibility()">
         <option value="">— Choose —</option>
         {% for key, label in action_types.items() %}
         <option value="{{ key }}" {{ 'selected' if automation and automation.action_type == key }}>{{ label }}</option>
         {% endfor %}
       </select>
+    </div>
+
+    <div id="sendToRepairFields" style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Repair Category (optional)</label>
+      <select name="repair_category_id">
+        <option value="">— None —</option>
+        {% for c in repair_categories %}
+        <option value="{{ c.id }}" {{ 'selected' if automation and automation.repair_category_id == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Classifies the auto-opened repair, same as picking one manually on Send to Repair.
+      </span>
+    </div>
+
+    <div id="moveDeviceFields" style="margin-bottom:1rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Target Org Unit</label>
+      <select name="target_org_unit_path">
+        <option value="">— Choose —</option>
+        {% for ou in org_units %}
+        <option value="{{ ou.org_unit_path }}" {{ 'selected' if automation and automation.target_org_unit_path == ou.org_unit_path }}>{{ ou.org_unit_path }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        Where the device moves to in Google Workspace. Refresh the list at
+        <a href="/admin/google_org_units">Org Units</a> if the one you want isn't here.
+      </span>
     </div>
 
     <label style="display:flex;align-items:flex-start;gap:.5rem;margin-bottom:.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
@@ -67,4 +94,12 @@
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if automation else 'Add Automation' }}</button>
   </form>
 </div>
+<script>
+  function updateAutomationFieldVisibility() {
+    var actionType = document.getElementById('actionTypeSelect').value;
+    document.getElementById('sendToRepairFields').style.display = (actionType === 'send_to_repair') ? '' : 'none';
+    document.getElementById('moveDeviceFields').style.display = (actionType === 'move_device') ? '' : 'none';
+  }
+  updateAutomationFieldVisibility();
+</script>
 {% endblock %}

@@ -310,6 +310,18 @@
           {% endif %}
         </div>
         <span class="spacer"></span>
+        {% if is_super_admin() and all_sites %}
+        <form method="POST" action="/admin/set_active_site" style="display:inline-flex;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <select name="site_id" onchange="this.form.submit()" title="Switch which site's data you're viewing"
+                  style="font-size:.82rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);">
+            <option value="">🌐 All Locations</option>
+            {% for s in all_sites %}
+            <option value="{{ s.id }}" {{ 'selected' if active_site and active_site.id == s.id }}>📍 {{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        {% endif %}
         <form class="nav-search" method="GET" action="/admin/search">
           <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
           <button type="submit" title="Search">🔎</button>

@@ -564,6 +564,13 @@ class Event(db.Model):
         }
 
 
+# Where a named User lands right after logging in — key into this dict,
+# stored on User.default_landing. 'dashboard' is the long-standing default;
+# 'loaners' exists for an admin whose day-to-day job is really the loaner
+# pool and would rather skip the Dashboard detour every time.
+LANDING_PAGES = {'dashboard': 'Dashboard', 'loaners': 'Loaner Pool'}
+
+
 class User(db.Model):
     """
     A named admin account with per-area permissions. Layered on top of the
@@ -588,8 +595,16 @@ class User(db.Model):
     can_manage_users = db.Column(db.Boolean, nullable=False, default=False)  # add/edit/delete User accounts, narrower than is_admin (can't grant is_admin/is_super_admin)
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    default_landing = db.Column(db.String(20), nullable=False, default='dashboard')  # key into LANDING_PAGES — where login sends this user
+    # A super admin's own standing "which site am I looking at" preference —
+    # None means all sites (this app's normal super-admin default). Only
+    # meaningful for a super admin; a site-scoped user's view is always just
+    # their own `sites` list regardless of this. Set via the switcher in the
+    # nav (/admin/set_active_site), not this form — see _current_site_ids().
+    default_site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
 
     sites = db.relationship('Site', secondary='user_site', backref='users')
+    default_site = db.relationship('Site', foreign_keys=[default_site_id])
 
 
 class KioskDevice(db.Model):
@@ -2252,15 +2267,27 @@ def _current_user():
 
 def _current_site_ids():
     """
-    None = unrestricted (super admin, or the legacy shared-password login).
-    Otherwise the list of site_ids the current session may see/act on.
-    Empty list = sees nothing — e.g. a named user not yet assigned any site,
-    or a kiosk enrolled without one. Only meaningful inside a route already
-    gated by login_required/require_permission/kiosk_or_login_required, since
-    it trusts the session is already valid rather than re-checking expiry.
+    None = unrestricted (super admin viewing all locations, or the legacy
+    shared-password login). Otherwise the list of site_ids the current
+    session may see/act on. Empty list = sees nothing — e.g. a named user
+    not yet assigned any site, or a kiosk enrolled without one. Only
+    meaningful inside a route already gated by
+    login_required/require_permission/kiosk_or_login_required, since it
+    trusts the session is already valid rather than re-checking expiry.
+
+    A super admin can narrow this to one site at a time via the switcher
+    in the nav (see admin_set_active_site) — that preference lives on
+    User.default_site_id (persists across logins, not just this session)
+    rather than session state, so every _scope_* helper in the app
+    (registry, people, tickets, repairs, loaners, activity log, dashboard,
+    nav badges — anything already keying off this function) narrows
+    automatically the moment it's set, with no per-route changes needed.
     """
     if session.get('admin_logged_in'):
         if session.get('is_super_admin'):
+            user = _current_user()
+            if user and user.default_site_id:
+                return [user.default_site_id]
             return None
         user = _current_user()
         return [s.id for s in user.sites] if user else []
@@ -2579,11 +2606,16 @@ def inject_permission_helper():
     nav_overdue_count = 0
     nav_orphan_count = 0
     nav_open_tickets_count = 0
+    all_sites = []
+    active_site = None
     if session.get('admin_logged_in'):
         if _has_permission('admin'):
             nav_overdue_count = len(_overdue_assignments(_current_site_ids()))
         if session.get('is_super_admin'):
             nav_orphan_count = Asset.query.filter_by(is_valid=False).count()
+            all_sites = Site.query.order_by(Site.name).all()
+            user = _current_user()
+            active_site = user.default_site if user else None
         if _has_permission('tickets'):
             nav_open_tickets_count = _scope_tickets(Ticket.query, _current_site_ids()) \
                 .filter(Ticket.status.in_(['open', 'in_progress'])).count()
@@ -2594,18 +2626,34 @@ def inject_permission_helper():
         'nav_overdue_count': nav_overdue_count,
         'nav_orphan_count': nav_orphan_count,
         'nav_open_tickets_count': nav_open_tickets_count,
+        'all_sites': all_sites,
+        'active_site': active_site,
         'branding': _current_branding(),
         'active_section': _active_nav_section(),
         'google_sync_enabled': GOOGLE_SYNC_ENABLED,
         'kace_sync_enabled': KACE_SYNC_ENABLED,
+        'landing_pages': LANDING_PAGES,
     }
+
+
+def _post_login_redirect(user):
+    """Where to send someone right after logging in (or when they revisit
+    /admin/login already logged in) — normally the Dashboard, but honors a
+    named User's own default_landing preference (set on their Edit User
+    page) when they actually still have permission to see it there, so a
+    stale preference from a since-revoked permission doesn't bounce them
+    to an error page instead. The legacy shared-password login has no User
+    row (user=None here), so it always lands on the Dashboard."""
+    if user and user.default_landing == 'loaners' and _has_permission('loaners'):
+        return url_for('admin_loaners')
+    return url_for('admin_panel')
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     # Redirect already-logged-in admins
     if session.get('admin_logged_in'):
-        return redirect(url_for('admin_panel'))
+        return redirect(_post_login_redirect(_current_user()))
 
     if request.method == 'POST':
         ip = request.remote_addr
@@ -2639,7 +2687,7 @@ def admin_login():
                 session['is_super_admin'] = user.is_super_admin
                 session['last_active'] = datetime.now(timezone.utc).timestamp()
                 session.permanent = True
-                return redirect(url_for('admin_panel'))
+                return redirect(_post_login_redirect(user))
 
         _record_attempt(ip)
         attempts_left = MAX_ATTEMPTS - len(_login_attempts[ip])
@@ -2701,6 +2749,39 @@ def admin_panel():
     non_available_explicit = sum(v for k, v in explicit_counts.items() if k != 'available')
     status_counts = {s: explicit_counts.get(s, 0) for s in ASSET_STATUSES}
     status_counts['available'] = registry_count - non_available_explicit
+
+    # Device-type mix (Chromebooks vs chargers vs iPads, etc.) and a direct
+    # assigned/unassigned split by Asset.assigned_to_id — distinct from
+    # status_counts above, which tracks the manually-set status field
+    # (a device can be unassigned but still 'repair'/'lost', for instance).
+    device_type_counts = None
+    assigned_count = unassigned_count = None
+    if _has_permission('devices'):
+        type_counts = dict(
+            _scope_registry(AssetRegistry.query, site_ids)
+            .with_entities(AssetRegistry.device_type, db.func.count(AssetRegistry.asset_tag))
+            .group_by(AssetRegistry.device_type).all()
+        )
+        device_type_counts = {t: type_counts.get(t, 0) for t in DEVICE_TYPES}
+
+        assigned_count = _scope_registry(AssetRegistry.query, site_ids) \
+            .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag) \
+            .filter(Asset.assigned_to_id.isnot(None)).count()
+        unassigned_count = registry_count - assigned_count
+
+    # Fleet-wide Google Workspace coverage — how much of the in-scope
+    # registry has ever been synced, and its last-known enabled/disabled
+    # split. Cheap: three small count()s off the same base join.
+    google_stats = None
+    if GOOGLE_SYNC_ENABLED and _has_permission('devices'):
+        google_base = _scope_registry(AssetRegistry.query, site_ids) \
+            .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
+        google_stats = {
+            'synced_count':   google_base.filter(Asset.google_last_sync_at.isnot(None)).count(),
+            'enabled_count':  google_base.filter(Asset.google_enabled.is_(True)).count(),
+            'disabled_count': google_base.filter(Asset.google_enabled.is_(False)).count(),
+        }
+
     overdue_count = len(_overdue_assignments(site_ids))
     warranty_expiring_count = _filter_registry_by_warranty(
         _scope_registry(AssetRegistry.query, site_ids), 'expiring').count()
@@ -2775,6 +2856,10 @@ def admin_panel():
                            orphan_count=orphan_count,
                            people_count=people_count,
                            status_counts=status_counts,
+                           device_type_counts=device_type_counts,
+                           assigned_count=assigned_count,
+                           unassigned_count=unassigned_count,
+                           google_stats=google_stats,
                            overdue_count=overdue_count,
                            warranty_expiring_count=warranty_expiring_count,
                            open_tickets_count=open_tickets_count,
@@ -5344,8 +5429,13 @@ def admin_user_new():
         if site_ids is not None:
             selected_site_ids = [s for s in selected_site_ids if s in site_ids]
 
+        default_landing = request.form.get('default_landing', 'dashboard').strip()
+        if default_landing not in LANDING_PAGES:
+            default_landing = 'dashboard'
+
         user = User(username=username, password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
-                     is_super_admin=wants_super_admin, **_user_form_permissions(bool(session.get('is_admin'))))
+                     is_super_admin=wants_super_admin, default_landing=default_landing,
+                     **_user_form_permissions(bool(session.get('is_admin'))))
         if not wants_super_admin:
             user.sites = Site.query.filter(Site.id.in_(selected_site_ids)).all()
         db.session.add(user)
@@ -5368,6 +5458,8 @@ def admin_user_edit(user_id):
         for field, value in _user_form_permissions(bool(session.get('is_admin'))).items():
             setattr(user, field, value)
         user.is_active = bool(request.form.get('is_active'))
+        default_landing = request.form.get('default_landing', 'dashboard').strip()
+        user.default_landing = default_landing if default_landing in LANDING_PAGES else 'dashboard'
 
         if site_ids is None:  # only a super admin can change super-admin status
             user.is_super_admin = bool(request.form.get('is_super_admin'))
@@ -5612,6 +5704,26 @@ def admin_emails():
                            sample_vars=_email_template_sample_vars())
 
 
+@app.route('/admin/set_active_site', methods=['POST'])
+@require_super_admin
+def admin_set_active_site():
+    """Lets a super admin narrow their standing view to one site (or back
+    to all) — persisted on their own User row (default_site_id), so it's a
+    real default that survives logout/login, not just a per-session toggle.
+    The shared legacy login has no User row to store this on, so it always
+    stays unrestricted. See _current_site_ids() for where this takes effect."""
+    user = _current_user()
+    if not user:
+        flash('The shared admin login can\'t narrow to one site — log in with a named account to use this.', 'info')
+        return redirect(request.referrer or url_for('admin_panel'))
+    site_id = request.form.get('site_id', type=int)
+    site = Site.query.get(site_id) if site_id else None
+    user.default_site_id = site.id if site else None
+    db.session.commit()
+    flash(f'Now viewing {site.name}.' if site else 'Now viewing all locations.', 'success')
+    return redirect(request.referrer or url_for('admin_panel'))
+
+
 # ─── Sites ────────────────────────────────────────────────────────────────────
 
 @app.route('/admin/sites')
@@ -5725,6 +5837,7 @@ def admin_site_delete(site_id):
         Ticket.query.filter_by(site_id=site.id).update({'site_id': None})
         ActivityLog.query.filter_by(site_id=site.id).update({'site_id': None})
         GoogleOrgUnit.query.filter_by(site_id=site.id).update({'site_id': None})
+        User.query.filter_by(default_site_id=site.id).update({'default_site_id': None})
         db.session.delete(site)
         _log_activity('site_delete', f'Deleted site "{site_name}".')
         db.session.commit()

@@ -27,6 +27,9 @@
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
     ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>
+  {% if is_super_admin() %}
+  <span class="badge badge-blue">{{ '📍 ' ~ active_site.name if active_site else '🌐 All Locations' }}</span>
+  {% endif %}
 </div>
 
 {% if is_super_admin() and fresh_install %}
@@ -67,6 +70,16 @@
       <div class="lbl">Assets in Registry</div>
     </div>
   </a>
+  {% if assigned_count is not none %}
+  <div class="stat-card">
+    <div class="num" style="color:var(--accent);">{{ assigned_count }}</div>
+    <div class="lbl">Assigned to Someone</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="color:var(--success);">{{ unassigned_count }}</div>
+    <div class="lbl">Unassigned</div>
+  </div>
+  {% endif %}
   {% if warranty_expiring_count %}
   <a href="/admin/registry?warranty=expiring" style="text-decoration:none;">
     <div class="stat-card">
@@ -186,6 +199,51 @@
       </div>
     </a>
     {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if device_type_counts %}
+<!-- Device type breakdown -->
+<div class="card">
+  <h2>💻 Devices by Type</h2>
+  <div class="stat-grid">
+    {% for t, count in device_type_counts.items() %}
+    {% if count %}
+    <a href="/admin/registry?device_type={{ t }}" style="text-decoration:none;">
+      <div class="stat-card">
+        <div class="num">{{ count }}</div>
+        <div class="lbl">{{ t|capitalize }}{{ 's' if t != 'other' }}</div>
+      </div>
+    </a>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if google_stats %}
+<!-- Google Workspace coverage -->
+<div class="card">
+  <h2 style="display:flex;align-items:center;gap:.6rem;">
+    🔗 Google Workspace
+    {% if is_super_admin() %}
+    <a href="/admin/google_field_mapping?entity=device" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">Manage →</a>
+    {% endif %}
+  </h2>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="num">{{ google_stats.synced_count }} / {{ registry_count }}</div>
+      <div class="lbl">Devices Synced from Google</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="color:var(--success);">{{ google_stats.enabled_count }}</div>
+      <div class="lbl">Enabled in Google</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="color:var(--danger);">{{ google_stats.disabled_count }}</div>
+      <div class="lbl">Disabled in Google</div>
+    </div>
   </div>
 </div>
 {% endif %}

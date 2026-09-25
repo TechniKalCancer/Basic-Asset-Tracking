@@ -25,6 +25,16 @@
       <input type="password" name="password" autocomplete="new-password" {{ 'required' if not user }} />
     </div>
 
+    <div style="margin-bottom:1.5rem;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Default Landing Page</label>
+      <select name="default_landing">
+        {% for key, label in landing_pages.items() %}
+        <option value="{{ key }}" {{ 'selected' if (user.default_landing if user else 'dashboard') == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">Where this account lands right after logging in.</span>
+    </div>
+
     {% set user_site_ids = user.sites|map(attribute='id')|list if user else [] %}
     {% if is_super_admin() %}
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1rem;cursor:pointer;">

@@ -1,7 +1,8 @@
 {% extends 'base.html' %}
 {% block title %}Submit a Ticket{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
-<h1>🎫 Submit a Ticket</h1>
+<h1>{{ icon('ticket') }}Submit a Ticket</h1>
 
 <div class="card" style="max-width:480px;">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
@@ -9,7 +10,7 @@
     scan or type its asset tag/serial too — otherwise leave that blank.
   </p>
 
-  <form method="POST" style="position:relative;">
+  <form method="POST" enctype="multipart/form-data" style="position:relative;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;position:relative;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Your Name</label>
@@ -40,6 +41,7 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">What's going on?</label>
       <textarea name="description" rows="4" placeholder="Describe the issue…" style="width:100%;resize:vertical;" required></textarea>
     </div>
+    {{ macros.photo_input() }}
     <button type="submit" class="btn btn-primary">Submit Ticket</button>
   </form>
   <script src="/static/js/person_search.js"></script>

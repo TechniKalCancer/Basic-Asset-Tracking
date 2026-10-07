@@ -1,48 +1,48 @@
 {% extends 'base.html' %}
-{% block title %}Admin Panel{% endblock %}
+{% block title %}Dashboard{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">⚙️ Admin Panel</h1>
+  <h1 style="margin:0;">{{ icon('dashboard') }}Dashboard</h1>
   {% if is_super_admin() %}
   <a href="/admin/google_setup" style="text-decoration:none;">
     <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
-      🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+      {{ icon('integration') }}Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
     </span>
   </a>
   {% else %}
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
-    🔗 Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
+    {{ icon('integration') }}Google Sync: {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
   {% endif %}
   {% if google_loaner_autodisable_active %}
-  <span class="badge badge-blue">🔒 Loaner Auto-Disable: Active</span>
+  <span class="badge badge-blue">{{ icon('lock') }}Loaner Auto-Disable: Active</span>
   {% endif %}
   {% if is_super_admin() %}
   <a href="/admin/branding" style="text-decoration:none;">
     <span class="badge {{ 'badge-green' if branding_configured else 'badge-yellow' }}">
-      🎨 Branding: {{ 'Configured' if branding_configured else 'Default' }}
+      {{ icon('branding') }}Branding: {{ 'Configured' if branding_configured else 'Default' }}
     </span>
   </a>
   {% endif %}
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
-    ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
+    {{ icon('email') }}Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>
   {% if is_super_admin() %}
-  <span class="badge badge-blue">{{ '📍 ' ~ active_site.name if active_site else '🌐 All Locations' }}</span>
+  <span class="badge badge-blue">{{ '' ~ active_site.name if active_site else 'All Locations' }}</span>
   {% endif %}
 </div>
 
 {% if is_super_admin() and fresh_install %}
 <div class="card" style="display:flex;align-items:center;gap:1rem;background:var(--surface2);">
-  <span>👋 Welcome! This looks like a brand-new install — create your first site to get started.</span>
+  <span>Welcome! This looks like a brand-new install — create your first site to get started.</span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/sites/new" class="btn btn-primary">🏫 Create Site</a>
+  <a href="/admin/sites/new" class="btn btn-primary">{{ icon('site') }}Create Site</a>
 </div>
 {% endif %}
 
 {% if is_super_admin() and dev_secrets_in_use %}
 <div class="card" style="display:flex;align-items:center;gap:1rem;">
-  <span style="color:var(--danger);">⚠️ Still running on the default dev <code>SECRET_KEY</code> and/or <code>ADMIN_PASSWORD</code>. Set both to real values in <code>.env</code> and restart before this is reachable outside your own network.</span>
+  <span style="color:var(--danger);">{{ icon('warning') }}Still running on the default dev <code>SECRET_KEY</code> and/or <code>ADMIN_PASSWORD</code>. Set both to real values in <code>.env</code> and restart before this is reachable outside your own network.</span>
 </div>
 {% endif %}
 
@@ -50,7 +50,7 @@
 <div class="card" style="display:flex;align-items:center;gap:1rem;">
   <span style="color:var(--danger);">{{ overdue_count }} assignment{{ 's are' if overdue_count != 1 else ' is' }} overdue for return.</span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/reminders" class="btn btn-primary">⏰ View Overdue</a>
+  <a href="/admin/reminders" class="btn btn-primary">{{ icon('schedule') }}View Overdue</a>
 </div>
 {% endif %}
 
@@ -58,7 +58,7 @@
 <div class="card" style="display:flex;align-items:center;gap:1rem;">
   <span style="color:var(--warning);">{{ orphan_count }} scan{{ 's' if orphan_count != 1 }} recorded against unknown asset tag{{ 's' if orphan_count != 1 }} (orphaned records).</span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">⚠️ View Orphans</a>
+  <a href="/admin/orphans" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">{{ icon('warning') }}View Orphans</a>
 </div>
 {% endif %}
 
@@ -97,6 +97,14 @@
   </a>
   {% endif %}
   {% endif %}
+  {% if data_quality_errors is not none %}
+  <a href="/admin/data_quality" style="text-decoration:none;">
+    <div class="stat-card">
+      <div class="num" style="color:{{ 'var(--danger)' if data_quality_errors else 'var(--success)' }}">{{ data_quality_errors }}</div>
+      <div class="lbl">Data Problems to Fix</div>
+    </div>
+  </a>
+  {% endif %}
   {% if can('people') %}
   <a href="/admin/people" style="text-decoration:none;">
     <div class="stat-card">
@@ -131,15 +139,125 @@
   {% endif %}
 </div>
 
+{% if violators is not none %}
+<div class="card violators-card">
+  <div style="display:flex;align-items:flex-start;gap:.8rem;margin-bottom:.9rem;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0;display:flex;align-items:center;gap:.5rem;">{{ icon('flag') }}Possible Violators
+        {% if violators.high %}<span class="badge badge-red">{{ violators.high|length }}</span>{% endif %}</h2>
+      <div style="color:var(--muted);font-size:.8rem;margin-top:.15rem;">
+        Students signing in to devices that aren't theirs, per Google · devices online in the last {{ violators.window_days }} days
+      </div>
+    </div>
+    <a href="/admin/signin_mismatches" class="btn btn-ghost" style="margin-left:auto;padding:.25rem .65rem;font-size:.78rem;">View all →</a>
+  </div>
+  {% if violators.high %}
+  <div class="violator-list">
+    {% for m in violators.high[:6] %}
+    <a class="violator-row" href="/admin/assets/{{ m.asset_tag }}/assign">
+      <span class="badge badge-red" style="flex:none;">{{ m.label }}</span>
+      <span class="violator-main">
+        <strong>{{ m.signer.full_name if m.signer else m.signin_email }}</strong>
+        on <code>{{ m.asset_tag }}</code>
+        <span class="violator-sub">
+          {% if m.expected %}assigned to {{ m.expected|map(attribute='full_name')|join(', ') }}{% elif m.asset.status in ['lost', 'retired'] %}marked {{ m.asset.status }}{% else %}not assigned{% endif %}
+          · {{ m.last_activity|ago }}
+        </span>
+      </span>
+      {% if m.foreign_count > 1 %}<span class="violator-repeat">on {{ m.foreign_count }} devices</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  {% if violators.high|length > 6 %}<div style="font-size:.8rem;color:var(--muted);margin-top:.6rem;">+{{ violators.high|length - 6 }} more</div>{% endif %}
+  {% else %}
+  <p style="color:var(--success);font-size:.9rem;margin:0;">{{ icon('success') }}No likely violations — every flagged sign-in is low-risk or already reviewed.</p>
+  {% endif %}
+  {% if violators.medium_count or violators.low_count %}
+  <div style="font-size:.8rem;color:var(--muted);margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--border);">
+    {% if violators.medium_count %}<a class="tag-link" href="/admin/signin_mismatches?severity=medium">{{ violators.medium_count }} to check</a>{% endif %}
+    {% if violators.medium_count and violators.low_count %} · {% endif %}
+    {% if violators.low_count %}<a class="tag-link" href="/admin/signin_mismatches?severity=low">{{ violators.low_count }} probably fine</a>{% endif %}
+    (unassigned devices in use, unknown accounts, staff and previous-holder sign-ins)
+  </div>
+  {% endif %}
+</div>
+<style>
+  .violator-list { display: flex; flex-direction: column; }
+  .violator-row { display: flex; align-items: center; gap: .7rem; padding: .55rem .4rem; border-top: 1px solid var(--border);
+    color: var(--text); text-decoration: none; border-radius: 6px; }
+  .violator-row:first-child { border-top: none; }
+  .violator-row:hover { background: var(--surface2); }
+  .violator-row > .badge { width: 205px; text-align: center; white-space: nowrap; }
+  .violator-main { flex: 1; min-width: 0; font-size: .88rem; }
+  .violator-sub { display: block; color: var(--muted); font-size: .78rem; margin-top: .1rem; }
+  .violator-repeat { flex: none; font-size: .75rem; color: var(--danger); border: 1px solid var(--danger); border-radius: 99px; padding: .05rem .5rem; }
+  @media (max-width: 760px) { .violator-row { flex-wrap: wrap; } .violator-row > .badge { width: auto; } .violator-main { flex-basis: 100%; } }
+</style>
+{% endif %}
+
+{% if charts %}
+<div class="viz-grid">
+  {% for chart in charts %}
+  <div class="card viz-card">
+    <div class="viz-head">
+      <div>
+        <h2>{{ chart.title }}</h2>
+        <div class="viz-sub">{{ chart.subtitle }}</div>
+      </div>
+      <a href="{{ chart.link }}" class="btn btn-ghost viz-more">View →</a>
+    </div>
+    <div class="viz" data-chart-id="{{ chart.id }}"><script type="application/json">{{ chart|tojson }}</script></div>
+  </div>
+  {% endfor %}
+</div>
+<style>
+  /* Dashboard chart tokens — the app is dark-only, so these are the dark
+     steps of the reference categorical palette, validated against --surface. */
+  .viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+  .viz-grid .card { margin-bottom: 0; }
+  .viz-card { --viz-series-1: #3987e5; --viz-series-2: #d95926; overflow: visible !important; }
+  .viz-head { display: flex; align-items: flex-start; gap: .8rem; margin-bottom: .8rem; }
+  .viz-head h2 { margin: 0; font-size: 1rem; }
+  .viz-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+  .viz-more { margin-left: auto; padding: .25rem .65rem; font-size: .78rem; min-height: 0 !important; white-space: nowrap; }
+  .viz { position: relative; width: 100%; }
+  .viz-svg { display: block; overflow: visible; }
+  .viz-svg .viz-gridline { stroke: var(--border); stroke-width: 1; }
+  .viz-svg .viz-axis { stroke: #3d4366; stroke-width: 1; }
+  .viz-svg .viz-tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .viz-svg .viz-label { fill: var(--text); font-size: 12.5px; }
+  .viz-svg .viz-value { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .viz-svg .viz-hit { fill: transparent; cursor: default; outline: none; }
+  .viz-svg .viz-mark.viz-hover path { filter: brightness(1.25); }
+  .viz-svg .viz-hit:focus-visible { stroke: var(--text); stroke-width: 1; }
+  .viz-legend { display: flex; gap: 1rem; font-size: .8rem; color: var(--muted); margin-bottom: .5rem; }
+  .viz-legend > span { display: inline-flex; align-items: center; gap: .4rem; }
+  .viz-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .viz-empty { color: var(--muted); font-size: .88rem; padding: 2rem 0; text-align: center; }
+  .viz-table { margin-top: .6rem; font-size: .8rem; }
+  .viz-table summary { color: var(--muted); cursor: pointer; }
+  .viz-table table { margin-top: .4rem; }
+  .viz-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .viz-tooltip {
+    display: none; position: fixed; z-index: 2000; pointer-events: none; max-width: 260px;
+    background: #0b0d13; border: 1px solid var(--border); border-radius: 8px; padding: .45rem .65rem;
+    font-size: .8rem; color: var(--muted); box-shadow: 0 6px 18px rgba(0,0,0,.4);
+  }
+  .viz-tooltip strong { display: block; color: var(--text); font-size: .95rem; }
+  .viz-tooltip-detail { margin-top: .15rem; font-size: .75rem; }
+</style>
+<script src="/static/js/charts.js"></script>
+{% endif %}
+
 {% if person_schedule and device_schedule %}
 <!-- Sync status -->
 <div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
-    🔄 Sync Status
+    {{ icon('sync') }}Sync Status
     <a href="/admin/sync_schedule" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">Manage →</a>
   </h2>
   <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:1rem;">
-    {% for label, schedule in [('👤 People', person_schedule), ('💻 Device', device_schedule), ('🖥️ KACE', kace_schedule)] %}
+    {% for label, schedule in [('People', person_schedule), ('Device', device_schedule), ('KACE', kace_schedule)] %}
     <div style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:.9rem 1rem;">
       <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;">
         <strong>{{ label }}</strong>
@@ -164,7 +282,7 @@
 <!-- Recent activity -->
 <div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
-    🕒 Recent Activity
+    {{ icon('history') }}Recent Activity
     <a href="/admin/activity" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">View Full Log →</a>
   </h2>
   <div style="overflow-x:auto;">
@@ -187,7 +305,7 @@
 {% if can('devices') %}
 <!-- Status breakdown -->
 <div class="card">
-  <h2>📊 Assets by Status</h2>
+  <h2>{{ icon('dashboard') }}Assets by Status</h2>
   <div class="stat-grid">
     {% set status_colors = {'available': 'var(--success)', 'assigned': 'var(--accent)',
                              'repair': 'var(--warning)', 'lost': 'var(--danger)', 'retired': 'var(--muted)'} %}
@@ -206,7 +324,7 @@
 {% if device_type_counts %}
 <!-- Device type breakdown -->
 <div class="card">
-  <h2>💻 Devices by Type</h2>
+  <h2>{{ icon('devices') }}Devices by Type</h2>
   <div class="stat-grid">
     {% for t, count in device_type_counts.items() %}
     {% if count %}
@@ -226,7 +344,7 @@
 <!-- Google Workspace coverage -->
 <div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
-    🔗 Google Workspace
+    {{ icon('integration') }}Google Workspace
     {% if is_super_admin() %}
     <a href="/admin/google_field_mapping?entity=device" class="btn btn-ghost" style="margin-left:auto;font-size:.8rem;padding:.3rem .7rem;">Manage →</a>
     {% endif %}
@@ -251,7 +369,7 @@
 {% if is_super_admin() and site_breakdown %}
 <!-- Per-site breakdown -->
 <div class="card">
-  <h2>🏫 By Site</h2>
+  <h2>{{ icon('site') }}By Site</h2>
   <table>
     <thead><tr><th>Site</th><th>Devices</th><th>People</th></tr></thead>
     <tbody>
@@ -277,7 +395,7 @@
 {% if is_super_admin() %}
 <!-- CSV Upload -->
 <div class="card">
-  <h2>📂 Upload Asset Registry CSV</h2>
+  <h2>{{ icon('import') }}Upload Asset Registry CSV</h2>
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     All columns are optional — rows with no <code>asset_tag</code> (and no <code>serial_number</code>
     to fall back on) get a tag self-assigned automatically: sequential numbers from the

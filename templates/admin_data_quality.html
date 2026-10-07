@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block title %}Data Quality{% endblock %}
+{% block content %}
+{% set sev_badge = {'error': 'badge-red', 'warning': 'badge-yellow', 'info': 'badge-blue'} %}
+{% set sev_label = {'error': 'Fix', 'warning': 'Review', 'info': 'FYI'} %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('data-quality') }}Data Quality</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/registry" class="btn btn-ghost">← Registry</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;margin-bottom:1.2rem;">
+  Checks the records for the mistakes that usually only turn up when someone exports to a spreadsheet.
+  Each check runs live when this page loads. Click a row to fix it, or download any check as CSV.
+</p>
+
+<div class="dq-summary">
+  {% for c in checks %}
+  <a href="#{{ c.key }}" class="dq-chip {{ 'dq-chip-clear' if not c.count }}">
+    <span class="badge {{ sev_badge[c.severity] if c.count else 'badge-green' }}">{{ c.count if c.count else '✓' }}</span>
+    {{ c.title }}
+  </a>
+  {% endfor %}
+</div>
+
+{% for c in checks %}
+<div class="card" id="{{ c.key }}">
+  <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.4rem;">
+    <h2 style="margin:0;">{{ c.title }}</h2>
+    {% if c.count %}
+      <span class="badge {{ sev_badge[c.severity] }}">{{ sev_label[c.severity] }} · {{ c.count }}</span>
+      <span class="spacer" style="flex:1;"></span>
+      <a href="?export={{ c.key }}" class="btn btn-ghost" style="padding:.25rem .7rem;font-size:.8rem;">{{ icon('download') }}CSV</a>
+    {% else %}
+      <span class="badge badge-green">All clear</span>
+    {% endif %}
+  </div>
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:{{ '.8rem' if c.count else '0' }};">{{ c.why }}</p>
+  {% if c.count %}
+  <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>{% for col in c.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in c.rows[:row_limit] %}
+        <tr>
+          {% for cell in row.cells %}
+          <td>{% if loop.first %}<a class="tag-link" href="{{ row.link }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if c.count > row_limit %}
+  <p style="color:var(--muted);font-size:.8rem;margin-top:.6rem;">Showing the first {{ row_limit }} of {{ c.count }} — download the CSV for all of them.</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+
+<style>
+  .dq-summary { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.5rem; }
+  .dq-chip {
+    display:inline-flex; align-items:center; gap:.45rem; padding:.4rem .7rem; border-radius:8px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text); text-decoration:none; font-size:.85rem;
+  }
+  .dq-chip:hover { border-color:var(--accent); }
+  .dq-chip-clear { color:var(--muted); }
+</style>
+{% endblock %}

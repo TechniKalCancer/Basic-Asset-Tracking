@@ -303,6 +303,15 @@ per-student assignment workflow:
 - The admin panel's "Assets by Status" card shows a live count per status; clicking a count
   jumps straight to that filtered registry view.
 
+### Dashboard Charts
+
+The Dashboard shows four trend charts, each only to users with the matching permission:
+**Tickets opened per week** (last 12 weeks), **Repairs by device model** (last 12 months, with a
+repairs-per-100-devices rate on hover, which is useful for refresh planning), **Damage reports by
+type**, and **Fees billed by site** (paid vs unpaid). Hover or tab to any bar for the exact value;
+**Show as table** under each chart lists every number. The charts are plain SVG drawn by
+`static/js/charts.js`, with no charting library.
+
 ## Dymo Label Printing
 
 The assign page (`/admin/assets/<asset_tag>/assign`) has a "Print Label" card that prints the
@@ -334,6 +343,44 @@ the charger's printed label resolves to the same asset.
 I haven't been able to test actual printing end-to-end since I don't have Dymo hardware in
 this environment — the SDK calls follow DYMO's own official sample code exactly, but printing
 itself needs to be verified on your machine with the printer attached.
+
+## Avery Sheet Labels (no Dymo needed)
+
+Bulk Print Labels (`/admin/bulk_print`) also has an **Avery Sheet Labels** card that prints the
+same checked rows onto standard US Letter label sheets from any office printer:
+
+| Sheet | Layout | Prints |
+|---|---|---|
+| Avery 5160 / 8160 | 30 per sheet, 1" × 2⅝" | tag, assigned person / loaner label, barcode |
+| Avery 5163 / 8163 | 10 per sheet, 2" × 4" | same, larger |
+| Avery 5167 / 8167 | 80 per sheet, ½" × 1¾" | tag + barcode only |
+
+- **Skip used labels** starts printing partway down a half-used sheet.
+- **Also charger labels** prints a matching "CHARGER" label after each device.
+- Barcodes are Code 128 (same as the Dymo labels), drawn server-side as SVG — no JS library.
+  All-digit tags use the denser Code 128 C set so they still fit on a 5167.
+- In the print dialog set **Scale: 100% / Actual size** and **Margins: None**, or the labels drift.
+
+## Camera Barcode Scanning (phones, tablets, Chromebooks)
+
+Every "Scan or type…" field (Check In/Out, loaners, Report a Problem, Submit a Ticket, Asset
+Audit, registry quick-add, repairs) gets a 📷 button. Tapping it opens the rear camera, reads the
+first barcode it sees, and types it into the field followed by Enter — exactly what a USB scanner
+does, so each page's existing scan handling is unchanged. A single-field scan form (e.g. Asset
+Audit) submits automatically, so you can walk a cart scanning device after device.
+
+- Uses the browser's built-in `BarcodeDetector` (Chrome, Edge, ChromeOS, Android). On iPhone/iPad
+  Safari it lazy-loads the ZXing library from jsDelivr the first time the camera is opened.
+- **Browsers only allow camera access over HTTPS** (or `localhost`). Over plain `http://` the 📷
+  button explains this instead of opening the camera.
+- Reads Code 128/39/93, EAN/UPC, ITF, Codabar, QR and Data Matrix — covers Dymo/Avery labels and
+  most manufacturer serial stickers.
+
+## Phone & Tablet Layout
+
+Below 760px wide the nav collapses behind a ☰ menu, side-by-side form fields stack, wide tables
+scroll inside their card instead of the whole page, and inputs use 16px text so iOS doesn't
+zoom on focus.
 
 ## Barcode Scan Lookup
 
@@ -368,6 +415,88 @@ whoever it's currently assigned to. The assign page shows the full incident hist
 asset and — matching the progressive accountability policies many districts already use (e.g.
 1st incident free, 2nd billed, 3rd billed plus discipline) — flags what number incident this
 would be for the currently assigned student, counted across all their devices, all time.
+
+## Photos & Attachments
+
+Incidents, tickets, and repairs all take photos (or PDFs): from the Log Incident form, the
+public **Report a Problem** / **Submit a Ticket** pages, the admin New Ticket form, the
+ticket and repair detail pages, and each incident's ⋮ menu on the device page. On a phone or
+tablet the file picker opens the camera directly.
+
+- Stored **in the database** (`Attachment` table), so they're included in the normal `pg_dump`
+  backups and need no extra Docker volume.
+- Images are downscaled in the browser to ≤1600px JPEG before upload (a 5 MB phone photo becomes
+  ~300 KB). Server-side, file types are checked by their actual bytes (JPEG/PNG/GIF/WebP/PDF only),
+  capped at 8 MB each / 6 per upload, and served back with a sandboxing `Content-Security-Policy`.
+- Viewing requires the same permission and site scope as the record it's attached to.
+
+## Parent/Guardian Damage Notices
+
+People have optional **Parent/Guardian Name** and **Parent/Guardian Email** fields (also
+`guardian_name`/`guardian_email` — or `parent_name`/`parent_email` — columns in the People CSV
+import, so they can come straight from an SIS export). When logging an incident against a
+student with a guardian email on file, tick **Email a damage notice** to send it immediately;
+each incident's ⋮ menu also has **Email Guardian Notice** for sending (or re-sending) later. The
+incident shows a ✉️ *Guardian notified* badge once sent. Wording is editable at Admin → Email.
+
+## Ticket Email Notifications
+
+With email configured, requesters get an email when their ticket is **received** and when it's
+**resolved** (resolved → closed doesn't send a second one). Turn these off at **Admin → Email →
+Automatic Ticket Emails**. Comments stay internal unless the tech ticks **Also email this to the
+requester**, which sends it as a reply; the comment list marks each one *Internal* or *Emailed to
+requester*. All of these emails are sent in the background, so a slow SMTP server never holds up
+a student's form submission. Wording is editable at Admin → Email.
+
+## Data Quality Checks
+
+`/admin/data_quality` (Devices → Data Quality) runs the checks people otherwise do by exporting to
+Excel, live on every page load and scoped to your sites:
+
+- **Fix:** duplicate serial numbers (ignoring case, spaces, and dashes), devices still assigned to
+  graduated/withdrawn people, status that contradicts the assignment.
+- **Review:** devices with no serial, no site, people holding more than one primary device,
+  repairs open more than 30 days, Chromebooks never matched in Google (when Google Sync is on).
+- **FYI:** devices with no model, active students with no device, students with no guardian email,
+  out-of-warranty devices still in use.
+
+Each check links every row to the record that fixes it and downloads as CSV. The Dashboard shows a
+**Data Problems to Fix** tile counting the *Fix* rows.
+
+## Google Sign-in Mismatches ("Possible Violators")
+
+Each Google device sync now records a Chromebook's recent sign-ins (most recent first) and when it
+was last online. `/admin/signin_mismatches` (Devices → Sign-in Mismatches) compares the most recent
+sign-in with who this app says should have the device:
+
+| Flag | Severity | Meaning |
+|---|---|---|
+| Another student's device | Likely violation | A student who isn't the assigned holder signed in last |
+| Swapped devices | Likely violation | Two students are each on the other's device |
+| Withdrawn/graduated account | Likely violation | Last sign-in belongs to someone marked inactive |
+| Lost/retired device in use | Likely violation | Marked lost/retired but still being used (or it turned up) |
+| Unassigned device in use | Check | Nobody assigned / loaner not checked out, used after it was returned |
+| Account not in People | Check | An account that doesn't match anyone in People |
+| Previous holder still signing in | Probably fine | Someone who used to have the device |
+| Staff sign-in | Probably fine | Usually a tech or teacher helping out |
+
+To keep false positives down, the check:
+- ignores devices that haven't been online within the window (7, 30 or 90 days);
+- ignores sign-ins from before a device was returned;
+- gives a new holder 3 days after hand-off before flagging the previous holder;
+- skips guest sessions.
+
+Each row notes things like the student's own device, or that they have none. A student turning up
+on several devices that aren't theirs is counted and sorted first. **Mark OK** (with an optional
+note, e.g. "sibling") silences that one account on that device. A *different* account on the same
+device is flagged again.
+
+The Dashboard's **🚩 Possible Violators** card lists the likely violations, with counts of the
+lower-severity ones. It appears once Google device data exists. A device's own page also shows a
+🚩 badge next to Google's *Recent User*, plus its earlier sign-ins and last-online time.
+
+**Needs Google Sync running.** Devices only get sign-in history on the first device sync after
+this update.
 
 ## Overdue Reminders (Google SMTP)
 
@@ -494,14 +623,33 @@ it's checked out** — so a student can't keep using a loaner after handing it b
 
 ## Navigation
 
-The top nav is grouped into click-toggle dropdowns — **Devices ▾**, **People ▾**, **Loaners ▾**,
-a standalone **Repairs** link, and **Admin ▾** (Dashboard, Kiosk Devices, Reminders, Activity
-Log, plus Users/Sites for accounts with those permissions) — replacing the old flat link row and
-the Admin Panel's button wall, both of which had grown past what a single row could hold. The
-Reminders and Sites entries carry a small red badge with the current overdue-assignment/orphan
-count. The Admin Panel dashboard itself keeps its data-driven content (stat tiles, per-site
-breakdown, CSV upload) and promotes the overdue/orphan counts to alert banners at the top of the
-page, so that urgency signal isn't lost now that the button wall is gone.
+Top tabs, each shown only to accounts with that permission:
+
+- **Dashboard**: stats, charts, the Possible Violators card and recent activity. The logo also links
+  here. It replaced the old Home tab: logged-in users who open `/` go to their own landing page.
+- **Devices**: the sub-menu has Registry, Check In, Check Out, Asset Audit, Data Quality, Sign-in
+  Mismatches and Billing. **Tools ▾** holds the occasional jobs: bulk assign, print labels,
+  collection, warranty, history, Report a Problem and exports. **Setup ▾** holds the catalog
+  settings and Orphans.
+- **People**, **Loaners**, **Repairs**, **Tickets**.
+- **Admin** opens a **Settings** page (`/admin/settings`) that lists every admin area as a card,
+  grouped and filtered to what that account can open. The same links stay in the sub-menu.
+
+An account that can only scan devices in and out (no Devices permission) gets a **Check In/Out** tab
+instead, and logs straight into the Check In page. Kiosks (enrolled devices, not logged in) still
+get the big-button home page: Check In, Check Out, Report a Problem, Submit a Ticket.
+
+**Any screen size:** below 1000px wide (tablets in portrait, phones) the nav collapses behind a menu
+button, and the Tools/Setup dropdowns expand in place. Below 760px forms stack and wide tables
+scroll inside their card. The layout has been checked at 320, 375, 768, 1024, 1100 and 1280px with
+no sideways page scrolling.
+
+## Icons
+
+The interface uses no emoji. Icon spots are drop-in SVG slots. `{{ icon('name') }}` renders nothing
+until `static/icons/<name>.svg` exists, then shows it in the surrounding text color. The full list
+of 49 icons and the file spec are in [`static/icons/README.md`](static/icons/README.md). Add the
+files and restart or redeploy; no template changes are needed.
 
 ## Branding
 

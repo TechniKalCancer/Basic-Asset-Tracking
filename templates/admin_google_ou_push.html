@@ -2,12 +2,12 @@
 {% block title %}Push to Google Org Units{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">📤 Push to Google Org Units</h1>
+  <h1 style="margin:0;">{{ icon('org-unit') }}Push to Google Org Units</h1>
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/google_org_units" class="btn btn-ghost">🗂️ Org Units</a>
+  <a href="/admin/google_org_units" class="btn btn-ghost">{{ icon('org-unit') }}Org Units</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -20,7 +20,7 @@
 </p>
 
 <div class="card">
-  <h2 style="margin-top:0;">🎒 Loaner Chromebooks by Site</h2>
+  <h2 style="margin-top:0;">{{ icon('loaner') }}Loaner Chromebooks by Site</h2>
   <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">
     Set each site's target org unit under <a href="/admin/sites">Sites</a>, then push — every loaner-pool
     device at that site with a serial number gets moved there. Items with no matching Chrome device in

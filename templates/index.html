@@ -1,29 +1,41 @@
 {% extends 'base.html' %}
-{% block title %}FoxDesk{% endblock %}
+{% block title %}{{ branding.app_name or 'FoxDesk' }}{% endblock %}
 {% block content %}
-<h1>🦊 FoxDesk</h1>
-<p style="color:var(--muted);margin-top:-1.2rem;margin-bottom:1.5rem;">Devices, loaners, and IT requests — one place to check in, check out, and get help.</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:2rem;">
-  <a href="/checkin" style="text-decoration:none;">
-    <div class="card" style="text-align:center;cursor:pointer;border-color:#22c55e44;transition:border-color .2s;">
-      <div style="font-size:2.5rem;margin-bottom:.5rem;">✅</div>
-      <div style="font-weight:700;font-size:1.1rem;">Check In</div>
-      <div style="color:var(--muted);font-size:.85rem;margin-top:.3rem;">Scan asset tag or serial</div>
-    </div>
+{# Kiosk landing page — logged-in users are redirected to their own landing page instead (see index() in app.py). #}
+<h1>{{ branding.app_name or 'FoxDesk' }}</h1>
+<p style="color:var(--muted);margin-top:-.6rem;margin-bottom:1.5rem;">Check a device in or out, or get help with one.</p>
+<div class="kiosk-grid">
+  <a class="kiosk-tile" href="/checkin">
+    {{ icon('check-in', 'icon-xl') }}
+    <span class="kiosk-title">Check In</span>
+    <span class="kiosk-desc">Returning a device — scan its tag or serial</span>
   </a>
-  <a href="/checkout" style="text-decoration:none;">
-    <div class="card" style="text-align:center;cursor:pointer;border-color:#4f7ef844;transition:border-color .2s;">
-      <div style="font-size:2.5rem;margin-bottom:.5rem;">📤</div>
-      <div style="font-weight:700;font-size:1.1rem;">Check Out</div>
-      <div style="color:var(--muted);font-size:.85rem;margin-top:.3rem;">Scan asset tag or serial</div>
-    </div>
+  <a class="kiosk-tile" href="/checkout">
+    {{ icon('check-out', 'icon-xl') }}
+    <span class="kiosk-title">Check Out</span>
+    <span class="kiosk-desc">Taking a device — scan its tag or serial</span>
   </a>
-  <a href="/asset_history" style="text-decoration:none;">
-    <div class="card" style="text-align:center;cursor:pointer;border-color:#a855f744;transition:border-color .2s;">
-      <div style="font-size:2.5rem;margin-bottom:.5rem;">📋</div>
-      <div style="font-weight:700;font-size:1.1rem;">History</div>
-      <div style="color:var(--muted);font-size:.85rem;margin-top:.3rem;">Look up any asset</div>
-    </div>
+  <a class="kiosk-tile" href="/report_problem">
+    {{ icon('flag', 'icon-xl') }}
+    <span class="kiosk-title">Report a Problem</span>
+    <span class="kiosk-desc">Broken, damaged, or not working right</span>
+  </a>
+  <a class="kiosk-tile" href="/submit_ticket">
+    {{ icon('ticket', 'icon-xl') }}
+    <span class="kiosk-title">Submit a Ticket</span>
+    <span class="kiosk-desc">Anything else you need help with</span>
   </a>
 </div>
+<style>
+  .kiosk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 1rem; }
+  .kiosk-tile {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .4rem; text-align: center;
+    min-height: 150px; padding: 1.4rem 1rem; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); text-decoration: none; transition: border-color .15s, background .15s;
+  }
+  .kiosk-tile:hover, .kiosk-tile:focus-visible { border-color: var(--accent); background: var(--surface2); }
+  .kiosk-tile .icon { margin: 0 0 .3rem; color: var(--accent); }
+  .kiosk-title { font-weight: 700; font-size: 1.15rem; }
+  .kiosk-desc { color: var(--muted); font-size: .85rem; }
+</style>
 {% endblock %}

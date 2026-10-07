@@ -2,16 +2,16 @@
 {% block title %}Help{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">❓ Help</h1>
+  <h1 style="margin:0;">{{ icon('help') }}Help</h1>
   {% if can('admin') %}
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/help" class="btn btn-ghost">✏️ Manage Help Content</a>
+  <a href="/admin/help" class="btn btn-ghost">{{ icon('edit') }}Manage Help Content</a>
   {% endif %}
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));gap:1.5rem;align-items:start;">
   <div class="card">
-    <h2 style="margin-top:0;">💬 Frequently Asked Questions</h2>
+    <h2 style="margin-top:0;">{{ icon('help') }}Frequently Asked Questions</h2>
     {% for a in faqs %}
     <details style="margin-bottom:.8rem;border-bottom:1px solid var(--border);padding-bottom:.8rem;">
       <summary style="cursor:pointer;font-weight:600;">{{ a.title }}</summary>
@@ -23,7 +23,7 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0;">📖 How-To Guides</h2>
+    <h2 style="margin-top:0;">{{ icon('help') }}How-To Guides</h2>
     {% for a in howtos %}
     <details style="margin-bottom:.8rem;border-bottom:1px solid var(--border);padding-bottom:.8rem;">
       <summary style="cursor:pointer;font-weight:600;">{{ a.title }}</summary>

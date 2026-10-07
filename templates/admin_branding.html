@@ -2,7 +2,7 @@
 {% block title %}Branding{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🎨 Branding</h1>
+  <h1 style="margin:0;">{{ icon('branding') }}Branding</h1>
   <span class="badge {{ 'badge-green' if settings.primary_color_raw else 'badge-yellow' }}">
     {{ 'Configured' if settings.primary_color_raw else 'Using Default' }}
   </span>

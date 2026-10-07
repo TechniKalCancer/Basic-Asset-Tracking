@@ -51,6 +51,16 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Graduation Year (optional, students)</label>
       <input type="number" name="grad_year" value="{{ (values.grad_year or '') if values else '' }}" placeholder="e.g. 2031" />
     </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.8rem;margin-bottom:1.5rem;">
+      <div>
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Parent/Guardian Name (optional)</label>
+        <input name="guardian_name" value="{{ (values.guardian_name or '') if values else '' }}" placeholder="e.g. Pat Smith" />
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Parent/Guardian Email (optional)</label>
+        <input type="email" name="guardian_email" value="{{ (values.guardian_email or '') if values else '' }}" placeholder="Where damage notices go" />
+      </div>
+    </div>
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="insurance_opted_in" style="width:auto;" {{ 'checked' if values and values.insurance_opted_in }} />
       Family opted into the device protection plan
@@ -62,7 +72,7 @@
 {% if person %}
 <div class="card" style="max-width:480px;">
   <h2 style="display:flex;align-items:center;gap:.6rem;font-size:1rem;">
-    🔗 Google Workspace Info
+    {{ icon('integration') }}Google Workspace Info
     <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}" style="font-size:.7rem;">
       {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
     </span>
@@ -88,7 +98,7 @@
 
 {% if person and person.custom_fields %}
 <div class="card" style="max-width:480px;">
-  <h2 style="margin-top:0;font-size:1rem;">🧩 Custom Fields</h2>
+  <h2 style="margin-top:0;font-size:1rem;">{{ icon('custom-fields') }}Custom Fields</h2>
   <p style="color:var(--muted);font-size:.8rem;margin-bottom:1rem;">
     Synced from Google — configure what's pulled in at <a href="/admin/google_field_mapping?entity=person">Google Field Mapping</a>.
   </p>

@@ -2,7 +2,7 @@
 {% block title %}Custom Fields{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🧩 Custom Fields</h1>
+  <h1 style="margin:0;">{{ icon('custom-fields') }}Custom Fields</h1>
   <span class="badge badge-blue">{{ fields|length }} total</span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/custom_fields/new?entity={{ entity_type }}" class="btn btn-primary">+ Add Field</a>

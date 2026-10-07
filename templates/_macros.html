@@ -46,3 +46,49 @@ actions column); skip is a list of 0-based column indices to leave blank
   {% endfor %}
 </tr>
 {%- endmacro %}
+
+{#
+Photo/PDF attachments (see Attachment in app.py). photo_input() is the bare
+file field for embedding in an existing form (Log Incident, Submit Ticket);
+attachment_panel() is the standalone thumbnails + "Add Photos" form for a
+detail page. Images are downscaled client-side by static/js/attachments.js,
+which base.html loads on every page.
+#}
+{% macro photo_input(label='Photos (optional)') %}
+<div style="margin-bottom:.8rem;">
+  <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">{{ icon('camera') }}{{ label }}</label>
+  <input type="file" name="photos" accept="image/*,application/pdf" multiple data-photo-input style="padding:.4rem;" />
+  <span style="display:block;margin-top:.3rem;font-size:.75rem;color:var(--muted);">On a phone or tablet this opens the camera. Up to 6 files.</span>
+</div>
+{%- endmacro %}
+
+{% macro attachment_thumbs(attachments, can_delete=true) %}
+{% if attachments %}
+<div class="attachment-grid">
+  {% for a in attachments %}
+  <div class="attachment-thumb">
+    <a href="/admin/attachments/{{ a.id }}" target="_blank" title="{{ a.filename }} · {{ (a.size_bytes / 1024)|round|int }} KB · {{ a.uploaded_by or '' }} {{ a.created_at.strftime('%Y-%m-%d') }}">
+      {% if a.is_image %}<img src="/admin/attachments/{{ a.id }}" alt="{{ a.filename }}" loading="lazy">
+      {% else %}<span class="attachment-file">{{ icon('document') }}{{ 'PDF' if a.content_type == 'application/pdf' else 'File' }}<br>{{ a.filename[:18] }}</span>{% endif %}
+    </a>
+    {% if can_delete %}
+    <form method="POST" action="/admin/attachments/{{ a.id }}/delete" onsubmit="return confirm('Remove this attachment?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" title="Remove">✕</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro attachment_panel(attachments, owner_type, owner_id) %}
+{{ attachment_thumbs(attachments) }}
+<form method="POST" action="/admin/attachments/{{ owner_type }}/{{ owner_id }}" enctype="multipart/form-data"
+      style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.6rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="file" name="photos" accept="image/*,application/pdf" multiple data-photo-input required style="flex:1;min-width:200px;padding:.4rem;" />
+  <button type="submit" class="btn btn-ghost">{{ icon('camera') }}Add Photos</button>
+</form>
+{%- endmacro %}

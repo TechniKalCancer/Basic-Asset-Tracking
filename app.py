@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash, has_request_context
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, url_for, session, flash, has_request_context, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_wtf import CSRFProtect
@@ -22,7 +22,9 @@ from email.message import EmailMessage
 from decimal import Decimal, InvalidOperation
 from collections import defaultdict, OrderedDict
 from dotenv import load_dotenv
+from markupsafe import Markup, escape
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 load_dotenv()
 
@@ -227,6 +229,17 @@ class EmailSettings(db.Model):
     loaner_nodate_body          = db.Column(db.Text, nullable=True)
     assignment_overdue_subject  = db.Column(db.String(200), nullable=True)
     assignment_overdue_body     = db.Column(db.Text, nullable=True)
+    ticket_received_subject     = db.Column(db.String(200), nullable=True)
+    ticket_received_body        = db.Column(db.Text, nullable=True)
+    ticket_reply_subject        = db.Column(db.String(200), nullable=True)
+    ticket_reply_body           = db.Column(db.Text, nullable=True)
+    ticket_resolved_subject     = db.Column(db.String(200), nullable=True)
+    ticket_resolved_body        = db.Column(db.Text, nullable=True)
+    damage_notice_subject       = db.Column(db.String(200), nullable=True)
+    damage_notice_body          = db.Column(db.Text, nullable=True)
+    # Master switch for the automatic requester emails (received/resolved).
+    # Replies are an explicit per-comment choice, so they ignore this.
+    ticket_notifications_enabled = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
     updated_at                  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -448,6 +461,8 @@ class Asset(db.Model):
     google_org_unit    = db.Column(db.String(255), nullable=True)
     google_recent_user = db.Column(db.String(255), nullable=True)
     google_last_sync_at = db.Column(db.DateTime, nullable=True)
+    google_recent_users = db.Column(db.JSON, nullable=True)  # Google's recentUsers emails, most recent first (≤5) — see _signin_mismatches()
+    google_last_activity = db.Column(db.DateTime, nullable=True)  # device's own lastSync in Google (UTC) — when it was last powered on and online, not when we last pulled it
     google_enabled     = db.Column(db.Boolean, nullable=True)  # last known enabled/disabled state — set by the loaner auto-disable sync, the per-device/bulk Google sync, and the manual toggle button
 
     assigned_to = db.relationship('Person', backref='assets')
@@ -487,6 +502,8 @@ class Person(db.Model):
     grad_year  = db.Column(db.Integer, nullable=True, index=True)  # expected graduation year (students); blank for staff
     is_active  = db.Column(db.Boolean, nullable=False, default=True, index=True)  # False once graduated/withdrawn — keeps history/incidents intact instead of deleting
     insurance_opted_in = db.Column(db.Boolean, nullable=False, default=False)  # family paid for the device protection plan this year
+    guardian_name  = db.Column(db.String(160), nullable=True)
+    guardian_email = db.Column(db.String(160), nullable=True)  # where damage notices go — students only, usually filled from the SIS export via People CSV import
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
 
@@ -673,6 +690,7 @@ class Incident(db.Model):
     fee_amount  = db.Column(db.Numeric(8, 2), nullable=True)
     paid_at     = db.Column(db.DateTime, nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    guardian_notified_at = db.Column(db.DateTime, nullable=True)  # last damage notice emailed to the student's guardian
 
     repair_category = db.relationship('RepairCategory')
 
@@ -795,16 +813,17 @@ class Ticket(db.Model):
 
 
 class TicketComment(db.Model):
-    """An internal note on a Ticket. There's no submitter-facing ticket
-    portal/login in this app (public forms are anonymous + person-search
-    based, not accounts), so every comment is inherently admin-internal —
-    no is_internal flag, it would have no meaningful False case."""
+    """A note on a Ticket. There's no submitter-facing ticket portal/login in
+    this app (public forms are anonymous + person-search based, not
+    accounts), so comments are internal by default — emailed_to_requester
+    marks the ones a tech chose to also send to the requester as a reply."""
     __tablename__ = 'ticket_comment'
     id          = db.Column(db.Integer, primary_key=True)
     ticket_id   = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=False, index=True)
     body        = db.Column(db.Text, nullable=False)
     author_label = db.Column(db.String(160), nullable=False)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    emailed_to_requester = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
 
 
 class TicketCharge(db.Model):
@@ -938,6 +957,57 @@ class LoanerCheckout(db.Model):
     repair_id        = db.Column(db.Integer, db.ForeignKey('repair.id'), nullable=True, index=True)  # set when this loaner covers someone whose own device is out for repair — see _checkout_loaner/admin_repair_assign_loaner
 
     repair = db.relationship('Repair', backref='loaner_checkouts')
+
+
+class SigninReview(db.Model):
+    """
+    A tech's "looked at it, it's fine" on one Google sign-in mismatch (see
+    _signin_mismatches) — e.g. a sibling sharing a device, a teacher who
+    signed in to help. Keyed on (asset_tag, signin_email) rather than the
+    device alone, so a *different* account showing up on the same device
+    later is flagged fresh instead of staying silenced.
+    """
+    __tablename__ = 'signin_review'
+    id           = db.Column(db.Integer, primary_key=True)
+    asset_tag    = db.Column(db.String(120), nullable=False, index=True)
+    signin_email = db.Column(db.String(255), nullable=False)
+    note         = db.Column(db.String(255), nullable=True)
+    reviewed_by  = db.Column(db.String(160), nullable=True)
+    reviewed_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('asset_tag', 'signin_email', name='uq_signin_review_asset_email'),)
+
+
+ATTACHMENT_OWNER_TYPES = ('incident', 'ticket', 'repair')
+
+
+class Attachment(db.Model):
+    """
+    A photo (or PDF) attached to an Incident, Ticket, or Repair — damage
+    evidence for a fee, a screenshot of an error, a vendor RMA slip. Stored
+    in the database rather than on disk so it's covered by the same pg_dump
+    backups as everything else and needs no extra Docker volume. Images are
+    downscaled in the browser before upload (see static/js/attachments.js),
+    so a typical phone photo lands around 200-400 KB, not 5+ MB.
+    owner_type/owner_id is a loose polymorphic link (no FK) — the delete
+    routes for each owner type clean up their own attachments.
+    """
+    __tablename__ = 'attachment'
+    id            = db.Column(db.Integer, primary_key=True)
+    owner_type    = db.Column(db.String(20), nullable=False)
+    owner_id      = db.Column(db.Integer, nullable=False)
+    filename      = db.Column(db.String(255), nullable=False)
+    content_type  = db.Column(db.String(100), nullable=False)
+    size_bytes    = db.Column(db.Integer, nullable=False)
+    data          = db.deferred(db.Column(db.LargeBinary, nullable=False))  # deferred so listing attachments never loads the bytes
+    uploaded_by   = db.Column(db.String(160), nullable=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (db.Index('ix_attachment_owner', 'owner_type', 'owner_id'),)
+
+    @property
+    def is_image(self):
+        return self.content_type.startswith('image/')
 
 
 # Schema creation/upgrades are handled by Flask-Migrate (`flask db upgrade`),
@@ -1415,13 +1485,39 @@ def sync_chromeos_device_from_google(serial_number):
     device = _find_chromeos_device_by_serial(service, serial_number)
     if not device:
         raise LookupError(f'No Chromebook with serial number "{serial_number}" found in Google Workspace.')
-    recent_users = device.get('recentUsers') or []
+    recent_emails = _google_recent_user_emails(device)
     return {
         'model': device.get('model'),
         'org_unit': device.get('orgUnitPath'),
-        'recent_user': recent_users[0].get('email') if recent_users else None,
+        'recent_user': recent_emails[0] if recent_emails else None,
+        'recent_users': recent_emails,
+        'last_activity': _parse_google_timestamp(device.get('lastSync')),
         'enabled': device.get('status') == 'ACTIVE',
     }
+
+
+def _google_recent_user_emails(device):
+    """Google's recentUsers for a Chrome device, as lowercased emails, most
+    recent sign-in first. Unmanaged (guest/personal) sessions carry no
+    email and are skipped — there's no account to match against."""
+    emails = []
+    for entry in device.get('recentUsers') or []:
+        email = (entry.get('email') or '').strip().lower()
+        if email and email not in emails:
+            emails.append(email)
+    return emails[:5]
+
+
+def _parse_google_timestamp(value):
+    """RFC 3339 from the Admin SDK (e.g. '2026-10-01T14:22:10.123Z') to a
+    naive UTC datetime, matching every other DateTime column in this app."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
 def sync_person_from_google(email):
@@ -1939,10 +2035,12 @@ def _run_google_device_sync(deadline=None):
             if not asset:
                 asset = Asset(asset_tag=row.asset_tag, is_valid=True)
                 db.session.add(asset)
-            recent_users = d.get('recentUsers') or []
+            recent_emails = _google_recent_user_emails(d)
             asset.google_model       = d.get('model')
             asset.google_org_unit    = d.get('orgUnitPath')
-            asset.google_recent_user = recent_users[0].get('email') if recent_users else None
+            asset.google_recent_user = recent_emails[0] if recent_emails else None
+            asset.google_recent_users = recent_emails
+            asset.google_last_activity = _parse_google_timestamp(d.get('lastSync'))
             asset.google_enabled     = d.get('status') == 'ACTIVE'
             asset.google_last_sync_at = now
 
@@ -2119,6 +2217,20 @@ def send_email(to_email, subject, body):
         server.send_message(msg)
 
 
+def _send_email_in_background(to_email, subject, body):
+    """Fire-and-forget send_email() on a daemon thread, for emails triggered
+    as a side effect of a page action (ticket submitted, status changed) —
+    a slow or unreachable SMTP server must never make a student's form
+    submission hang for 10s or fail. Failures are only logged."""
+    def _run():
+        try:
+            send_email(to_email, subject, body)
+            logger.info('Sent "%s" email to %s', subject, to_email)
+        except Exception as e:
+            logger.error('Background email to %s failed: %s', to_email, e)
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # ─── Customizable email wording ────────────────────────────────────────────────
 # Every system email this app sends is registered here as a "kind" with a
 # built-in default subject/body. An admin can override either at
@@ -2169,6 +2281,48 @@ EMAIL_TEMPLATE_KINDS = {
             'Thanks!'
         ),
     },
+    'ticket_received': {
+        'label': 'Ticket — Received (to requester)',
+        'subject': 'We got your request: {ticket_subject} [Ticket #{ticket_id}]',
+        'body': (
+            'Hi {first_name},\n\n'
+            'Thanks for reaching out — your ticket #{ticket_id} ("{ticket_subject}") has been received '
+            'and our tech team will take a look.\n\n'
+            'What you told us:\n{ticket_description}\n\n'
+            'You\'ll get another email when it\'s resolved.\n\nThanks!'
+        ),
+    },
+    'ticket_reply': {
+        'label': 'Ticket — Reply from a Tech (to requester)',
+        'subject': 'Update on your ticket #{ticket_id}: {ticket_subject}',
+        'body': (
+            'Hi {first_name},\n\n'
+            '{tech_name} posted an update on your ticket #{ticket_id} ("{ticket_subject}"):\n\n'
+            '{reply_body}\n\n'
+            'Thanks!'
+        ),
+    },
+    'ticket_resolved': {
+        'label': 'Ticket — Resolved (to requester)',
+        'subject': 'Resolved: {ticket_subject} [Ticket #{ticket_id}]',
+        'body': (
+            'Hi {first_name},\n\n'
+            'Your ticket #{ticket_id} ("{ticket_subject}") has been marked {ticket_status}.\n\n'
+            'If the problem isn\'t fixed, just submit a new ticket or stop by the tech office.\n\nThanks!'
+        ),
+    },
+    'damage_notice': {
+        'label': 'Damage Notice (to parent/guardian)',
+        'subject': 'Device damage report for {student_name}',
+        'body': (
+            'Dear {guardian_name},\n\n'
+            'This is to let you know that a damage/loss report was logged on {incident_date} for the '
+            'school device assigned to {student_name} (asset tag {asset_tag}):\n\n'
+            '{incident_description}\n\n'
+            '{fee_line}\n\n'
+            'Please contact the school office with any questions.\n\nThank you.'
+        ),
+    },
 }
 
 EMAIL_TEMPLATE_VARIABLES = {
@@ -2176,6 +2330,10 @@ EMAIL_TEMPLATE_VARIABLES = {
     'loaner_upcoming': ['first_name', 'full_name', 'asset_tag', 'due_date'],
     'loaner_nodate': ['first_name', 'full_name', 'asset_tag'],
     'assignment_overdue': ['first_name', 'full_name', 'asset_tag', 'due_date', 'days_overdue'],
+    'ticket_received': ['first_name', 'full_name', 'ticket_id', 'ticket_subject', 'ticket_description'],
+    'ticket_reply': ['first_name', 'full_name', 'ticket_id', 'ticket_subject', 'tech_name', 'reply_body'],
+    'ticket_resolved': ['first_name', 'full_name', 'ticket_id', 'ticket_subject', 'ticket_status'],
+    'damage_notice': ['guardian_name', 'student_name', 'asset_tag', 'incident_date', 'incident_description', 'fee_line'],
 }
 
 
@@ -2543,6 +2701,9 @@ NAV_SECTION_PREFIXES = [
     ('/admin/orphans', 'devices'),
     ('/admin/scan_lookup', 'devices'),
     ('/admin/upload_csv', 'devices'),
+    ('/admin/data_quality', 'devices'),
+    ('/admin/signin_mismatches', 'devices'),
+    ('/admin/labels', 'devices'),
     ('/admin/people', 'people'),
     ('/loaner_checkinout', 'loaners'),
     ('/loaner_checkout', 'loaners'),
@@ -2554,6 +2715,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/automations', 'tickets'),
     ('/admin/pending_actions', 'tickets'),
     ('/submit_ticket', 'tickets'),
+    ('/admin/settings', 'admin'),
     ('/admin/kiosk', 'admin'),
     ('/admin/reminders', 'admin'),
     ('/admin/activity', 'admin'),
@@ -2569,23 +2731,55 @@ NAV_SECTION_PREFIXES = [
     ('/admin/google_field_mapping', 'admin'),
     ('/admin/sync_schedule', 'admin'),
     ('/admin', 'admin'),
-    ('/checkin', 'home'),
-    ('/checkout', 'home'),
-    ('/report_problem', 'home'),
-    ('/', 'home'),
+    ('/checkin', 'devices'),
+    ('/checkout', 'devices'),
+    ('/report_problem', 'devices'),
 ]
 
 
 def _active_nav_section():
     """Longest-prefix match of request.path against NAV_SECTION_PREFIXES.
-    None means no top tab should be highlighted (e.g. /admin/search)."""
+    None means no top tab should be highlighted (e.g. /admin/search).
+    /admin itself is the Dashboard tab — matched exactly, since every
+    settings page also lives under /admin/."""
     path = request.path
+    if path.rstrip('/') == '/admin':
+        return 'dashboard'
     best = None
     for prefix, section in NAV_SECTION_PREFIXES:
         matches = path == prefix or (prefix != '/' and path.startswith(prefix.rstrip('/') + '/'))
         if matches and (best is None or len(prefix) > len(best[0])):
             best = (prefix, section)
     return best[1] if best else None
+
+
+# ─── Icons ────────────────────────────────────────────────────────────────────
+# Custom icons are drop-in SVG files: static/icons/<name>.svg (see
+# static/icons/README.md for the list and spec). icon('name') renders
+# nothing until that file exists, so pages read cleanly as text-only in the
+# meantime and pick up each icon as soon as it's added — no template edits.
+# Rendered as a CSS mask, so a single-color SVG takes on the surrounding
+# text color (and the branding palette) automatically.
+
+ICON_DIR = os.path.join(app.static_folder, 'icons')
+
+
+def _available_icons():
+    try:
+        return {f[:-4] for f in os.listdir(ICON_DIR) if f.endswith('.svg')}
+    except OSError:
+        return set()
+
+
+AVAILABLE_ICONS = _available_icons()  # read once at startup — restart (or redeploy) after adding icons
+
+
+@app.template_global('icon')
+def icon(name, extra_class=''):
+    if name not in AVAILABLE_ICONS:
+        return Markup('')
+    return Markup(f'<span class="icon {escape(extra_class)}" aria-hidden="true" '
+                  f'style="--icon:url(\'/static/icons/{escape(name)}.svg\')"></span>')
 
 
 @app.context_processor
@@ -2633,6 +2827,7 @@ def inject_permission_helper():
         'google_sync_enabled': GOOGLE_SYNC_ENABLED,
         'kace_sync_enabled': KACE_SYNC_ENABLED,
         'landing_pages': LANDING_PAGES,
+        'available_icons': sorted(AVAILABLE_ICONS),
     }
 
 
@@ -2646,6 +2841,11 @@ def _post_login_redirect(user):
     row (user=None here), so it always lands on the Dashboard."""
     if user and user.default_landing == 'loaners' and _has_permission('loaners'):
         return url_for('admin_loaners')
+    # Someone who can only scan devices in and out (e.g. a library aide)
+    # would find nothing on the Dashboard — send them to the scanner.
+    if user and _has_permission('checkinout') and not any(
+            _has_permission(p) for p in ('devices', 'people', 'loaners', 'repairs', 'tickets', 'admin')):
+        return url_for('checkin_page')
     return url_for('admin_panel')
 
 
@@ -2732,6 +2932,119 @@ def session_extend():
 
 
 # ─── Admin Panel ──────────────────────────────────────────────────────────────
+
+def _top_n_with_other(counter, n=8):
+    """[(label, value), ...] sorted desc, with everything past n folded into
+    one "Other" row — a 15-model fleet shouldn't become a 15-bar chart."""
+    ranked = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
+    head, tail = ranked[:n], ranked[n:]
+    if tail:
+        head.append(('Other', sum(v for _, v in tail)))
+    return head
+
+
+def _dashboard_charts(site_ids):
+    """Data for the Dashboard's trend charts, as plain dicts handed to
+    static/js/charts.js. Bucketing happens in Python rather than SQL because
+    week/date truncation differs between SQLite (local dev) and Postgres,
+    and the row counts involved (a year of tickets/incidents) are small."""
+    charts = []
+    now = datetime.utcnow()
+    year_ago = now - timedelta(days=365)
+
+    if _has_permission('tickets'):
+        this_monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        weeks = [this_monday - timedelta(weeks=i) for i in range(11, -1, -1)]
+        opened = _scope_tickets(Ticket.query, site_ids).filter(Ticket.created_at >= weeks[0]) \
+            .with_entities(Ticket.created_at).all()
+        counts = defaultdict(int)
+        for (created_at,) in opened:
+            counts[(created_at - timedelta(days=created_at.weekday())).date()] += 1
+        charts.append({
+            'id': 'tickets_weekly', 'type': 'columns', 'title': 'Tickets opened per week',
+            'subtitle': 'Last 12 weeks', 'link': url_for('admin_tickets'),
+            'unit': 'ticket', 'series': [{'name': 'Tickets opened'}],
+            'rows': [{'label': f'{w.strftime("%b")} {w.day}',
+                      'tip': f'Week of {w.strftime("%b %d, %Y")}',
+                      'values': [counts.get(w.date(), 0)]} for w in weeks],
+        })
+
+    if _has_permission('repairs'):
+        repairs = _scope_repairs(Repair.query, site_ids).filter(Repair.sent_at >= year_ago).all()
+        tags = {r.asset_tag for r in repairs}
+        registry = {r.asset_tag: r for r in AssetRegistry.query.filter(AssetRegistry.asset_tag.in_(tags))} if tags else {}
+
+        def model_label(row):
+            if not row:
+                return 'Not in registry'
+            if row.device_model:
+                return row.device_model.full_name
+            return row.description or row.device_type.capitalize()
+        repair_counts = defaultdict(int)
+        for r in repairs:
+            repair_counts[model_label(registry.get(r.asset_tag))] += 1
+        fleet = defaultdict(int)
+        for model, count in _scope_registry(AssetRegistry.query, site_ids).join(DeviceModel) \
+                .with_entities(DeviceModel, db.func.count(AssetRegistry.id)).group_by(DeviceModel.id).all():
+            fleet[model.full_name] = count
+        rows = []
+        for label, value in _top_n_with_other(repair_counts):
+            tip = f'{value} repair{"s" if value != 1 else ""}'
+            if fleet.get(label):
+                tip += f' · {fleet[label]} in fleet · {value * 100 / fleet[label]:.1f} per 100 devices'
+            rows.append({'label': label, 'tip': tip, 'values': [value]})
+        charts.append({
+            'id': 'repairs_by_model', 'type': 'hbar', 'title': 'Repairs by device model',
+            'subtitle': 'Sent out in the last 12 months', 'link': url_for('admin_repairs'),
+            'unit': 'repair', 'series': [{'name': 'Repairs'}], 'rows': rows,
+            'empty': 'No repairs logged in the last 12 months.',
+        })
+
+    if _has_permission('devices'):
+        inc_query = Incident.query.filter(Incident.created_at >= year_ago)
+        if site_ids is not None:
+            inc_query = inc_query.join(AssetRegistry, AssetRegistry.asset_tag == Incident.asset_tag) \
+                .filter(AssetRegistry.site_id.in_(site_ids))
+        incidents = inc_query.all()
+        damage = defaultdict(int)
+        for inc in incidents:
+            damage[inc.repair_category.name if inc.repair_category else 'Uncategorized'] += 1
+        charts.append({
+            'id': 'damage_by_category', 'type': 'hbar', 'title': 'Damage reports by type',
+            'subtitle': 'Incidents logged in the last 12 months', 'link': url_for('admin_repair_categories'),
+            'unit': 'incident', 'series': [{'name': 'Incidents'}],
+            'rows': [{'label': label, 'tip': f'{value} incident{"s" if value != 1 else ""}', 'values': [value]}
+                     for label, value in _top_n_with_other(damage)],
+            'empty': 'No damage reports in the last 12 months.',
+        })
+
+        site_names = {site.id: site.name for site in Site.query.all()}
+        tag_sites = {}
+        if incidents:
+            tag_sites = dict(AssetRegistry.query.filter(
+                AssetRegistry.asset_tag.in_({i.asset_tag for i in incidents})
+            ).with_entities(AssetRegistry.asset_tag, AssetRegistry.site_id).all())
+        fees = defaultdict(lambda: [Decimal('0'), Decimal('0')])  # site -> [paid, unpaid]
+        for inc in incidents:
+            if inc.fee_charged and inc.fee_amount:
+                site = site_names.get(tag_sites.get(inc.asset_tag), 'No site')
+                fees[site][0 if inc.paid_at else 1] += inc.fee_amount
+        if _has_permission('tickets'):
+            ticket_charges = _scope_tickets(TicketCharge.query.join(Ticket, Ticket.id == TicketCharge.ticket_id), site_ids) \
+                .filter(TicketCharge.created_at >= year_ago).with_entities(TicketCharge, Ticket.site_id).all()
+            for charge, site_id in ticket_charges:
+                fees[site_names.get(site_id, 'No site')][0 if charge.paid_at else 1] += charge.amount
+        charts.append({
+            'id': 'fees_by_site', 'type': 'hbar', 'stacked': True, 'money': True,
+            'title': 'Fees billed by site', 'subtitle': 'Damage and ticket charges, last 12 months',
+            'link': url_for('admin_fees', status='all'),
+            'series': [{'name': 'Paid'}, {'name': 'Unpaid'}],
+            'rows': [{'label': site, 'values': [float(paid), float(unpaid)]}
+                     for site, (paid, unpaid) in sorted(fees.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))],
+            'empty': 'No fees billed in the last 12 months.',
+        })
+    return charts
+
 
 @app.route('/admin')
 @login_required
@@ -2851,6 +3164,22 @@ def admin_panel():
     branding_settings = BrandingSettings.query.get(1)
     branding_configured = bool(branding_settings and (branding_settings.primary_color_raw or branding_settings.logo_filename))
 
+    data_quality_errors = None
+    if _has_permission('devices'):
+        data_quality_errors = sum(c['count'] for c in _data_quality_checks(site_ids) if c['severity'] == 'error')
+
+    # "Possible violators" widget — only once there's Google device data to
+    # judge by, otherwise it would just be an empty card on every install.
+    violators = None
+    if _has_permission('devices') and Asset.query.filter(Asset.google_last_activity.isnot(None)).first():
+        mismatches = _signin_mismatches(site_ids)
+        violators = {
+            'high': [m for m in mismatches if m['severity'] == 'high'],
+            'medium_count': sum(1 for m in mismatches if m['severity'] == 'medium'),
+            'low_count': sum(1 for m in mismatches if m['severity'] == 'low'),
+            'window_days': SIGNIN_DEFAULT_WINDOW_DAYS,
+        }
+
     return render_template('admin_panel.html',
                            registry_count=registry_count,
                            orphan_count=orphan_count,
@@ -2877,7 +3206,10 @@ def admin_panel():
                            email_enabled=EMAIL_ENABLED,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED,
                            google_loaner_autodisable_active=google_loaner_autodisable_active,
-                           branding_configured=branding_configured)
+                           branding_configured=branding_configured,
+                           charts=_dashboard_charts(site_ids),
+                           data_quality_errors=data_quality_errors,
+                           violators=violators)
 
 
 @app.route('/admin/upload_csv', methods=['POST'])
@@ -3944,6 +4276,8 @@ def _person_form_values():
         'external_id': request.form.get('external_id', '').strip() or None,
         'grad_year':   int(grad_year_raw) if grad_year_raw.isdigit() else None,
         'insurance_opted_in': bool(request.form.get('insurance_opted_in')),
+        'guardian_name':  request.form.get('guardian_name', '').strip() or None,
+        'guardian_email': request.form.get('guardian_email', '').strip().lower() or None,
     }
 
 
@@ -3955,6 +4289,9 @@ def _validate_person_form(values, person_id=None, allowed_site_ids=None):
         return 'First name, last name, and email are required.'
     if '@' not in values['email'] or '.' not in values['email'].split('@')[-1]:
         return 'Enter a valid email address.'
+    if values.get('guardian_email') and ('@' not in values['guardian_email']
+                                         or '.' not in values['guardian_email'].split('@')[-1]):
+        return 'Enter a valid parent/guardian email address (or leave it blank).'
     if values['external_id']:
         dupe = Person.query.filter(Person.external_id == values['external_id'])
         if person_id:
@@ -4255,6 +4592,9 @@ def admin_people_import():
                 grad_year_raw = clean(row.get('grad_year') or row.get('graduation_year'))
                 grad_year  = int(grad_year_raw) if grad_year_raw and grad_year_raw.isdigit() else None
                 insurance_opted_in = _parse_bool_csv(row.get('insurance') or row.get('insurance_opted_in'))
+                guardian_name  = clean(row.get('guardian_name') or row.get('parent_name'))
+                guardian_email = clean(row.get('guardian_email') or row.get('parent_email'))
+                guardian_email = guardian_email.lower() if guardian_email else None
 
                 if not first_name or not last_name or not email:
                     skipped += 1
@@ -4311,6 +4651,8 @@ def admin_people_import():
                     if site_id:      person.site_id = site_id
                     if grad_year:    person.grad_year = grad_year
                     if insurance_opted_in is not None: person.insurance_opted_in = insurance_opted_in
+                    if guardian_name:  person.guardian_name = guardian_name
+                    if guardian_email: person.guardian_email = guardian_email
                     updated += 1
                     results.append({'row': email, 'ok': True, 'message': f'Updated {person.full_name}.'})
                 else:
@@ -4319,6 +4661,7 @@ def admin_people_import():
                         external_id=external_id, role=role or 'staff',
                         department=department, site_id=site_id, grad_year=grad_year,
                         insurance_opted_in=bool(insurance_opted_in),
+                        guardian_name=guardian_name, guardian_email=guardian_email,
                     )
                     db.session.add(person)
                     created += 1
@@ -4521,6 +4864,10 @@ def admin_asset_assign(asset_tag):
 
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
                            history=history, combined_history=combined_history, events=events, incidents=incidents,
+                           incident_attachments=_attachments_for('incident', [i.id for i in incidents]),
+                           signin_flag=next(iter(_signin_mismatches(_current_site_ids(), window_days=90, only_tags=[asset_tag])), None)
+                                       if asset and asset.google_last_activity else None,
+                           email_enabled=EMAIL_ENABLED,
                            current_person_incident_count=current_person_incident_count,
                            repair_categories=repair_categories,
                            open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
@@ -4700,7 +5047,126 @@ def admin_bulk_print():
     return render_template('admin_bulk_print.html', candidates=candidates,
                            status_filter=status_filter, type_filter=type_filter,
                            order_mode=order_mode, since=since_str,
-                           asset_statuses=ASSET_STATUSES, device_types=DEVICE_TYPES)
+                           asset_statuses=ASSET_STATUSES, device_types=DEVICE_TYPES,
+                           avery_templates=AVERY_TEMPLATES)
+
+
+# ─── Avery sheet labels ───────────────────────────────────────────────────────
+# The no-Dymo option: a printable US Letter page laid out for standard Avery
+# sheets, so any office laser printer works. Barcodes are drawn server-side
+# as SVG (Code 128 — same symbology the Dymo labels use, so the same
+# scanners read both) rather than pulling in a JS barcode library.
+
+# Positions in inches, from Avery's published templates. Printing must be at
+# "Actual size"/100% with no extra margins — called out on the page itself.
+AVERY_TEMPLATES = OrderedDict([
+    ('5160', {'label': 'Avery 5160 / 8160 — 30 per sheet (1" × 2⅝")', 'cols': 3, 'rows': 10,
+              'width': 2.625, 'height': 1.0, 'top': 0.5, 'left': 0.1875, 'pitch_x': 2.75, 'pitch_y': 1.0}),
+    ('5163', {'label': 'Avery 5163 / 8163 — 10 per sheet (2" × 4")', 'cols': 2, 'rows': 5,
+              'width': 4.0, 'height': 2.0, 'top': 0.5, 'left': 0.15625, 'pitch_x': 4.1875, 'pitch_y': 2.0}),
+    ('5167', {'label': 'Avery 5167 / 8167 — 80 per sheet (½" × 1¾", tag + barcode only)', 'cols': 4, 'rows': 20,
+              'width': 1.75, 'height': 0.5, 'top': 0.5, 'left': 0.3, 'pitch_x': 2.05, 'pitch_y': 0.5}),
+])
+
+# Bar/space module widths for Code 128 symbol values 0-106 (106 = stop, 13 modules).
+_CODE128_PATTERNS = (
+    '212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 '
+    '221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 '
+    '221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 '
+    '212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 '
+    '231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 '
+    '231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 '
+    '314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 '
+    '112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 '
+    '111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 '
+    '214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 '
+    '114131 311141 411131 211412 211214 211232 2331112'
+).split()
+_CODE128_START_B, _CODE128_START_C, _CODE128_STOP = 104, 105, 106
+
+
+def _code128_values(text):
+    """Symbol values (start + data + checksum + stop). All-digit, even-length
+    values use Code C (two digits per symbol — half the width, which matters
+    on a ½"-tall 5167 label); anything else uses Code B (printable ASCII)."""
+    if len(text) >= 4 and len(text) % 2 == 0 and text.isdigit():
+        values = [_CODE128_START_C] + [int(text[i:i + 2]) for i in range(0, len(text), 2)]
+    else:
+        if any(not (32 <= ord(ch) <= 126) for ch in text):
+            raise ValueError(f'Can\'t barcode "{text}" — only plain printable characters are supported.')
+        values = [_CODE128_START_B] + [ord(ch) - 32 for ch in text]
+    checksum = (values[0] + sum(i * v for i, v in enumerate(values[1:], start=1))) % 103
+    return values + [checksum, _CODE128_STOP]
+
+
+def code128_svg(text, quiet_zone=10):
+    """Returns an inline <svg> for `text` as a Code 128 barcode. The viewBox is
+    in barcode modules and preserveAspectRatio="none", so CSS sizes it to
+    whatever box the label gives it without blurring the bars."""
+    x = quiet_zone
+    bars = []
+    for value in _code128_values(text):
+        for i, width in enumerate(_CODE128_PATTERNS[value]):
+            width = int(width)
+            if i % 2 == 0:  # even positions are bars, odd are spaces
+                bars.append(f'<rect x="{x}" y="0" width="{width}" height="1"/>')
+            x += width
+    total = x + quiet_zone
+    return Markup(f'<svg class="barcode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total} 1" '
+                  f'preserveAspectRatio="none" shape-rendering="crispEdges" role="img" '
+                  f'aria-label="Barcode {escape(text)}">{"".join(bars)}</svg>')
+
+
+@app.route('/admin/labels/avery', methods=['POST'])
+@require_permission('devices')
+def admin_avery_labels():
+    """Renders the selected asset tags (from Bulk Print's checkboxes, in
+    table order) onto an Avery sheet layout. skip = how many labels on the
+    first sheet are already used, so a half-used sheet isn't wasted."""
+    template_key = request.form.get('template', '5160')
+    template = AVERY_TEMPLATES.get(template_key)
+    if not template:
+        abort(400)
+    per_sheet = template['cols'] * template['rows']
+    skip = max(0, min(request.form.get('skip', 0, type=int) or 0, per_sheet - 1))
+    include_chargers = request.form.get('chargers') == 'on'
+    # One newline-joined field rather than one field per tag — a whole
+    # site's worth of tags would blow past Werkzeug's 1000-form-part limit.
+    tags = [t.strip() for t in request.form.get('asset_tags', '').split('\n') if t.strip()]
+
+    registry = {r.asset_tag: r for r in _scope_registry(AssetRegistry.query, _current_site_ids())
+                .filter(AssetRegistry.asset_tag.in_(tags))}
+    assets = {a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(list(registry)))}
+
+    labels = []
+    for tag in tags:
+        row = registry.get(tag)
+        if not row:
+            continue  # out of scope or deleted since the page loaded
+        asset = assets.get(tag)
+        if row.is_loaner:
+            second = 'LOANER' + (f': {row.loaner_label}' if row.loaner_label else '')
+        else:
+            second = asset.assigned_to.full_name if asset and asset.assigned_to else ''
+        try:
+            barcode = code128_svg(tag)
+        except ValueError:
+            barcode = None
+        labels.append({'tag': tag, 'second': second, 'barcode': barcode, 'charger': False})
+        if include_chargers:
+            labels.append({'tag': tag, 'second': 'CHARGER' + (f' · {second}' if second else ''),
+                           'barcode': barcode, 'charger': True})
+
+    if not labels:
+        flash('Select at least one device to print.', 'error')
+        return redirect(url_for('admin_bulk_print'))
+
+    slots = [None] * skip + labels
+    sheets = [slots[i:i + per_sheet] for i in range(0, len(slots), per_sheet)]
+    _log_activity('labels_print', f'Printed {len(labels)} Avery {template_key} label(s).')
+    db.session.commit()
+    return render_template('admin_avery_labels.html', template=template, template_key=template_key,
+                           sheets=sheets, label_count=len(labels), skip=skip)
 
 
 @app.route('/admin/assets/<string:asset_tag>/unassign', methods=['POST'])
@@ -4782,6 +5248,8 @@ def admin_asset_google_sync(asset_tag):
         asset.google_model        = info.get('model')
         asset.google_org_unit     = info.get('org_unit')
         asset.google_recent_user  = info.get('recent_user')
+        asset.google_recent_users = info.get('recent_users')
+        asset.google_last_activity = info.get('last_activity')
         asset.google_enabled      = info.get('enabled')
         asset.google_last_sync_at = datetime.utcnow()
         db.session.commit()
@@ -5635,6 +6103,13 @@ def _email_template_sample_vars():
     return {
         'first_name': 'Jordan', 'full_name': 'Jordan Smith', 'asset_tag': '123456',
         'due_date': datetime.utcnow().date().isoformat(), 'days_overdue': '3', 'days_overdue_plural': 's',
+        'ticket_id': '1042', 'ticket_subject': 'Chromebook won\'t charge',
+        'ticket_description': 'The charging light doesn\'t come on with any charger I try.',
+        'ticket_status': 'resolved', 'tech_name': 'Tech Office',
+        'reply_body': 'We swapped the charging port — you can pick it up from the library.',
+        'guardian_name': 'Pat Smith', 'student_name': 'Jordan Smith',
+        'incident_date': datetime.utcnow().date().isoformat(),
+        'incident_description': 'Cracked screen', 'fee_line': 'A repair fee of $45.00 has been assessed.',
     }
 
 
@@ -5660,12 +6135,22 @@ def admin_emails():
                 flash('Reset to the built-in default.', 'success')
             return redirect(url_for('admin_emails'))
 
+        if action == 'notifications':
+            settings.ticket_notifications_enabled = request.form.get('ticket_notifications_enabled') == 'on'
+            _log_activity('email_template_edit', f'Automatic ticket emails turned '
+                           f'{"on" if settings.ticket_notifications_enabled else "off"}.')
+            db.session.commit()
+            flash('Ticket email setting saved.', 'success')
+            return redirect(url_for('admin_emails'))
+
         # Validate every submitted template against the sample variables
         # before saving any of them — a typo (e.g. an unclosed brace) gets
         # caught here with a clear error instead of silently breaking a
         # reminder send later.
         submitted = {}
         for kind, default in EMAIL_TEMPLATE_KINDS.items():
+            if f'{kind}_subject' not in request.form and f'{kind}_body' not in request.form:
+                continue  # each card on the page is its own form — leave the others alone
             subject = request.form.get(f'{kind}_subject', '').strip()
             body = request.form.get(f'{kind}_body', '').strip()
             safe_vars = _SafeFormatDict(_email_template_sample_vars())
@@ -5700,8 +6185,55 @@ def admin_emails():
             'preview_subject': current_subject.format_map(safe_sample),
             'preview_body': current_body.format_map(safe_sample),
         })
-    return render_template('admin_emails.html', kinds=kinds, email_enabled=EMAIL_ENABLED,
+    return render_template('admin_emails.html', kinds=kinds, email_enabled=EMAIL_ENABLED, settings=settings,
                            sample_vars=_email_template_sample_vars())
+
+
+def _settings_sections():
+    """Every admin/settings area, grouped, filtered to what the current user
+    can actually open — the Admin tab's landing page. Kept as data so the
+    hub page and the Admin sub-nav can't drift apart on permissions."""
+    admin = _has_permission('admin')
+    users = _has_permission('manage_users')
+    sup = bool(session.get('is_super_admin'))
+    sections = [
+        ('People & Access', [
+            (users, 'users', 'Users & Permissions', 'Staff logins and what each one can see and do.', '/admin/users'),
+            (sup, 'site', 'Sites', 'Schools and buildings; which devices and people belong where.', '/admin/sites'),
+            (admin, 'computer', 'Kiosk Devices', 'Enroll a shared device for check-in/out without a login.', '/admin/kiosk'),
+        ]),
+        ('Notifications', [
+            (sup, 'email', 'Email', 'Wording for reminders, ticket updates, and parent damage notices.', '/admin/emails'),
+            (admin, 'schedule', 'Overdue Reminders', 'Devices past their due date, and who to remind.', '/admin/reminders'),
+        ]),
+        ('Customize', [
+            (sup, 'branding', 'Branding', 'Logo, app name, and colors.', '/admin/branding'),
+            (sup, 'custom-fields', 'Custom Fields', 'Extra fields on devices and people.', '/admin/custom_fields'),
+            (admin, 'help', 'Help Content', 'The FAQ and how-to guides on the Help page.', '/admin/help'),
+        ]),
+        ('Integrations', [
+            (sup, 'integration', 'Google Workspace', 'Connect Google Admin for Chromebook and user sync.', '/admin/google_setup'),
+            (sup and GOOGLE_SYNC_ENABLED, 'custom-fields', 'Google Field Mapping', 'Which Google fields fill which app fields.', '/admin/google_field_mapping'),
+            (sup and GOOGLE_SYNC_ENABLED, 'org-unit', 'Google Org Units', 'Map org units to sites and roles; push loaners to an OU.', '/admin/google_org_units'),
+            (sup, 'integration', 'KACE', 'Connect the KACE SMA inventory.', '/admin/kace_setup'),
+            (sup, 'sync', 'Scheduled Syncs', 'How often Google and KACE syncs run.', '/admin/sync_schedule'),
+        ]),
+        ('Records', [
+            (admin, 'history', 'Activity Log', 'Who changed what, and when.', '/admin/activity'),
+        ]),
+    ]
+    return [(title, [dict(icon=i, title=t, desc=d, url=u) for ok, i, t, d, u in items if ok])
+            for title, items in sections if any(item[0] for item in items)]
+
+
+@app.route('/admin/settings')
+@login_required
+def admin_settings():
+    sections = _settings_sections()
+    if not sections:
+        flash('Your account doesn\'t have access to any settings.', 'error')
+        return redirect(url_for('admin_panel'))
+    return render_template('admin_settings.html', sections=sections)
 
 
 @app.route('/admin/set_active_site', methods=['POST'])
@@ -6506,6 +7038,437 @@ def loaner_checkinout_page():
     return render_template('loaner_checkinout.html')
 
 
+# ─── Data Quality ─────────────────────────────────────────────────────────────
+# The "export to Excel and eyeball it" checks — duplicate serials, devices
+# held by people who've left, status/assignment disagreements. Every check
+# is a plain query run fresh on page load (no stored results to go stale),
+# scoped by the same _current_site_ids() as every other page.
+
+DATA_QUALITY_ROW_LIMIT = 250
+PRIMARY_DEVICE_TYPES = ('chromebook', 'laptop', 'ipad')
+STALE_REPAIR_DAYS = 30
+
+
+def _device_cells(row, asset=None, person=None, extra=None):
+    cells = [row.asset_tag, row.serial_number or '—', row.device_type,
+             row.site.name if row.site else '—']
+    if person is not None or asset is not None:
+        holder = person or (asset.assigned_to if asset else None)
+        cells.append(holder.full_name if holder else '—')
+    return cells + list(extra or [])
+
+
+def _data_quality_checks(site_ids):
+    """Returns a list of check dicts: key, title, why, severity
+    ('error' = almost certainly wrong data, 'warning' = needs a human look,
+    'info' = worth knowing), columns, rows [{'cells': [...], 'link': url}],
+    and count. rows is the full list (the CSV export needs all of them) —
+    the page itself only renders the first DATA_QUALITY_ROW_LIMIT."""
+    checks = []
+
+    def add(key, title, why, severity, columns, query_rows, row_fn):
+        rows = [row_fn(r) for r in query_rows]
+        checks.append({'key': key, 'title': title, 'why': why, 'severity': severity,
+                       'columns': columns, 'rows': rows, 'count': len(rows)})
+
+    device_cols = ['Asset Tag', 'Serial', 'Type', 'Site']
+    registry = _scope_registry(AssetRegistry.query, site_ids)
+    registry_asset = registry.join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
+    dev_link = lambda tag: url_for('admin_asset_assign', asset_tag=tag)
+
+    # Serials are unique as stored, but "5CD1234ABC" vs "5cd1234abc " vs
+    # "5CD-1234ABC" are the same machine typed three ways.
+    norm = db.func.upper(db.func.replace(db.func.replace(db.func.trim(AssetRegistry.serial_number), '-', ''), ' ', ''))
+    dupe_keys = [k for (k,) in registry.filter(AssetRegistry.serial_number.isnot(None), AssetRegistry.serial_number != '')
+                 .with_entities(norm).group_by(norm).having(db.func.count(AssetRegistry.id) > 1).all()]
+    dupes = registry.filter(norm.in_(dupe_keys)).order_by(norm, AssetRegistry.asset_tag).all() if dupe_keys else []
+    add('duplicate_serials', 'Duplicate serial numbers',
+        'Same serial (ignoring case, spaces, and dashes) on more than one asset tag — usually a device entered twice.',
+        'error', device_cols, dupes, lambda r: {'cells': _device_cells(r), 'link': dev_link(r.asset_tag)})
+
+    missing_serial = registry.filter(db.or_(AssetRegistry.serial_number.is_(None), AssetRegistry.serial_number == '')) \
+        .filter(AssetRegistry.device_type != 'charger').order_by(AssetRegistry.asset_tag).all()
+    add('missing_serial', 'Devices with no serial number',
+        'Can\'t be matched to Google/vendor records or warranty claims without one. Chargers are excluded.',
+        'warning', device_cols, missing_serial, lambda r: {'cells': _device_cells(r), 'link': dev_link(r.asset_tag)})
+
+    inactive_holders = registry_asset.join(Person, Person.id == Asset.assigned_to_id) \
+        .filter(Person.is_active.is_(False)).with_entities(AssetRegistry, Asset, Person) \
+        .order_by(Person.last_name, Person.first_name).all()
+    add('inactive_holders', 'Devices still assigned to inactive people',
+        'Graduated or withdrawn, but the record says they still have a device — collect it or mark it lost.',
+        'error', device_cols + ['Assigned To', 'Grad Year'], inactive_holders,
+        lambda t: {'cells': _device_cells(t[0], person=t[2], extra=[t[2].grad_year or '—']), 'link': dev_link(t[0].asset_tag)})
+
+    status_mismatch = registry_asset.filter(db.or_(
+        db.and_(Asset.status == 'assigned', Asset.assigned_to_id.is_(None)),
+        db.and_(Asset.assigned_to_id.isnot(None), Asset.status.in_(['available', 'retired', 'lost'])),
+    )).with_entities(AssetRegistry, Asset).order_by(AssetRegistry.asset_tag).all()
+    add('status_mismatch', 'Status doesn\'t match assignment',
+        'Marked "assigned" with nobody assigned, or assigned to someone while marked available/retired/lost.',
+        'error', device_cols + ['Assigned To', 'Status'], status_mismatch,
+        lambda t: {'cells': _device_cells(t[0], asset=t[1], extra=[t[1].status]), 'link': dev_link(t[0].asset_tag)})
+
+    no_site = registry.filter(AssetRegistry.site_id.is_(None)).order_by(AssetRegistry.asset_tag).all() if site_ids is None else []
+    if site_ids is None:
+        add('no_site', 'Devices with no site',
+            'Invisible to site-scoped staff until a site is set (Devices → Set Device Sites).',
+            'warning', device_cols, no_site, lambda r: {'cells': _device_cells(r), 'link': dev_link(r.asset_tag)})
+
+    no_model = registry.filter(AssetRegistry.device_model_id.is_(None),
+                               db.or_(AssetRegistry.description.is_(None), AssetRegistry.description == ''),
+                               AssetRegistry.device_type.in_(PRIMARY_DEVICE_TYPES)) \
+        .order_by(AssetRegistry.asset_tag).all()
+    add('no_model', 'Devices with no model or description',
+        'Repair-by-model charts and refresh planning can\'t count these.',
+        'info', device_cols, no_model, lambda r: {'cells': _device_cells(r), 'link': dev_link(r.asset_tag)})
+
+    held_primary = db.session.query(Asset.assigned_to_id, db.func.count(Asset.id)) \
+        .join(AssetRegistry, AssetRegistry.asset_tag == Asset.asset_tag) \
+        .filter(Asset.assigned_to_id.isnot(None), AssetRegistry.device_type.in_(PRIMARY_DEVICE_TYPES)) \
+        .filter(AssetRegistry.is_loaner.is_(False))
+    if site_ids is not None:
+        held_primary = held_primary.filter(AssetRegistry.site_id.in_(site_ids))
+    multi = dict(held_primary.group_by(Asset.assigned_to_id).having(db.func.count(Asset.id) > 1).all())
+    multi_people = Person.query.filter(Person.id.in_(list(multi))).order_by(Person.last_name).all() if multi else []
+    add('multiple_devices', 'People with more than one primary device',
+        'More than one Chromebook/laptop/iPad (loaners excluded) — often an old device never checked back in.',
+        'warning', ['Name', 'Email', 'Role', 'Devices'], multi_people,
+        lambda p: {'cells': [p.full_name, p.email, p.role, multi[p.id]], 'link': url_for('admin_person_history', person_id=p.id)})
+
+    with_device = db.session.query(Asset.assigned_to_id) \
+        .join(AssetRegistry, AssetRegistry.asset_tag == Asset.asset_tag) \
+        .filter(Asset.assigned_to_id.isnot(None), AssetRegistry.device_type.in_(PRIMARY_DEVICE_TYPES))
+    no_device = _scope_people(Person.query, site_ids).filter(
+        Person.role == 'student', Person.is_active.is_(True), ~Person.id.in_(with_device),
+    ).order_by(Person.last_name, Person.first_name).all()
+    add('students_without_device', 'Active students with no device',
+        '1:1 gap — every active student should have a Chromebook/laptop/iPad assigned.',
+        'info', ['Name', 'Email', 'Site', 'Grad Year'], no_device,
+        lambda p: {'cells': [p.full_name, p.email, p.site.name if p.site else '—', p.grad_year or '—'],
+                   'link': url_for('admin_person_edit', person_id=p.id)})
+
+    students_no_guardian = _scope_people(Person.query, site_ids).filter(
+        Person.role == 'student', Person.is_active.is_(True),
+        db.or_(Person.guardian_email.is_(None), Person.guardian_email == ''),
+    ).order_by(Person.last_name, Person.first_name).all()
+    add('students_no_guardian', 'Active students with no parent/guardian email',
+        'Damage notices can\'t be sent for these. Add guardian_email to your People CSV import from the SIS.',
+        'info', ['Name', 'Email', 'Site'], students_no_guardian,
+        lambda p: {'cells': [p.full_name, p.email, p.site.name if p.site else '—'],
+                   'link': url_for('admin_person_edit', person_id=p.id)})
+
+    stale_cutoff = datetime.utcnow() - timedelta(days=STALE_REPAIR_DAYS)
+    stale_repairs = _scope_repairs(Repair.query, site_ids).filter(
+        Repair.returned_at.is_(None), Repair.sent_at < stale_cutoff).order_by(Repair.sent_at).all()
+    add('stale_repairs', f'Repairs open more than {STALE_REPAIR_DAYS} days',
+        'Chase the vendor, or close it out if the device came back and nobody marked it returned.',
+        'warning', ['Asset Tag', 'Sent', 'Days Out', 'Issue'], stale_repairs,
+        lambda r: {'cells': [r.asset_tag, r.sent_at.strftime('%Y-%m-%d'), (datetime.utcnow() - r.sent_at).days,
+                             (r.issue_description or '—')[:80]],
+                   'link': url_for('admin_repair_detail', repair_id=r.id)})
+
+    expired_in_use = _filter_registry_by_warranty(registry_asset, 'expired') \
+        .filter(Asset.assigned_to_id.isnot(None)).with_entities(AssetRegistry, Asset) \
+        .order_by(AssetRegistry.warranty_expiration).all()
+    add('expired_in_use', 'Out-of-warranty devices still in use',
+        'Assigned devices whose warranty has expired — repairs on these come out of the budget. Useful for refresh planning.',
+        'info', device_cols + ['Assigned To', 'Warranty Ended'], expired_in_use,
+        lambda t: {'cells': _device_cells(t[0], asset=t[1], extra=[t[0].warranty_expiration.isoformat()]),
+                   'link': dev_link(t[0].asset_tag)})
+
+    if GOOGLE_SYNC_ENABLED:
+        never_synced = registry_asset.filter(AssetRegistry.device_type == 'chromebook',
+                                             Asset.google_last_sync_at.is_(None),
+                                             Asset.status.notin_(['retired', 'lost'])) \
+            .with_entities(AssetRegistry).order_by(AssetRegistry.asset_tag).all()
+        add('never_synced', 'Chromebooks never matched in Google',
+            'No Google Admin record found by serial — typo\'d serial, never enrolled, or deprovisioned.',
+            'warning', device_cols, never_synced, lambda r: {'cells': _device_cells(r), 'link': dev_link(r.asset_tag)})
+
+    severity_order = {'error': 0, 'warning': 1, 'info': 2}
+    checks.sort(key=lambda c: (c['count'] == 0, severity_order[c['severity']]))
+    return checks
+
+
+@app.route('/admin/data_quality')
+@require_permission('devices')
+def admin_data_quality():
+    checks = _data_quality_checks(_current_site_ids())
+    export_key = request.args.get('export')
+    if export_key:
+        check = next((c for c in checks if c['key'] == export_key), None)
+        if not check:
+            abort(404)
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(check['columns'])
+        for row in check['rows']:
+            writer.writerow(row['cells'])
+        response = app.response_class(out.getvalue(), mimetype='text/csv')
+        response.headers['Content-Disposition'] = f'attachment; filename=data_quality_{export_key}.csv'
+        return response
+    return render_template('admin_data_quality.html', checks=checks, row_limit=DATA_QUALITY_ROW_LIMIT)
+
+
+# ─── Google Sign-in Mismatches ("possible violators") ─────────────────────────
+# Cross-checks who Google says last signed in to each Chromebook against who
+# this app says should have it. Purely a read of data the device sync already
+# caches (Asset.google_recent_users / google_last_activity) — no live API
+# calls on page load. Every rule below exists to avoid a specific false
+# positive seen in real 1:1 programs; see the comments inline.
+
+SIGNIN_WINDOW_DAYS_CHOICES = (7, 30, 90)
+SIGNIN_DEFAULT_WINDOW_DAYS = 30
+SIGNIN_HANDOFF_GRACE_DAYS = 3  # a new holder often doesn't sign in for a day or two after pickup
+
+SIGNIN_CATEGORIES = OrderedDict([
+    # key: (label, severity, explanation)
+    ('wrong_student',     ('Another student\'s device', 'high',
+                           'A student who isn\'t the assigned holder is the most recent sign-in.')),
+    ('swapped',           ('Swapped devices', 'high',
+                           'Two students are each signing in to the other\'s assigned device.')),
+    ('inactive_person',   ('Withdrawn/graduated account', 'high',
+                           'The most recent sign-in belongs to someone marked inactive.')),
+    ('lost_in_use',       ('Lost/retired device in use', 'high',
+                           'Marked lost or retired, but someone has been signing in to it.')),
+    ('unassigned_in_use', ('Unassigned device in use', 'medium',
+                           'Nobody is assigned (or no loaner is checked out), but someone signed in after it was returned.')),
+    ('unknown_account',   ('Account not in People', 'medium',
+                           'Signed in with an account that doesn\'t match anyone in People.')),
+    ('previous_holder',   ('Previous holder still signing in', 'low',
+                           'The last sign-in is someone who used to have this device.')),
+    ('staff_signin',      ('Staff sign-in', 'low',
+                           'A staff account — usually a tech or teacher helping out.')),
+])
+SIGNIN_SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
+
+
+def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include_reviewed=False, only_tags=None):
+    """Returns a list of mismatch dicts (asset_tag, signin_email, signer,
+    expected, category, severity, last_activity, note, reviewed), most
+    severe first. Only devices that were actually online within
+    window_days are considered — recentUsers is a history, and a device
+    sitting in a closet still lists whoever used it last spring.
+    only_tags narrows to specific devices (the device page's own flag) —
+    swap detection then can't see the other half of a swap, which is fine
+    for a single-device badge."""
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=window_days)
+
+    rows = _scope_registry(AssetRegistry.query, site_ids) \
+        .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag) \
+        .filter(Asset.google_recent_user.isnot(None), Asset.google_last_activity >= cutoff)
+    if only_tags is not None:
+        rows = rows.filter(AssetRegistry.asset_tag.in_(only_tags))
+    rows = rows.with_entities(AssetRegistry, Asset).all()
+    if not rows:
+        return []
+    tags = [r.asset_tag for r, _ in rows]
+
+    people_by_email = {p.email.lower(): p for p in Person.query.all()}
+    people_by_id = {p.id: p for p in people_by_email.values()}
+
+    open_assignments = {h.asset_tag: h for h in AssignmentHistory.query.filter(
+        AssignmentHistory.asset_tag.in_(tags), AssignmentHistory.unassigned_at.is_(None))}
+    open_loaners = {l.asset_tag: l for l in LoanerCheckout.query.filter(
+        LoanerCheckout.asset_tag.in_(tags), LoanerCheckout.checked_in_at.is_(None))}
+
+    # Who used to have each device, and when it was last handed back — a
+    # sign-in by the previous holder, or from before the return, isn't news.
+    previous_ids = defaultdict(set)
+    last_returned = {}
+    for h in AssignmentHistory.query.filter(AssignmentHistory.asset_tag.in_(tags),
+                                            AssignmentHistory.unassigned_at.isnot(None)):
+        if h.person_id:
+            previous_ids[h.asset_tag].add(h.person_id)
+        last_returned[h.asset_tag] = max(last_returned.get(h.asset_tag, h.unassigned_at), h.unassigned_at)
+    for l in LoanerCheckout.query.filter(LoanerCheckout.asset_tag.in_(tags), LoanerCheckout.checked_in_at.isnot(None)):
+        if l.person_id:
+            previous_ids[l.asset_tag].add(l.person_id)
+        last_returned[l.asset_tag] = max(last_returned.get(l.asset_tag, l.checked_in_at), l.checked_in_at)
+
+    # Every device each person is *supposed* to have, for the "their own
+    # device is X" note and swap detection.
+    own_devices = defaultdict(list)
+    for a in Asset.query.filter(Asset.assigned_to_id.isnot(None)).with_entities(Asset.asset_tag, Asset.assigned_to_id):
+        own_devices[a.assigned_to_id].append(a.asset_tag)
+    for l in LoanerCheckout.query.filter(LoanerCheckout.checked_in_at.is_(None), LoanerCheckout.person_id.isnot(None)):
+        own_devices[l.person_id].append(l.asset_tag)
+
+    reviewed = {(r.asset_tag, r.signin_email): r for r in SigninReview.query.filter(SigninReview.asset_tag.in_(tags))}
+
+    results = []
+    for registry_row, asset in rows:
+        recent = asset.google_recent_users or [asset.google_recent_user.lower()]
+        signin_email = recent[0]
+        signer = people_by_email.get(signin_email)
+
+        expected = []
+        held_since = None
+        loaner = open_loaners.get(registry_row.asset_tag)
+        if loaner and loaner.person_id in people_by_id:
+            expected.append(people_by_id[loaner.person_id])
+            held_since = loaner.checked_out_at
+        if asset.assigned_to_id and asset.assigned_to_id in people_by_id:
+            if people_by_id[asset.assigned_to_id] not in expected:
+                expected.append(people_by_id[asset.assigned_to_id])
+            assignment = open_assignments.get(registry_row.asset_tag)
+            if assignment and not held_since:
+                held_since = assignment.assigned_at
+        expected_ids = {p.id for p in expected}
+
+        is_expected = bool(signer and signer.id in expected_ids)
+        if is_expected and asset.status not in ('lost', 'retired'):
+            continue  # the normal case: the right person
+
+        note = []
+        category = None
+        if asset.status in ('lost', 'retired'):
+            category = 'lost_in_use'
+            if is_expected:
+                note.append('It\'s the assigned holder signing in — the device may have turned up.')
+        elif not expected:
+            returned_at = last_returned.get(registry_row.asset_tag)
+            # Only flag use AFTER it came back — before that, whoever had it
+            # was supposed to be signing in.
+            if returned_at and asset.google_last_activity <= returned_at:
+                continue
+            category = 'unassigned_in_use'
+            if registry_row.is_loaner:
+                note.append('Loaner in the pool with no checkout recorded.')
+        elif not signer:
+            category = 'unknown_account'
+        elif signer.id in previous_ids[registry_row.asset_tag]:
+            # Checked before is_active: a graduate who had this device before
+            # it was reassigned is old history, not a withdrawn student
+            # still using it.
+            category = 'previous_holder'
+            if held_since and (now - held_since).days < SIGNIN_HANDOFF_GRACE_DAYS:
+                continue  # just handed over — give the new holder a chance to sign in
+            if held_since:
+                note.append(f'Handed to the current holder {(now - held_since).days} day(s) ago.')
+        elif not signer.is_active:
+            category = 'inactive_person'
+        elif signer.role == 'staff':
+            category = 'staff_signin'
+        else:
+            category = 'wrong_student'
+
+        if expected and signer and any(p.email.lower() in recent for p in expected):
+            note.append('The assigned holder also appears in this device\'s recent sign-ins.')
+        if signer:
+            others = [t for t in own_devices.get(signer.id, []) if t != registry_row.asset_tag]
+            if others:
+                note.append(f'{signer.full_name}\'s own device: {", ".join(others)}.')
+            elif signer.role == 'student' and signer.is_active:
+                note.append(f'{signer.full_name} has no device assigned.')
+
+        review = reviewed.get((registry_row.asset_tag, signin_email))
+        if review and not include_reviewed:
+            continue
+        label, severity, _ = SIGNIN_CATEGORIES[category]
+        results.append({
+            'asset_tag': registry_row.asset_tag, 'registry_row': registry_row, 'asset': asset,
+            'signin_email': signin_email, 'signer': signer, 'expected': expected,
+            'category': category, 'label': label, 'severity': severity,
+            'last_activity': asset.google_last_activity, 'note': note, 'review': review,
+        })
+
+    # Swap detection: A is on B's device and B is on A's device.
+    by_pair = {}
+    for m in results:
+        if m['category'] == 'wrong_student' and m['signer'] and len(m['expected']) == 1:
+            by_pair[(m['signer'].id, m['expected'][0].id)] = m
+    for (signer_id, holder_id), m in by_pair.items():
+        if (holder_id, signer_id) in by_pair:
+            m['category'] = 'swapped'
+            m['label'], m['severity'], _ = SIGNIN_CATEGORIES['swapped']
+
+    # How many devices that aren't theirs each account is turning up on — a
+    # student on three other kids' Chromebooks is a different conversation
+    # than one borrowed device.
+    foreign_counts = defaultdict(int)
+    for m in results:
+        if m['severity'] == 'high':
+            foreign_counts[m['signin_email']] += 1
+    for m in results:
+        m['foreign_count'] = foreign_counts.get(m['signin_email'], 0)
+
+    results.sort(key=lambda m: (SIGNIN_SEVERITY_ORDER[m['severity']], -m['foreign_count'],
+                                -(m['last_activity'] or datetime.min).timestamp()))
+    return results
+
+
+@app.template_filter('ago')
+def _ago_filter(value):
+    """'3h ago' / '2d ago' for a naive-UTC datetime — reads faster than a
+    timestamp when scanning a list for what's recent."""
+    if not value:
+        return '—'
+    seconds = max(0, int((datetime.utcnow() - value).total_seconds()))
+    if seconds < 3600:
+        return f'{max(1, seconds // 60)}m ago'
+    if seconds < 86400:
+        return f'{seconds // 3600}h ago'
+    return f'{seconds // 86400}d ago'
+
+
+def _signin_window_days():
+    days = request.args.get('days', SIGNIN_DEFAULT_WINDOW_DAYS, type=int)
+    return days if days in SIGNIN_WINDOW_DAYS_CHOICES else SIGNIN_DEFAULT_WINDOW_DAYS
+
+
+@app.route('/admin/signin_mismatches')
+@require_permission('devices')
+def admin_signin_mismatches():
+    window_days = _signin_window_days()
+    show_reviewed = request.args.get('reviewed') == '1'
+    severity = request.args.get('severity', '').strip()
+    mismatches = _signin_mismatches(_current_site_ids(), window_days, include_reviewed=show_reviewed)
+    counts = defaultdict(int)
+    for m in mismatches:
+        counts[m['severity']] += 1
+    if severity in SIGNIN_SEVERITY_ORDER:
+        mismatches = [m for m in mismatches if m['severity'] == severity]
+    has_google_data = Asset.query.filter(Asset.google_last_activity.isnot(None)).first() is not None
+    return render_template('admin_signin_mismatches.html', mismatches=mismatches, counts=counts,
+                           window_days=window_days, window_choices=SIGNIN_WINDOW_DAYS_CHOICES,
+                           show_reviewed=show_reviewed, severity=severity, categories=SIGNIN_CATEGORIES,
+                           has_google_data=has_google_data, google_sync_enabled=GOOGLE_SYNC_ENABLED,
+                           grace_days=SIGNIN_HANDOFF_GRACE_DAYS)
+
+
+@app.route('/admin/signin_mismatches/review', methods=['POST'])
+@require_permission('devices')
+def admin_signin_mismatch_review():
+    """Marks one (device, account) mismatch as reviewed/OK, or with
+    action=reopen puts it back on the list."""
+    asset_tag = request.form.get('asset_tag', '').strip()
+    signin_email = request.form.get('signin_email', '').strip().lower()
+    registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
+    existing = SigninReview.query.filter_by(asset_tag=asset_tag, signin_email=signin_email).first()
+    try:
+        if request.form.get('action') == 'reopen':
+            if existing:
+                db.session.delete(existing)
+                _log_activity('signin_review', f'Reopened sign-in flag: {signin_email} on {asset_tag}.', site_id=registry_row.site_id)
+            flash(f'{signin_email} on {asset_tag} is back on the list.', 'success')
+        else:
+            _, actor_label, _ = _current_actor()
+            note = request.form.get('note', '').strip()[:255] or None
+            if not existing:
+                db.session.add(SigninReview(asset_tag=asset_tag, signin_email=signin_email, note=note, reviewed_by=actor_label))
+            _log_activity('signin_review', f'Marked sign-in OK: {signin_email} on {asset_tag}'
+                           f'{" — " + note if note else ""}.', site_id=registry_row.site_id)
+            flash(f'Marked {signin_email} on {asset_tag} as reviewed. It\'ll only come back if a different account signs in.', 'success')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not save: {e}', 'error')
+    return redirect(request.referrer or url_for('admin_signin_mismatches'))
+
+
 # ─── Asset Audit ──────────────────────────────────────────────────────────────
 
 @app.route('/admin/audit')
@@ -6604,6 +7567,42 @@ def _create_incident(asset_tag, person, description, fee_charged=False, fee_amou
     return incident
 
 
+def _send_damage_notice(incident):
+    """Emails the damage_notice template to the guardian of the student the
+    incident was logged against. Sent synchronously (unlike the ticket
+    notices) because it's always an explicit office action and the person
+    clicking needs to know whether it actually went out. Commits the
+    guardian_notified_at stamp. Returns (ok, message)."""
+    person = Person.query.get(incident.person_id) if incident.person_id else None
+    if not EMAIL_ENABLED:
+        return False, 'Email isn\'t configured (set SMTP_FROM_EMAIL), so no notice was sent.'
+    if not person or not person.guardian_email:
+        return False, 'No parent/guardian email on file for this person — add one on their People record.'
+    if incident.fee_charged and incident.fee_amount:
+        fee_line = f'A fee of ${incident.fee_amount:.2f} has been assessed.'
+    elif incident.fee_charged:
+        fee_line = 'A fee will be assessed; the office will follow up with the amount.'
+    else:
+        fee_line = 'No fee has been assessed at this time.'
+    subject, body = _render_email_template('damage_notice', {
+        'guardian_name': person.guardian_name or 'Parent/Guardian',
+        'student_name': person.full_name, 'asset_tag': incident.asset_tag,
+        'incident_date': incident.created_at.strftime('%Y-%m-%d'),
+        'incident_description': incident.description, 'fee_line': fee_line,
+    })
+    try:
+        send_email(person.guardian_email, subject, body)
+    except Exception as e:
+        logger.error('Damage notice for incident %s failed: %s', incident.id, e)
+        return False, f'Could not send the notice: {e}'
+    incident.guardian_notified_at = datetime.utcnow()
+    registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
+    _log_activity('damage_notice', f'Emailed damage notice for {incident.asset_tag} to {person.full_name}\'s guardian ({person.guardian_email}).',
+                   site_id=registry_row.site_id if registry_row else None)
+    db.session.commit()
+    return True, f'Damage notice emailed to {person.guardian_email}.'
+
+
 @app.route('/admin/assets/<string:asset_tag>/incidents', methods=['POST'])
 @require_permission('devices')
 def admin_incident_add(asset_tag):
@@ -6627,14 +7626,30 @@ def admin_incident_add(asset_tag):
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
     person = asset.assigned_to if asset else None
     try:
-        _create_incident(asset_tag, person, description, fee_charged=fee_charged, fee_amount=fee_amount,
-                          repair_category_id=repair_category_id)
+        incident = _create_incident(asset_tag, person, description, fee_charged=fee_charged, fee_amount=fee_amount,
+                                     repair_category_id=repair_category_id)
+        db.session.flush()
+        _, actor_label, _ = _current_actor()
+        _save_attachments('incident', incident.id, request.files.getlist('photos'), uploaded_by=actor_label)
         db.session.commit()
         flash('Incident logged.', 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not log incident: {e}', 'error')
+        return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+    if request.form.get('notify_guardian') == 'on':
+        ok, message = _send_damage_notice(incident)
+        flash(message, 'success' if ok else 'error')
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+
+@app.route('/admin/incidents/<int:incident_id>/notify_guardian', methods=['POST'])
+@require_permission('devices')
+def admin_incident_notify_guardian(incident_id):
+    incident = _attachment_owner_in_scope('incident', incident_id) or abort(404)
+    ok, message = _send_damage_notice(incident)
+    flash(message, 'success' if ok else 'error')
+    return redirect(request.referrer or url_for('admin_asset_assign', asset_tag=incident.asset_tag))
 
 
 @app.route('/report_problem', methods=['GET', 'POST'])
@@ -6672,7 +7687,9 @@ def report_problem_page():
                 return redirect(url_for('report_problem_page'))
 
         try:
-            _create_incident(asset_tag, person, description)
+            incident = _create_incident(asset_tag, person, description)
+            db.session.flush()
+            _save_attachments('incident', incident.id, request.files.getlist('photos'), uploaded_by=person.full_name)
             db.session.commit()
             flash('Thanks — your report has been logged.', 'success')
         except Exception as e:
@@ -6724,6 +7741,7 @@ def admin_incident_delete(incident_id):
     incident = Incident.query.get_or_404(incident_id)
     asset_tag, person_name, description = incident.asset_tag, incident.person_name, incident.description
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
+    Attachment.query.filter_by(owner_type='incident', owner_id=incident.id).delete()
     db.session.delete(incident)
     _log_activity('incident_delete', f'Deleted incident on {asset_tag} ({person_name or "unknown"}): {description}',
                    site_id=registry_row.site_id if registry_row else None)
@@ -7055,7 +8073,8 @@ def admin_repair_detail(repair_id):
     default_loaner_person = repair.ticket.requester if repair.ticket else None
     return render_template('admin_repair_detail.html', repair=repair, repair_categories=repair_categories,
                            repair_outcomes=REPAIR_OUTCOMES, active_loaner=active_loaner,
-                           default_loaner_person=default_loaner_person)
+                           default_loaner_person=default_loaner_person,
+                           attachments=_attachments_for('repair', [repair.id])[repair.id])
 
 
 @app.route('/admin/repairs/<int:repair_id>/return', methods=['POST'])
@@ -7269,6 +8288,34 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     return ticket
 
 
+def _ticket_email_vars(ticket):
+    first_name = (ticket.requester.first_name if ticket.requester
+                  else (ticket.requester_name or 'there').split(' ')[0])
+    return {
+        'first_name': first_name, 'full_name': ticket.requester_name or '',
+        'ticket_id': str(ticket.id), 'ticket_subject': ticket.subject,
+        'ticket_description': ticket.description, 'ticket_status': ticket.status.replace('_', ' '),
+    }
+
+
+def _notify_ticket_requester(ticket, kind, extra_vars=None, force=False):
+    """Emails the ticket's requester using the `kind` template. Automatic
+    notices (received/resolved) respect the ticket_notifications_enabled
+    switch on /admin/emails; an explicit tech reply passes force=True.
+    Returns True if a send was queued — False (silently) when email isn't
+    configured, there's no requester address, or notices are switched off,
+    since none of those should block the ticket action itself."""
+    if not EMAIL_ENABLED or not ticket.requester_email:
+        return False
+    if not force and not _get_email_settings().ticket_notifications_enabled:
+        return False
+    variables = _ticket_email_vars(ticket)
+    variables.update(extra_vars or {})
+    subject, body = _render_email_template(kind, variables)
+    _send_email_in_background(ticket.requester_email, subject, body)
+    return True
+
+
 def _execute_device_automation_action(action_type, asset_tag, ticket=None, automation=None):
     """
     Runs one automation action_type against a device by asset_tag —
@@ -7447,9 +8494,14 @@ def submit_ticket_page():
         try:
             ticket = _create_ticket(category_id, subject, description, person=person,
                                      asset_tag=asset_tag, site_id=person.site_id)
+            photo_count = _save_attachments('ticket', ticket.id, request.files.getlist('photos'),
+                                            uploaded_by=person.full_name)
             db.session.commit()
             _check_ticket_automation(ticket)
-            flash('Thanks — your ticket has been submitted.', 'success')
+            emailed = _notify_ticket_requester(ticket, 'ticket_received')
+            flash(f'Thanks — your ticket #{ticket.id} has been submitted'
+                  f'{f" with {photo_count} photo(s)" if photo_count else ""}.'
+                  f'{" A confirmation was emailed to " + person.email + "." if emailed else ""}', 'success')
         except Exception as e:
             db.session.rollback()
             flash(f'Could not submit ticket: {e}', 'error')
@@ -7540,29 +8592,33 @@ def admin_ticket_new():
 
         if not category_id or not TicketCategory.query.filter_by(id=category_id, is_active=True).first():
             flash('Choose a category.', 'error')
-            return render_template('admin_ticket_form.html', categories=categories, sites=sites, form=request.form)
+            return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=request.form)
         if not subject:
             flash('Give the ticket a short subject.', 'error')
-            return render_template('admin_ticket_form.html', categories=categories, sites=sites, form=request.form)
+            return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=request.form)
         if not description:
             flash('Describe the issue.', 'error')
-            return render_template('admin_ticket_form.html', categories=categories, sites=sites, form=request.form)
+            return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=request.form)
         if site_ids is not None and (not site_id or site_id not in site_ids):
             flash('Choose one of your own sites.', 'error')
-            return render_template('admin_ticket_form.html', categories=categories, sites=sites, form=request.form)
+            return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=request.form)
 
         try:
             ticket = _create_ticket(category_id, subject, description, person=person,
                                      asset_tag=asset_tag, site_id=site_id, priority=priority)
+            _, actor_label, _ = _current_actor()
+            _save_attachments('ticket', ticket.id, request.files.getlist('photos'), uploaded_by=actor_label)
             db.session.commit()
             _check_ticket_automation(ticket)
+            if request.form.get('notify_requester') == 'on':
+                _notify_ticket_requester(ticket, 'ticket_received')
             flash('Ticket created.', 'success')
             return redirect(url_for('admin_ticket_detail', ticket_id=ticket.id))
         except Exception as e:
             db.session.rollback()
             flash(f'Could not create ticket: {e}', 'error')
 
-    return render_template('admin_ticket_form.html', categories=categories, sites=sites, form=None, priorities=TICKET_PRIORITIES)
+    return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=None, priorities=TICKET_PRIORITIES)
 
 
 @app.route('/admin/tickets/<int:ticket_id>')
@@ -7578,7 +8634,9 @@ def admin_ticket_detail(ticket_id):
                            statuses=TICKET_STATUSES, priorities=TICKET_PRIORITIES,
                            assignees=_ticket_assignees(site_ids), history=history,
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
-                           pending_action=pending_action, action_labels=AUTOMATION_ACTIONS)
+                           pending_action=pending_action, action_labels=AUTOMATION_ACTIONS,
+                           attachments=_attachments_for('ticket', [ticket.id])[ticket.id],
+                           email_enabled=EMAIL_ENABLED)
 
 
 @app.route('/admin/tickets/<int:ticket_id>/edit', methods=['GET', 'POST'])
@@ -7660,11 +8718,22 @@ def admin_ticket_comment(ticket_id):
         flash('Comment cannot be blank.', 'error')
         return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
     _, actor_label, _ = _current_actor()
-    db.session.add(TicketComment(ticket_id=ticket.id, body=body, author_label=actor_label))
+    send_reply = request.form.get('email_requester') == 'on'
+    if send_reply and not (EMAIL_ENABLED and ticket.requester_email):
+        flash('Can\'t email this reply — ' + ('email isn\'t configured.' if not EMAIL_ENABLED
+              else 'the ticket has no requester email.') + ' Nothing was saved.', 'error')
+        return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+    db.session.add(TicketComment(ticket_id=ticket.id, body=body, author_label=actor_label,
+                                 emailed_to_requester=send_reply))
     ticket.updated_at = datetime.utcnow()
-    _log_activity('ticket_comment', f'Commented on ticket #{ticket.id}.', site_id=ticket.site_id, ticket_id=ticket.id)
+    _log_activity('ticket_comment', f'{"Replied to requester on" if send_reply else "Commented on"} ticket #{ticket.id}.',
+                   site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
-    flash('Comment added.', 'success')
+    if send_reply:
+        _notify_ticket_requester(ticket, 'ticket_reply', {'tech_name': actor_label, 'reply_body': body}, force=True)
+        flash(f'Reply emailed to {ticket.requester_email}.', 'success')
+    else:
+        flash('Comment added.', 'success')
     return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
 
 
@@ -7689,6 +8758,10 @@ def admin_ticket_status(ticket_id):
     if changes:
         _log_activity('ticket_status', f'Ticket #{ticket.id} — {"; ".join(changes)}.', site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
+    # Only on the transition INTO resolved/closed — resolved → closed is
+    # bookkeeping, not news to the requester.
+    if ticket.status in ('resolved', 'closed') and old_status not in ('resolved', 'closed'):
+        _notify_ticket_requester(ticket, 'ticket_resolved')
     flash(f'Ticket #{ticket.id} updated.', 'success')
     return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
 
@@ -8045,6 +9118,146 @@ def admin_asset_profile_clear(asset_tag):
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
+# ─── Attachments (photos on incidents / tickets / repairs) ─────────────────────
+
+ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024  # per file, after client-side downscaling — generous headroom for a PDF
+ATTACHMENT_MAX_PER_UPLOAD = 6
+# Magic-byte sniffing, not the browser-supplied Content-Type or extension —
+# both are trivially spoofable and these bytes get served back inline.
+_ATTACHMENT_SIGNATURES = (
+    (b'\xff\xd8\xff', 'image/jpeg'),
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'GIF87a', 'image/gif'),
+    (b'GIF89a', 'image/gif'),
+    (b'%PDF-', 'application/pdf'),
+)
+ATTACHMENT_PERMISSIONS = {'incident': 'devices', 'ticket': 'tickets', 'repair': 'repairs'}
+
+
+def _sniff_attachment_type(data):
+    for signature, content_type in _ATTACHMENT_SIGNATURES:
+        if data.startswith(signature):
+            return content_type
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'image/webp'
+    return None
+
+
+def _save_attachments(owner_type, owner_id, files, uploaded_by=None):
+    """Stores each uploaded file in `files` (a request.files.getlist()) as an
+    Attachment on the given owner. Silently skips empty file inputs; raises
+    ValueError for a disallowed type or oversized file so the caller's
+    try/except rolls back the whole action (a ticket shouldn't half-save
+    with some photos missing). Does not commit. Returns the count saved."""
+    files = [f for f in (files or []) if f and f.filename]
+    if len(files) > ATTACHMENT_MAX_PER_UPLOAD:
+        raise ValueError(f'At most {ATTACHMENT_MAX_PER_UPLOAD} files per upload.')
+    for f in files:
+        data = f.read()
+        if len(data) > ATTACHMENT_MAX_BYTES:
+            raise ValueError(f'"{f.filename}" is larger than {ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB.')
+        content_type = _sniff_attachment_type(data)
+        if not content_type:
+            raise ValueError(f'"{f.filename}" isn\'t a supported photo (JPEG/PNG/GIF/WebP) or PDF.')
+        db.session.add(Attachment(
+            owner_type=owner_type, owner_id=owner_id, filename=secure_filename(f.filename) or 'upload',
+            content_type=content_type, size_bytes=len(data), data=data, uploaded_by=uploaded_by,
+        ))
+    return len(files)
+
+
+def _attachments_for(owner_type, owner_ids):
+    """{owner_id: [Attachment, ...]} for a batch of owners — one query for a
+    whole table of incidents instead of one per row."""
+    owner_ids = list(owner_ids)
+    grouped = defaultdict(list)
+    if owner_ids:
+        rows = Attachment.query.filter(Attachment.owner_type == owner_type, Attachment.owner_id.in_(owner_ids)) \
+            .order_by(Attachment.created_at).all()
+        for row in rows:
+            grouped[row.owner_id].append(row)
+    return grouped
+
+
+def _attachment_owner_in_scope(owner_type, owner_id):
+    """Returns the owning Incident/Ticket/Repair if the current user has
+    the matching permission AND it's within their site scope, else None."""
+    if owner_type not in ATTACHMENT_PERMISSIONS or not _has_permission(ATTACHMENT_PERMISSIONS[owner_type]):
+        return None
+    site_ids = _current_site_ids()
+    if owner_type == 'ticket':
+        return _scope_tickets(Ticket.query, site_ids).filter_by(id=owner_id).first()
+    if owner_type == 'repair':
+        return _scope_repairs(Repair.query, site_ids).filter_by(id=owner_id).first()
+    incident = Incident.query.get(owner_id)
+    if incident and site_ids is not None:
+        in_scope = _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=incident.asset_tag).first()
+        return incident if in_scope else None
+    return incident
+
+
+def _attachment_return_url(owner_type, owner):
+    if owner_type == 'ticket':
+        return url_for('admin_ticket_detail', ticket_id=owner.id)
+    if owner_type == 'repair':
+        return url_for('admin_repair_detail', repair_id=owner.id)
+    return url_for('admin_asset_assign', asset_tag=owner.asset_tag)
+
+
+@app.route('/admin/attachments/<int:attachment_id>')
+@login_required
+def admin_attachment_view(attachment_id):
+    attachment = Attachment.query.get_or_404(attachment_id)
+    if not _attachment_owner_in_scope(attachment.owner_type, attachment.owner_id):
+        abort(404)
+    response = app.response_class(attachment.data, mimetype=attachment.content_type)
+    disposition = 'attachment' if request.args.get('download') else 'inline'
+    response.headers['Content-Disposition'] = f'{disposition}; filename="{attachment.filename}"'
+    response.headers['Content-Security-Policy'] = "sandbox; default-src 'none'; img-src 'self'"
+    response.headers['Cache-Control'] = 'private, max-age=86400'
+    return response
+
+
+@app.route('/admin/attachments/<string:owner_type>/<int:owner_id>', methods=['POST'])
+@login_required
+def admin_attachment_upload(owner_type, owner_id):
+    owner = _attachment_owner_in_scope(owner_type, owner_id)
+    if not owner:
+        abort(404)
+    _, actor_label, _ = _current_actor()
+    try:
+        count = _save_attachments(owner_type, owner_id, request.files.getlist('photos'), uploaded_by=actor_label)
+        if count:
+            _log_activity('attachment_add', f'Attached {count} file(s) to {owner_type} #{owner_id}.',
+                           ticket_id=owner_id if owner_type == 'ticket' else None)
+        db.session.commit()
+        flash(f'Attached {count} file(s).' if count else 'Choose a photo first.', 'success' if count else 'error')
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+    return redirect(_attachment_return_url(owner_type, owner))
+
+
+@app.route('/admin/attachments/<int:attachment_id>/delete', methods=['POST'])
+@login_required
+def admin_attachment_delete(attachment_id):
+    attachment = Attachment.query.get_or_404(attachment_id)
+    owner = _attachment_owner_in_scope(attachment.owner_type, attachment.owner_id)
+    if not owner:
+        abort(404)
+    try:
+        _log_activity('attachment_delete', f'Removed attachment "{attachment.filename}" from '
+                       f'{attachment.owner_type} #{attachment.owner_id}.',
+                       ticket_id=attachment.owner_id if attachment.owner_type == 'ticket' else None)
+        db.session.delete(attachment)
+        db.session.commit()
+        flash('Attachment removed.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not remove attachment: {e}', 'error')
+    return redirect(_attachment_return_url(attachment.owner_type, owner))
+
+
 # ─── Help (FAQ / How-To) ────────────────────────────────────────────────────────
 
 @app.route('/help')
@@ -8353,6 +9566,11 @@ def healthz():
 @app.route('/')
 @kiosk_or_login_required
 def index():
+    """The big-button landing page is for kiosks (Check In / Check Out /
+    Report a Problem / Submit a Ticket). A logged-in user has all of that in
+    their own nav, so they go straight to their normal landing page."""
+    if _admin_session_active():
+        return redirect(_post_login_redirect(_current_user()))
     return render_template('index.html')
 
 

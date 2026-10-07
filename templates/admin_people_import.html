@@ -2,7 +2,7 @@
 {% block title %}Import People{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">📥 Import People</h1>
+  <h1 style="margin:0;">{{ icon('import') }}Import People</h1>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/people" class="btn btn-ghost">← Back</a>
 </div>
@@ -21,7 +21,8 @@
     <strong style="color:var(--text);">Required columns:</strong> <code>first_name</code>, <code>last_name</code>, <code>email</code><br>
     <strong style="color:var(--text);">Optional columns:</strong> <code>external_id</code> (also accepts <code>staff_id</code>/<code>student_id</code>),
     <code>role</code> (staff/student), <code>department</code>, <code>site</code>,
-    <code>grad_year</code> (also accepts <code>graduation_year</code>)<br>
+    <code>grad_year</code> (also accepts <code>graduation_year</code>), <code>insurance</code>,
+    <code>guardian_name</code>/<code>guardian_email</code> (also accept <code>parent_name</code>/<code>parent_email</code> — where damage notices are emailed)<br>
     <code>site</code> must exactly match an existing site's name (see Sites) — required for a new person if
     you only manage one site or more; an unrecognized name skips that row rather than guessing.<br><br>
     <strong style="color:var(--text);">Example:</strong><br>

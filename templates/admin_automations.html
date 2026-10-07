@@ -2,7 +2,7 @@
 {% block title %}Automations{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🤖 Automations</h1>
+  <h1 style="margin:0;">{{ icon('automation') }}Automations</h1>
   <span class="badge badge-blue">{{ automations|length }} total</span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/automations/new" class="btn btn-primary">+ Add Automation</a>

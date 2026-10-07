@@ -3,10 +3,10 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">⏰ Overdue Reminders</h1>
+  <h1 style="margin:0;">{{ icon('schedule') }}Overdue Reminders</h1>
   <span class="badge {{ 'badge-red' if overdue else 'badge-green' }}">{{ overdue|length }} overdue</span>
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
-    ✉️ Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
+    {{ icon('email') }}Email: {{ 'Configured' if email_enabled else 'Not Configured' }}
   </span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin" class="btn btn-ghost">← Back</a>
@@ -50,7 +50,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem;">Nothing overdue. 🎉</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:2rem;">Nothing overdue. </td></tr>
       {% endfor %}
     </tbody>
   </table>

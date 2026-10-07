@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ title }}{% endblock %}
 {% block content %}
-<h1>{{ '✅' if action == 'checkin' else '📤' }} {{ title }}</h1>
+<h1>{{ '' if action == 'checkin' else '' }} {{ title }}</h1>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:start;">
 
@@ -128,7 +128,7 @@ async function submitScan() {
       box.style.background = '#78350f33';
       box.style.border     = '1px solid var(--warning)';
       box.style.color      = 'var(--warning)';
-      box.innerHTML = `⚠️ ${data.message} — <strong>${data.asset_tag}</strong>
+      box.innerHTML = `${data.message} — <strong>${data.asset_tag}</strong>
                        <small style="opacity:.75">(via ${data.scan_type})</small>
                        <br><small>${data.warning}</small>`;
     } else {

@@ -1,17 +1,18 @@
 {% extends 'base.html' %}
 {% block title %}Repair — {{ repair.asset_tag }}{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 {% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🛠️ Repair — <code>{{ repair.asset_tag }}</code></h1>
+  <h1 style="margin:0;">{{ icon('repair') }}Repair — <code>{{ repair.asset_tag }}</code></h1>
   {% if repair.returned_at %}
     <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
   {% else %}
     <span class="badge badge-yellow">Open</span>
   {% endif %}
   <span class="spacer" style="flex:1;"></span>
-  {% if repair.ticket_id %}<a href="/admin/tickets/{{ repair.ticket_id }}" class="btn btn-ghost">🎫 View Full Ticket</a>{% endif %}
-  <a href="/admin/assets/{{ repair.asset_tag }}/assign" class="btn btn-ghost">📋 Device Page</a>
+  {% if repair.ticket_id %}<a href="/admin/tickets/{{ repair.ticket_id }}" class="btn btn-ghost">{{ icon('ticket') }}View Full Ticket</a>{% endif %}
+  <a href="/admin/assets/{{ repair.asset_tag }}/assign" class="btn btn-ghost">{{ icon('devices') }}Device Page</a>
   <a href="/admin/repairs" class="btn btn-ghost">← Back to Repairs</a>
 </div>
 
@@ -37,7 +38,7 @@
 {% if not repair.returned_at %}
 <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">
   <div class="card" style="flex:1;min-width:280px;">
-    <h2 style="margin-top:0;">✏️ Edit Details</h2>
+    <h2 style="margin-top:0;">{{ icon('edit') }}Edit Details</h2>
     <form method="POST" action="/admin/repairs/{{ repair.id }}/edit">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:.8rem;">
@@ -66,7 +67,7 @@
   </div>
 
   <div class="card" style="flex:1;min-width:280px;">
-    <h2 style="margin-top:0;">🎒 Loaner While Repaired</h2>
+    <h2 style="margin-top:0;">{{ icon('loaner') }}Loaner While Repaired</h2>
     {% if active_loaner %}
     <p style="font-size:.9rem;margin:0 0 1rem;">
       <code>{{ active_loaner.asset_tag }}</code> → {{ active_loaner.person_name }}
@@ -113,7 +114,7 @@
 </div>
 
 <div class="card" style="margin-bottom:1.5rem;">
-  <h2 style="margin-top:0;">✅ Mark Returned</h2>
+  <h2 style="margin-top:0;">{{ icon('success') }}Mark Returned</h2>
   <form method="POST" action="/admin/repairs/{{ repair.id }}/return" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="min-width:160px;">
@@ -134,13 +135,19 @@
 </div>
 {% endif %}
 
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">{{ icon('camera') }}Photos &amp; Files</h2>
+  <p style="color:var(--muted);font-size:.82rem;margin-bottom:.6rem;">Damage photos, the vendor's RMA slip, or a shipping label.</p>
+  {{ macros.attachment_panel(attachments, 'repair', repair.id) }}
+</div>
+
 <div class="card">
   {% if repair.ticket %}
   {% set ticket = repair.ticket %}
   {% set total = ticket.charges|sum(attribute='amount') %}
   {% set unpaid_total = ticket.charges|selectattr('paid_at', 'none')|sum(attribute='amount') %}
   <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
-    <h2 style="margin:0;">💵 Billing</h2>
+    <h2 style="margin:0;">{{ icon('billing') }}Billing</h2>
     {% if ticket.charges %}
     <span class="badge {{ 'badge-red' if unpaid_total else 'badge-green' }}">
       ${{ '%.2f'|format(total) }} total{% if unpaid_total %} · ${{ '%.2f'|format(unpaid_total) }} unpaid{% endif %}
@@ -216,7 +223,7 @@
     <button type="submit" class="btn btn-primary">Add Charge</button>
   </form>
   {% else %}
-  <h2 style="margin-top:0;">💵 Billing</h2>
+  <h2 style="margin-top:0;">{{ icon('billing') }}Billing</h2>
   <p style="color:var(--muted);font-size:.85rem;">No ticket is linked to this repair, so there's nowhere to bill charges to.</p>
   {% endif %}
 </div>

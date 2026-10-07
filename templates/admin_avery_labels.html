@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Avery {{ template_key }} Labels</title>
+  {# Standalone page (no base.html chrome) — it's meant to go straight to the printer. #}
+  <style>
+    @page { size: letter; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #e5e7eb; }
+    .toolbar {
+      position: sticky; top: 0; z-index: 2; background: #111827; color: #f9fafb; padding: .7rem 1rem;
+      display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; font-size: 14px;
+    }
+    .toolbar button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: .5rem 1rem; font-size: 14px; cursor: pointer; }
+    .toolbar .hint { color: #fcd34d; }
+    .sheet {
+      position: relative; width: 8.5in; height: 11in; background: #fff; margin: .4in auto;
+      box-shadow: 0 2px 12px rgba(0,0,0,.25); overflow: hidden; page-break-after: always; break-after: page;
+    }
+    .sheet:last-child { page-break-after: auto; break-after: auto; }
+    .label {
+      position: absolute; width: {{ template.width }}in; height: {{ template.height }}in;
+      display: flex; flex-direction: column; justify-content: center; overflow: hidden;
+      padding: {{ '.03in .08in' if template.height < 0.75 else '.08in .14in' }};
+    }
+    .label.empty { outline: 1px dashed #d1d5db; outline-offset: -2px; }
+    .tag { font-weight: 700; white-space: nowrap; font-size: {{ '7pt' if template.height < 0.75 else ('16pt' if template.height >= 2 else '11pt') }}; }
+    .second { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: {{ '11pt' if template.height >= 2 else '8pt' }}; }
+    .barcode { display: block; width: 100%; height: {{ '.24in' if template.height < 0.75 else ('.8in' if template.height >= 2 else '.42in') }}; margin-top: .03in; }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .sheet { margin: 0; box-shadow: none; }
+      .label.empty { outline: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" onclick="window.print()">{{ icon('print') }}Print</button>
+    <span>{{ label_count }} label{{ 's' if label_count != 1 }} on {{ sheets|length }} sheet{{ 's' if sheets|length != 1 }} of Avery {{ template_key }}{% if skip %}, starting at position {{ skip + 1 }}{% endif %}.</span>
+    <span class="hint">In the print dialog set Scale to <strong>100% / Actual size</strong> and Margins to <strong>None</strong>, or the labels will drift.</span>
+  </div>
+  {% for sheet in sheets %}
+  <div class="sheet">
+    {% for slot in sheet %}
+      {% set col = loop.index0 % template.cols %}
+      {% set row = loop.index0 // template.cols %}
+      <div class="label {{ 'empty' if not slot }}"
+           style="left:{{ template.left + col * template.pitch_x }}in;top:{{ template.top + row * template.pitch_y }}in;">
+        {% if slot %}
+          <div class="tag">{{ slot.tag }}{% if slot.charger and template.height < 0.75 %} CHG{% endif %}</div>
+          {% if template.height >= 0.75 and slot.second %}<div class="second">{{ slot.second }}</div>{% endif %}
+          {% if slot.barcode %}{{ slot.barcode }}{% endif %}
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</body>
+</html>

@@ -3,7 +3,7 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">⚠️ Orphaned Records</h1>
+  <h1 style="margin:0;">{{ icon('warning') }}Orphaned Records</h1>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -48,7 +48,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No orphaned records 🎉</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:2rem;">No orphaned records </td></tr>
       {% endfor %}
     </tbody>
   </table>

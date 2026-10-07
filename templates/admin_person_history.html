@@ -2,10 +2,10 @@
 {% block title %}History — {{ person.full_name }}{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">📜 History — {{ person.full_name }}</h1>
-  {% if person.insurance_opted_in %}<span class="badge badge-blue">🛡️ Insured</span>{% endif %}
+  <h1 style="margin:0;">{{ icon('history') }}History — {{ person.full_name }}</h1>
+  {% if person.insurance_opted_in %}<span class="badge badge-blue">{{ icon('protection-plan') }}Insured</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">✏️ Edit</a>
+  <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
   <a href="/admin/people" class="btn btn-ghost">← Back</a>
 </div>
 

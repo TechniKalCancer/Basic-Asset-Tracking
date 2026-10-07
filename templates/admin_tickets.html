@@ -3,7 +3,7 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🎫 Tickets</h1>
+  <h1 style="margin:0;">{{ icon('ticket') }}Tickets</h1>
   <span class="badge badge-blue">{{ pagination.total }} shown</span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/tickets/new" class="btn btn-primary">+ New Ticket</a>

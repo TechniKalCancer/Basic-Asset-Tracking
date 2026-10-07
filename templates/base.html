@@ -65,9 +65,12 @@
     nav .logout { color: var(--danger) !important; border: 1px solid var(--danger); border-radius: 6px; padding: .25rem .7rem; font-size: .82rem; }
     nav .logout:hover { background: var(--danger); color: #fff !important; }
     nav .nav-search { display: flex; }
+    .nav-tools { display: flex; align-items: center; gap: .8rem; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+    .nav-site select { font-size: .82rem; padding: .3rem .5rem; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text); width: auto; max-width: 170px; }
     nav { flex-direction: column; align-items: stretch; gap: 0; padding: 0; }
     .nav-top {
-      padding: .6rem 1.5rem; display: flex; align-items: center; gap: 1.6rem; flex-wrap: wrap; min-height: 56px;
+      padding: .6rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; min-height: 56px;
     }
     .nav-tabs { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
     .nav-tab {
@@ -102,7 +105,7 @@
     }
     .nav-dropdown-divider { height: 1px; background: var(--border); margin: .4rem .2rem; }
     nav .nav-search input {
-      width: 220px;
+      width: 180px;
       padding: .35rem .7rem;
       font-size: .85rem;
       background: var(--surface2);
@@ -275,102 +278,197 @@
     .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.2rem; text-align: center; }
     .stat-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
     .stat-card .lbl { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+
+    /* Drop-in icons (see icon() in app.py and static/icons/README.md) —
+       a CSS mask, so a single-color SVG takes the surrounding text color. */
+    .icon {
+      display: inline-block; flex: none; width: 1.15em; height: 1.15em; margin-right: .4em; vertical-align: -.2em;
+      background-color: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat;
+    }
+    .icon.icon-lg { width: 1.6em; height: 1.6em; }
+    .icon.icon-xl { width: 2.6rem; height: 2.6rem; }
+    .nav-tab .icon, .btn .icon { margin-right: .1em; }
+    @media (forced-colors: active) { .icon { background-color: CanvasText; } }
+
+    /* Attachments (see macros.attachment_thumbs) */
+    .attachment-grid { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+    .attachment-thumb { position: relative; width: 84px; height: 84px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--surface2); }
+    .attachment-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .attachment-thumb .attachment-file { display: flex; align-items: center; justify-content: center; text-align: center; height: 100%; font-size: .68rem; color: var(--muted); padding: .3rem; word-break: break-all; }
+    .attachment-thumb form { position: absolute; top: 3px; right: 3px; }
+    .attachment-thumb form button { background: rgba(0,0,0,.65); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; font-size: .7rem; line-height: 1; }
+    .attachment-thumb form button:hover { background: var(--danger); }
+
+    /* Camera scanning (see static/js/camera_scan.js) */
+    .cam-wrap { display: flex; gap: .4rem; align-items: stretch; width: 100%; }
+    .cam-wrap > input { flex: 1; min-width: 0; }
+    .cam-btn { flex: none; background: var(--surface2); border: 1px solid var(--border); border-radius: 7px; padding: 0 .8rem; font-size: .85rem; font-weight: 600; color: var(--text); font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; }
+    .cam-btn:hover { border-color: var(--accent); }
+    .cam-overlay { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0,0,0,.92); flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 1rem; }
+    .cam-overlay.open { display: flex; }
+    .cam-frame { position: relative; width: min(92vw, 560px); aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: #000; }
+    .cam-frame video { width: 100%; height: 100%; object-fit: cover; }
+    .cam-reticle { position: absolute; left: 10%; right: 10%; top: 35%; bottom: 35%; border: 2px solid var(--accent); border-radius: 8px; box-shadow: 0 0 0 9999px rgba(0,0,0,.35); }
+    .cam-status { color: #fff; font-size: .95rem; text-align: center; max-width: 520px; }
+
+    .nav-toggle { display: none; margin-left: auto; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: .35rem .7rem; font-size: 1.1rem; cursor: pointer; }
+
+    /* ─── Phone / small tablet ─────────────────────────────────────────────
+       Most pages were laid out with inline styles for a desktop width, so
+       this block mostly undoes fixed widths and stacks side-by-side forms
+       rather than restyling each template individually. */
+    @media (max-width: 1000px) {
+      .nav-top { padding: .55rem .9rem; gap: .6rem; }
+      .nav-toggle { display: inline-flex; align-items: center; }
+      nav:not(.nav-open) .nav-top > :not(.brand):not(.nav-toggle) { display: none !important; }
+      nav:not(.nav-open) .nav-sub { display: none; }
+      nav.nav-open .nav-top > :not(.brand):not(.nav-toggle) { flex-basis: 100%; }
+      nav.nav-open .nav-tabs { flex-direction: column; align-items: stretch; }
+      nav.nav-open .nav-tab { padding: .7rem .8rem; font-size: 1rem; }
+      nav.nav-open .nav-tools { flex-direction: column; align-items: stretch; gap: .7rem; margin: .3rem 0 .2rem; }
+      nav.nav-open .nav-site select { max-width: none; width: 100%; font-size: 16px; padding: .5rem; }
+      nav.nav-open .nav-search, nav.nav-open .nav-search input { width: 100%; }
+      nav.nav-open .nav-search input { font-size: 16px; padding: .5rem .7rem; }
+      nav.nav-open .nav-tools > a:not(.logout) { padding: .3rem .2rem; font-size: .95rem; }
+      nav.nav-open .nav-tools > .logout { align-self: flex-start; padding: .45rem 1rem; }
+      nav.nav-open .nav-sub { flex-direction: column; align-items: stretch; gap: 0; padding: .4rem .9rem .8rem; }
+      nav.nav-open .nav-sub > a, nav.nav-open .nav-sub .nav-dropdown > button { padding: .6rem .2rem; font-size: .95rem; display: block; width: 100%; text-align: left; }
+      nav.nav-open .nav-sub-divider { width: 100%; height: 1px; margin: .3rem 0; }
+      /* Dropdowns inside the open mobile menu expand in place rather than floating */
+      nav.nav-open .nav-dropdown.open .row-menu-items { position: static; display: block; box-shadow: none; margin: 0 0 .4rem .6rem; border: none; border-left: 2px solid var(--border); border-radius: 0; }
+    }
+
+    @media (max-width: 760px) {
+      .container { padding: 1rem .75rem; }
+      .card { padding: 1rem; overflow-x: auto; }
+      h1 { font-size: 1.3rem; margin-bottom: 1rem; }
+      h2 { font-size: 1.05rem; }
+      input, select, textarea { font-size: 16px; max-width: 100%; }  /* 16px stops iOS zooming on focus */
+      .btn { min-height: 42px; }
+      td, th { padding: .5rem .55rem; }
+      [style*="flex-wrap:wrap"] > [style*="min-width"],
+      [style*="flex-wrap: wrap"] > [style*="min-width"] { min-width: 0 !important; flex-basis: 100% !important; }
+      [style*="minmax(420px"], [style*="minmax(520px"], [style*="minmax(260px"],
+      [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+      [style*="width:220px"], [style*="width:240px"], [style*="width:260px"], [style*="width:300px"] { max-width: 100%; }
+      .stat-card .num { font-size: 1.6rem; }
+    }
   </style>
 </head>
 <body>
   <nav>
     <div class="nav-top">
-      <span class="brand">
+      <a class="brand" href="/" title="Home">
         {% if branding.logo_url %}
           {% if branding.logo_background %}<span class="logo-plate-{{ branding.logo_background }}"><img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}"></span>
           {% else %}<img src="{{ branding.logo_url }}" alt="{{ branding.app_name or 'Logo' }}">{% endif %}
-        {% else %}📦{% endif %}
+        {% else %}{{ icon('logo', 'icon-lg') }}{% endif %}
         {{ branding.app_name or 'FoxDesk' }}
-      </span>
+      </a>
+      <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="false"
+              onclick="var n=this.closest('nav');n.classList.toggle('nav-open');this.setAttribute('aria-expanded',n.classList.contains('nav-open'));">{{ icon('menu') or '☰' }}</button>
       {% if session.get('admin_logged_in') %}
         <div class="nav-tabs">
-          <a href="/" class="nav-tab {{ 'active' if active_section == 'home' }}">🏠 Home</a>
+          <a href="/admin" class="nav-tab {{ 'active' if active_section == 'dashboard' }}">{{ icon('dashboard') }}Dashboard</a>
           {% if can('devices') %}
-          <a href="/admin/registry" class="nav-tab {{ 'active' if active_section == 'devices' }}">📋 Devices</a>
+          <a href="/admin/registry" class="nav-tab {{ 'active' if active_section == 'devices' }}">{{ icon('devices') }}Devices</a>
+          {% elif can('checkinout') %}
+          {# Scan-only accounts (e.g. a library aide) don't get the Devices tab, but still need Check In/Out. #}
+          <a href="/checkin" class="nav-tab {{ 'active' if active_section == 'devices' }}">{{ icon('scan') }}Check In/Out</a>
           {% endif %}
           {% if can('people') %}
-          <a href="/admin/people" class="nav-tab {{ 'active' if active_section == 'people' }}">👥 People</a>
+          <a href="/admin/people" class="nav-tab {{ 'active' if active_section == 'people' }}">{{ icon('people') }}People</a>
           {% endif %}
           {% if can('loaner_checkinout') or can('loaners') %}
-          <a href="{{ '/loaner_checkinout' if can('loaner_checkinout') else '/admin/loaners' }}" class="nav-tab {{ 'active' if active_section == 'loaners' }}">🎒 Loaners</a>
+          <a href="{{ '/loaner_checkinout' if can('loaner_checkinout') else '/admin/loaners' }}" class="nav-tab {{ 'active' if active_section == 'loaners' }}">{{ icon('loaner') }}Loaners</a>
           {% endif %}
           {% if can('repairs') %}
-          <a href="/admin/repairs" class="nav-tab {{ 'active' if active_section == 'repairs' }}">🛠️ Repairs</a>
+          <a href="/admin/repairs" class="nav-tab {{ 'active' if active_section == 'repairs' }}">{{ icon('repair') }}Repairs</a>
           {% endif %}
           {% if can('tickets') %}
-          <a href="/admin/tickets" class="nav-tab {{ 'active' if active_section == 'tickets' }}">🎫 Tickets {% if nav_open_tickets_count %}<span class="nav-tab-badge">{{ nav_open_tickets_count }}</span>{% endif %}</a>
+          <a href="/admin/tickets" class="nav-tab {{ 'active' if active_section == 'tickets' }}">{{ icon('ticket') }}Tickets {% if nav_open_tickets_count %}<span class="nav-tab-badge">{{ nav_open_tickets_count }}</span>{% endif %}</a>
           {% endif %}
           {% if can('admin') or can('manage_users') or is_super_admin() %}
-          <a href="/admin" class="nav-tab {{ 'active' if active_section == 'admin' }}">⚙️ Admin</a>
+          <a href="/admin/settings" class="nav-tab {{ 'active' if active_section == 'admin' }}">{{ icon('settings') }}Admin</a>
           {% endif %}
         </div>
-        <span class="spacer"></span>
+        <div class="nav-tools">
         {% if is_super_admin() and all_sites %}
-        <form method="POST" action="/admin/set_active_site" style="display:inline-flex;">
+        <form method="POST" action="/admin/set_active_site" class="nav-site">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <select name="site_id" onchange="this.form.submit()" title="Switch which site's data you're viewing"
-                  style="font-size:.82rem;padding:.3rem .5rem;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);">
-            <option value="">🌐 All Locations</option>
+          <select name="site_id" onchange="this.form.submit()" title="Switch which site's data you're viewing" aria-label="Site">
+            <option value="">All Locations</option>
             {% for s in all_sites %}
-            <option value="{{ s.id }}" {{ 'selected' if active_site and active_site.id == s.id }}>📍 {{ s.name }}</option>
+            <option value="{{ s.id }}" {{ 'selected' if active_site and active_site.id == s.id }}>{{ s.name }}</option>
             {% endfor %}
           </select>
         </form>
         {% endif %}
         <form class="nav-search" method="GET" action="/admin/search">
           <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
-          <button type="submit" title="Search">🔎</button>
+          <button type="submit" title="Search">{{ icon('search') or 'Go' }}</button>
         </form>
-        <a href="/help" title="Help">❓ Help</a>
+        <a href="/help" title="Help">{{ icon('help') }}Help</a>
         <a href="/admin/logout" class="logout">Logout</a>
+        </div>
       {% else %}
-        <a href="/">Home</a>
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
         <a href="/report_problem">Report a Problem</a>
         <a href="/submit_ticket">Submit a Ticket</a>
-        <a href="/help">❓ Help</a>
+        <a href="/help">{{ icon('help') }}Help</a>
         <span class="spacer"></span>
         <a href="/admin/login">Admin</a>
       {% endif %}
     </div>
 
-    {% if session.get('admin_logged_in') and active_section in ['home', 'devices', 'people', 'loaners', 'tickets', 'admin'] %}
+    {% if session.get('admin_logged_in') and active_section in ['devices', 'people', 'loaners', 'tickets', 'admin'] %}
     <div class="nav-sub">
-      {% if active_section == 'home' %}
+      {% if active_section == 'devices' and can('devices') %}
+        <a href="/admin/registry">Registry</a>
+        {% if can('checkinout') %}
+        <a href="/checkin">Check In</a>
+        <a href="/checkout">Check Out</a>
+        {% endif %}
+        <a href="/admin/audit">Asset Audit</a>
+        <a href="/admin/data_quality">Data Quality</a>
+        <a href="/admin/signin_mismatches">Sign-in Mismatches</a>
+        <a href="/admin/fees">Billing</a>
+        <div class="row-menu nav-dropdown">
+          <button type="button">Tools ▾</button>
+          <div class="row-menu-items">
+            <a href="/admin/bulk_assign">Bulk Assign</a>
+            <a href="/admin/bulk_print">Print Labels</a>
+            <a href="/admin/collection">Collection (Who Has What)</a>
+            <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
+            <a href="/asset_history">Asset History</a>
+            {% if can('checkinout') %}<a href="/report_problem">Report a Problem</a>{% endif %}
+            <div class="nav-dropdown-divider"></div>
+            <a href="/admin/registry/export">Export CSV</a>
+            <a href="/api/assets" target="_blank">Assets API</a>
+          </div>
+        </div>
+        <div class="row-menu nav-dropdown">
+          <button type="button">Setup {% if nav_orphan_count %}<span class="nav-tab-badge">{{ nav_orphan_count }}</span>{% endif %} ▾</button>
+          <div class="row-menu-items">
+            {% if can('devices_manage') %}
+            <a href="/admin/registry/new">Add Device</a>
+            <a href="/admin/registry/set_sites">Set Device Sites</a>
+            <a href="/admin/device_models">Device Models</a>
+            <a href="/admin/asset_number_ranges">Asset Number Ranges</a>
+            {% endif %}
+            <a href="/admin/repair_categories">Repair Categories</a>
+            {% if is_super_admin() %}
+            <div class="nav-dropdown-divider"></div>
+            <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-tab-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
+            {% endif %}
+          </div>
+        </div>
+      {% elif active_section == 'devices' %}
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
         <a href="/report_problem">Report a Problem</a>
         <a href="/submit_ticket">Submit a Ticket</a>
-      {% elif active_section == 'devices' and can('devices') %}
-        <a href="/admin/registry">Registry</a>
-        <a href="/admin/bulk_assign">Bulk Assign</a>
-        <a href="/admin/bulk_print">Bulk Print Labels</a>
-        <a href="/admin/audit">Asset Audit</a>
-        <span class="nav-sub-divider"></span>
-        <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
-        <a href="/admin/fees">Billing</a>
-        <a href="/admin/repair_categories">Repair Categories</a>
-        <a href="/admin/collection">Collection (Who Has What)</a>
-        <a href="/admin/registry/export">Export CSV</a>
-        <a href="/asset_history">Asset History</a>
-        <a href="/api/assets" target="_blank">Assets API</a>
-        {% if can('devices_manage') %}
-        <span class="nav-sub-divider"></span>
-        <a href="/admin/registry/new">Add Device</a>
-        <a href="/admin/registry/set_sites">Set Device Sites</a>
-        <a href="/admin/device_models">Device Models</a>
-        <a href="/admin/asset_number_ranges">Asset Number Ranges</a>
-        {% endif %}
-        {% if is_super_admin() %}
-        <span class="nav-sub-divider"></span>
-        <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-tab-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
-        {% endif %}
       {% elif active_section == 'people' and can('people') %}
         <a href="/admin/people">People</a>
         <a href="/admin/people/new">Add Person</a>
@@ -385,7 +483,7 @@
         <a href="/admin/ticket_categories">Categories</a>
         {% if is_super_admin() %}<a href="/admin/automations">Automations</a>{% endif %}
       {% elif active_section == 'admin' %}
-        <a href="/admin">Dashboard</a>
+        <a href="/admin/settings">All Settings</a>
         {% if can('admin') %}
         <a href="/admin/kiosk">Kiosk Devices</a>
         <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
@@ -403,9 +501,9 @@
         <a href="/admin/emails">Email</a>
         <a href="/admin/custom_fields">Custom Fields</a>
         <div class="row-menu nav-dropdown">
-          <button type="button">🔄 Syncs {% if google_sync_enabled or kace_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
+          <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
           <div class="row-menu-items">
-            <a href="/admin/sync_schedule">⏰ Scheduled Syncs</a>
+            <a href="/admin/sync_schedule">{{ icon('schedule') }}Scheduled Syncs</a>
             <div class="nav-dropdown-label">Google Sync {% if google_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
             {% if google_sync_enabled %}
             <a href="/admin/google_setup">Setup / Status</a>
@@ -433,7 +531,7 @@
 
   <!-- Session timeout warning banner (only shown on admin pages) -->
   <div id="session-warning">
-    ⚠️ Your session will expire in <span id="session-countdown"></span>.
+    {{ icon('warning') }}Your session will expire in <span id="session-countdown"></span>.
     <a id="stay-logged-in-link">Stay logged in</a>
     &nbsp;·&nbsp;
     <a href="/admin/logout">Logout now</a>
@@ -452,6 +550,9 @@
 
     {% block content %}{% endblock %}
   </div>
+<script>window.APP_ICONS = {{ available_icons|tojson }};</script>
+<script src="/static/js/attachments.js"></script>
+<script src="/static/js/camera_scan.js"></script>
 <script>
 // The nav can be one or two rows tall depending on whether a sub-nav row is
 // showing for the active tab — position the session-expiry banner right
@@ -492,7 +593,14 @@ document.addEventListener('click', function (e) {
   if (e.target.closest('.row-menu')) return;
   closeAllRowMenus();
 });
-window.addEventListener('scroll', closeAllRowMenus, true);
+// Scrolling closes floating menus (they're position:fixed and would drift
+// off their button) — except dropdowns expanded in place inside the open
+// phone/tablet nav, which scroll with the page like everything else.
+window.addEventListener('scroll', function () {
+  document.querySelectorAll('.row-menu.open').forEach(function (menu) {
+    if (!menu.closest('nav.nav-open')) menu.classList.remove('open');
+  });
+}, true);
 
 // Per-column instant filter row (see macros.filter_row in _macros.html) —
 // narrows the rows already loaded in that table as you type, purely

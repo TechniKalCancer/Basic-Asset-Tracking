@@ -2,7 +2,7 @@
 {% block title %}Email{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">✉️ Email</h1>
+  <h1 style="margin:0;">{{ icon('email') }}Email</h1>
   <span class="badge {{ 'badge-green' if email_enabled else 'badge-yellow' }}">
     {{ 'Sending enabled' if email_enabled else 'Not configured' }}
   </span>
@@ -12,11 +12,27 @@
 
 <div class="card">
   <p style="color:var(--muted);font-size:.9rem;margin-bottom:0;">
-    Customize the wording of every reminder email this app sends. Use <code>{variable}</code>
+    Customize the wording of every email this app sends — reminders, ticket updates, and parent/guardian damage notices. Use <code>{variable}</code>
     placeholders anywhere in the subject or body — each card below lists which ones are
     available for that email. Leave a field blank to use the built-in default. Not configured?
     Set <code>SMTP_FROM_EMAIL</code> (and <code>SMTP_USERNAME</code>/<code>SMTP_PASSWORD</code> if your relay
     requires auth) in <code>.env</code> to enable sending.
+  </p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">{{ icon('ticket') }}Automatic Ticket Emails</h2>
+  <form method="POST" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="notifications">
+    <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;cursor:pointer;flex:1;min-width:260px;">
+      <input type="checkbox" name="ticket_notifications_enabled" style="width:auto;" {{ 'checked' if settings.ticket_notifications_enabled }} />
+      Email the requester when their ticket is received and when it's resolved
+    </label>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+  <p style="color:var(--muted);font-size:.8rem;margin:.6rem 0 0;">
+    Tech replies are separate — they're only emailed when the tech ticks "Also email this to the requester" on a comment.
   </p>
 </div>
 

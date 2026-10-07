@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}Sign-in Mismatches{% endblock %}
+{% block content %}
+{% set sev_badge = {'high': 'badge-red', 'medium': 'badge-yellow', 'low': 'badge-blue'} %}
+{% set sev_label = {'high': 'Likely violation', 'medium': 'Check', 'low': 'Probably fine'} %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('flag') }}Sign-in Mismatches</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/data_quality" class="btn btn-ghost">{{ icon('data-quality') }}Data Quality</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;margin-bottom:1.2rem;">
+  Compares each Chromebook's most recent Google sign-in with who this app says should have it —
+  students on someone else's device, swapped devices, "lost" devices that are still in use.
+  Only devices that were online in the selected window are checked, using what the last Google
+  device sync saw{% if not google_sync_enabled %} (Google Sync isn't configured on this server){% endif %}.
+</p>
+
+{% if not has_google_data %}
+<div class="card">
+  <h2 style="margin-top:0;">No Google device data yet</h2>
+  <p style="color:var(--muted);font-size:.9rem;">
+    This check needs the Google device sync to have run at least once since this feature was added
+    (it records each device's recent sign-ins and when it was last online).
+    {% if is_super_admin() %}Set it up or run it from <a class="tag-link" href="/admin/google_setup">Admin → Syncs → Google</a>.{% endif %}
+  </p>
+</div>
+{% else %}
+
+<form method="GET" style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-bottom:1.2rem;">
+  <select name="days" onchange="this.form.submit()" style="max-width:250px;">
+    {% for d in window_choices %}<option value="{{ d }}" {{ 'selected' if d == window_days }}>Online in last {{ d }} days</option>{% endfor %}
+  </select>
+  <input type="hidden" name="severity" value="{{ severity }}">
+  <label style="display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+    <input type="checkbox" name="reviewed" value="1" style="width:auto;" {{ 'checked' if show_reviewed }} onchange="this.form.submit()">
+    Include ones marked OK
+  </label>
+</form>
+
+<div class="dq-summary">
+  {% set base_args = {'days': window_days, 'reviewed': '1' if show_reviewed else ''} %}
+  <a href="?{{ base_args|urlencode }}" class="dq-chip {{ 'dq-chip-active' if not severity }}">All</a>
+  {% for sev in ['high', 'medium', 'low'] %}
+  <a href="?{{ dict(base_args, severity=sev)|urlencode }}" class="dq-chip {{ 'dq-chip-active' if severity == sev }}">
+    <span class="badge {{ sev_badge[sev] }}">{{ counts[sev] }}</span> {{ sev_label[sev] }}
+  </a>
+  {% endfor %}
+</div>
+
+<div class="card" style="padding:0;">
+  {% if mismatches %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead>
+      <tr><th>Flag</th><th>Device</th><th>Should Have It</th><th>Signed In As</th><th>Last Online</th><th>Notes</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for m in mismatches %}
+      <tr {% if m.review %}style="opacity:.55;"{% endif %}>
+        <td style="min-width:150px;">
+          <span class="badge {{ sev_badge[m.severity] }}">{{ m.label }}</span>
+          {% if m.foreign_count > 1 %}<div style="font-size:.75rem;color:var(--danger);margin-top:.25rem;">on {{ m.foreign_count }} devices</div>{% endif %}
+        </td>
+        <td style="white-space:nowrap;">
+          <a class="tag-link" href="/admin/assets/{{ m.asset_tag }}/assign"><code>{{ m.asset_tag }}</code></a>
+          <div style="font-size:.75rem;color:var(--muted);">
+            {{ m.registry_row.site.name if m.registry_row.site else '' }}{% if m.asset.status in ['lost', 'retired'] %} · <span style="color:var(--danger);">{{ m.asset.status }}</span>{% endif %}{% if m.registry_row.is_loaner %} · loaner{% endif %}
+          </div>
+        </td>
+        <td>
+          {% for p in m.expected %}<a class="tag-link" href="/admin/people/{{ p.id }}/history">{{ p.full_name }}</a>{% if not loop.last %}, {% endif %}
+          {% else %}<span style="color:var(--muted);">Nobody</span>{% endfor %}
+        </td>
+        <td>
+          {% if m.signer %}<a class="tag-link" href="/admin/people/{{ m.signer.id }}/history">{{ m.signer.full_name }}</a>
+            <div style="font-size:.75rem;color:var(--muted);">{{ m.signer.role }}{% if m.signer.grad_year %} · {{ m.signer.grad_year }}{% endif %}{% if not m.signer.is_active %} · inactive{% endif %}</div>
+          {% else %}<span style="font-size:.85rem;">{{ m.signin_email }}</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap;color:var(--muted);" title="{{ m.last_activity.strftime('%Y-%m-%d %H:%M') }} UTC">{{ m.last_activity|ago }}</td>
+        <td style="font-size:.8rem;color:var(--muted);max-width:280px;">
+          {{ m.note|join(' ') }}
+          {% if m.review %}<div>✓ Marked OK by {{ m.review.reviewed_by or '—' }} {{ m.review.reviewed_at|ago }}{% if m.review.note %}: “{{ m.review.note }}”{% endif %}</div>{% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          <div class="row-menu">
+            <button type="button">⋮</button>
+            <div class="row-menu-items" style="min-width:250px;">
+              <a href="/admin/assets/{{ m.asset_tag }}/assign">Open device</a>
+              {% if m.signer %}<a href="/admin/people/{{ m.signer.id }}/history">{{ m.signer.first_name }}'s history</a>{% endif %}
+              {% if m.review %}
+              <form method="POST" action="/admin/signin_mismatches/review" style="border-top:1px solid var(--border);margin-top:.3rem;padding-top:.3rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="asset_tag" value="{{ m.asset_tag }}">
+                <input type="hidden" name="signin_email" value="{{ m.signin_email }}">
+                <input type="hidden" name="action" value="reopen">
+                <button type="submit">↩ Put back on the list</button>
+              </form>
+              {% else %}
+              <form method="POST" action="/admin/signin_mismatches/review" style="padding:.4rem;border-top:1px solid var(--border);margin-top:.3rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="asset_tag" value="{{ m.asset_tag }}">
+                <input type="hidden" name="signin_email" value="{{ m.signin_email }}">
+                <input name="note" placeholder="Why it's OK (optional), e.g. sibling" style="margin-bottom:.5rem;" />
+                <button type="submit" class="btn btn-ghost" style="width:100%;">✓ Mark OK</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);text-align:center;padding:2.5rem 1rem;">{{ icon('success') }}Nothing to review — every device online in the last {{ window_days }} days was last used by the right person.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:1rem;">What the flags mean</h2>
+  <table>
+    <tbody>
+      {% for key, info in categories.items() %}
+      <tr><td style="white-space:nowrap;"><span class="badge {{ sev_badge[info[1]] }}">{{ info[0] }}</span></td><td style="color:var(--muted);font-size:.85rem;">{{ info[2] }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="color:var(--muted);font-size:.8rem;margin-top:.8rem;">
+    Not flagged on purpose: sign-ins from before a device was returned, the previous holder within
+    {{ grace_days }} days of a hand-off, and guest/personal sessions with no account. “Mark OK” silences one
+    account on one device — a different account on that device is flagged again.
+  </p>
+</div>
+{% endif %}
+
+<style>
+  .dq-summary { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.2rem; }
+  .dq-chip { display:inline-flex; align-items:center; gap:.45rem; padding:.4rem .7rem; border-radius:8px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text); text-decoration:none; font-size:.85rem; }
+  .dq-chip:hover { border-color:var(--accent); }
+  .dq-chip-active { border-color:var(--accent); background:var(--surface2); }
+</style>
+{% endblock %}

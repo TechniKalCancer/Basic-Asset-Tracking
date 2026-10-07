@@ -2,7 +2,7 @@
 {% block title %}Bulk Print Labels{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🖨️ Bulk Print Labels</h1>
+  <h1 style="margin:0;">{{ icon('print') }}Bulk Print Labels</h1>
   <span class="badge badge-blue">{{ candidates|length }} listed</span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin" class="btn btn-ghost">← Back</a>
@@ -56,6 +56,41 @@
   </div>
 </div>
 
+<div class="card">
+  <h2 style="margin-top:0;font-size:1rem;">{{ icon('print') }}Avery Sheet Labels <span style="color:var(--muted);font-weight:400;font-size:.82rem;">— any office printer, no Dymo needed</span></h2>
+  <form id="averyForm" method="POST" action="/admin/labels/avery" target="_blank"
+        style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="asset_tags" value="">
+    <div style="min-width:260px;flex:1;max-width:420px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Label Sheet</label>
+      <select name="template">
+        {% for key, t in avery_templates.items() %}<option value="{{ key }}">{{ t.label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div style="width:150px;">
+      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Skip used labels</label>
+      <input type="number" name="skip" min="0" value="0" title="Already peeled some off this sheet? Start after them." />
+    </div>
+    <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="chargers" style="width:auto;" />
+      Also charger labels
+    </label>
+    <button type="submit" class="btn btn-primary">Open Printable Sheet</button>
+  </form>
+</div>
+<script>
+  // Copies the currently-checked rows (in table order) into the Avery form
+  // right before it submits, so it always matches the same selection the
+  // Dymo "Print Selected" button would use.
+  document.getElementById('averyForm').addEventListener('submit', function (e) {
+    var form = e.target;
+    var picked = Array.from(document.querySelectorAll('.asset-select:checked'));
+    if (!picked.length) { e.preventDefault(); alert('Select at least one device first.'); return; }
+    form.elements.asset_tags.value = picked.map(function (cb) { return cb.dataset.assetTag; }).join('\n');
+  });
+</script>
+
 <div class="card" style="padding:0;overflow:hidden;">
   <table>
     <thead>
@@ -76,7 +111,7 @@
         <td><code>{{ c.asset_tag }}</code></td>
         <td style="color:var(--muted);">
           {% if c.is_loaner %}
-            <span class="badge badge-yellow" style="font-size:.7rem;">🎒 LOANER{{ ': ' + c.loaner_label if c.loaner_label }}</span>
+            <span class="badge badge-yellow" style="font-size:.7rem;">{{ icon('loaner') }}LOANER{{ ': ' + c.loaner_label if c.loaner_label }}</span>
           {% else %}
             {{ c.person_name or 'Unassigned' }}
           {% endif %}

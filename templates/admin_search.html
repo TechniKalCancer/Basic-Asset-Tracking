@@ -2,7 +2,7 @@
 {% block title %}Search{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🔎 Search Results</h1>
+  <h1 style="margin:0;">{{ icon('search') }}Search Results</h1>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -14,7 +14,7 @@
 
 {% if people %}
 <div class="card" style="padding:0;overflow:hidden;">
-  <h2 style="padding:1.5rem 1.5rem 0;">👤 People ({{ people|length }})</h2>
+  <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('person') }}People ({{ people|length }})</h2>
   <table>
     <thead>
       <tr><th>Name</th><th>Email</th><th>Site</th><th>Assets</th><th></th></tr>
@@ -42,7 +42,7 @@
 
 {% if assets %}
 <div class="card" style="padding:0;overflow:hidden;">
-  <h2 style="padding:1.5rem 1.5rem 0;">💻 Assets ({{ assets|length }})</h2>
+  <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('devices') }}Assets ({{ assets|length }})</h2>
   {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
                           'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
   <table>

@@ -1,14 +1,15 @@
 {% extends 'base.html' %}
 {% block title %}Ticket #{{ ticket.id }}{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 {% set status_badge = {'open': 'badge-blue', 'in_progress': 'badge-yellow', 'resolved': 'badge-green', 'closed': 'badge-red'} %}
 {% set priority_badge = {'low': 'badge-blue', 'normal': 'badge-blue', 'high': 'badge-yellow', 'urgent': 'badge-red'} %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🎫 #{{ ticket.id }} — {{ ticket.subject }}</h1>
+  <h1 style="margin:0;">{{ icon('ticket') }}#{{ ticket.id }} — {{ ticket.subject }}</h1>
   <span class="badge {{ status_badge.get(ticket.status, 'badge-blue') }}">{{ ticket.status|replace('_', ' ')|capitalize }}</span>
   <span class="badge {{ priority_badge.get(ticket.priority, 'badge-blue') }}">{{ ticket.priority|capitalize }}</span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/tickets/{{ ticket.id }}/edit" class="btn btn-ghost">✏️ Edit</a>
+  <a href="/admin/tickets/{{ ticket.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
   <a href="/admin/tickets" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -33,12 +34,16 @@
     {% endif %}
   </table>
   <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);white-space:pre-wrap;">{{ ticket.description }}</div>
+  <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+    <div style="color:var(--muted);font-size:.85rem;margin-bottom:.4rem;">{{ icon('camera') }}Photos &amp; Files</div>
+    {{ macros.attachment_panel(attachments, 'ticket', ticket.id) }}
+  </div>
 </div>
 
 {% if pending_action %}
 <div class="card" style="margin-bottom:1.5rem;border:1px solid var(--warning);">
   <h2 style="margin-top:0;display:flex;align-items:center;gap:.6rem;">
-    🤖 Automation Pending
+    {{ icon('automation') }}Automation Pending
     <span class="badge badge-yellow">Awaiting confirmation</span>
   </h2>
   <p style="margin-bottom:1rem;">
@@ -52,7 +57,7 @@
     <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/confirm"
           onsubmit="return confirm('Run {{ action_labels.get(pending_action.action_type, pending_action.action_type) }} on {{ pending_action.asset_tag }} now? This can\'t be undone.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-danger">✅ Confirm &amp; Run</button>
+      <button type="submit" class="btn btn-danger">{{ icon('success') }}Confirm &amp; Run</button>
     </form>
     <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/dismiss">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -109,7 +114,7 @@
 {% set repair = ticket.repair %}
 <div class="card" style="margin-bottom:1.5rem;">
   <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
-    <h2 style="margin:0;">🛠️ Repair</h2>
+    <h2 style="margin:0;">{{ icon('repair') }}Repair</h2>
     {% if repair.returned_at %}
       {% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
       <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
@@ -136,7 +141,7 @@
 
   {% if not repair.returned_at %}
   <details style="margin-bottom:1rem;">
-    <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">✏️ Edit repair details</summary>
+    <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">{{ icon('edit') }}Edit repair details</summary>
     <form method="POST" action="/admin/repairs/{{ repair.id }}/edit" style="margin-top:.8rem;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div style="margin-bottom:.8rem;">
@@ -190,7 +195,7 @@
   {% set total = ticket.charges|sum(attribute='amount') %}
   {% set unpaid_total = ticket.charges|selectattr('paid_at', 'none')|sum(attribute='amount') %}
   <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
-    <h2 style="margin:0;">💵 Billing</h2>
+    <h2 style="margin:0;">{{ icon('billing') }}Billing</h2>
     {% if ticket.charges %}
     <span class="badge {{ 'badge-red' if unpaid_total else 'badge-green' }}">
       ${{ '%.2f'|format(total) }} total{% if unpaid_total %} · ${{ '%.2f'|format(unpaid_total) }} unpaid{% endif %}
@@ -271,7 +276,8 @@
   <h2 style="margin-top:0;">Comments</h2>
   {% for c in ticket.comments %}
   <div style="padding:.8rem 0;border-bottom:1px solid var(--border);">
-    <div style="color:var(--muted);font-size:.8rem;margin-bottom:.3rem;">{{ c.author_label }} — {{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+    <div style="color:var(--muted);font-size:.8rem;margin-bottom:.3rem;">{{ c.author_label }} — {{ c.created_at.strftime('%Y-%m-%d %H:%M') }}
+      {% if c.emailed_to_requester %}<span class="badge badge-blue" style="font-size:.68rem;">{{ icon('email') }}Emailed to requester</span>{% else %}<span class="badge" style="font-size:.68rem;background:var(--surface2);color:var(--muted);">Internal</span>{% endif %}</div>
     <div style="white-space:pre-wrap;">{{ c.body }}</div>
   </div>
   {% else %}
@@ -281,12 +287,18 @@
   <form method="POST" action="/admin/tickets/{{ ticket.id }}/comment" style="margin-top:1rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <textarea name="body" rows="3" placeholder="Add a comment…" style="width:100%;resize:vertical;margin-bottom:.8rem;" required></textarea>
+    {% if email_enabled and ticket.requester_email %}
+    <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" name="email_requester" style="width:auto;" />
+      Also email this to {{ ticket.requester_name or 'the requester' }} ({{ ticket.requester_email }}) — otherwise it stays internal
+    </label>
+    {% endif %}
     <button type="submit" class="btn btn-primary">Add Comment</button>
   </form>
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0;">🕵️ History</h2>
+  <h2 style="margin-top:0;">{{ icon('history') }}History</h2>
   {% if history %}
   <table>
     <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>

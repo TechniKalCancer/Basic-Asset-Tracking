@@ -1,22 +1,23 @@
 {% extends 'base.html' %}
 {% block title %}Assign {{ registry_row.asset_tag }}{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">Assign <code>{{ registry_row.asset_tag }}</code></h1>
-  {% if registry_row.site %}<span class="badge badge-blue">🏫 {{ registry_row.site.name }}</span>{% endif %}
-  {% if registry_row.is_loaner %}<span class="badge badge-yellow">🎒 Loaner</span>{% endif %}
+  {% if registry_row.site %}<span class="badge badge-blue">{{ icon('site') }}{{ registry_row.site.name }}</span>{% endif %}
+  {% if registry_row.is_loaner %}<span class="badge badge-yellow">{{ icon('loaner') }}Loaner</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
   {% if can('devices_manage') %}
-  <a href="/admin/registry/{{ registry_row.asset_tag }}/edit" class="btn btn-ghost">✏️ Edit Device</a>
+  <a href="/admin/registry/{{ registry_row.asset_tag }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit Device</a>
   {% if not registry_row.is_loaner and asset and asset.assigned_to %}
-  <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">🎒 Mark as Loaner</button>
+  <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">{{ icon('loaner') }}Mark as Loaner</button>
   {% else %}
   <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/toggle_loaner" style="display:inline-flex;gap:.4rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% if not registry_row.is_loaner %}
     <input name="loaner_label" placeholder="Label (optional), e.g. Front Office #3" style="width:220px;" />
     {% endif %}
-    <button type="submit" class="btn btn-ghost">{{ '🎒 Unmark Loaner' if registry_row.is_loaner else '🎒 Mark as Loaner' }}</button>
+    <button type="submit" class="btn btn-ghost">{{ 'Unmark Loaner' if registry_row.is_loaner else 'Mark as Loaner' }}</button>
   </form>
   {% endif %}
   {% endif %}
@@ -26,7 +27,7 @@
 {% if pending_action %}
 <div class="card" style="margin-bottom:1.5rem;border:1px solid var(--warning);">
   <h2 style="margin-top:0;display:flex;align-items:center;gap:.6rem;">
-    🤖 Automation Pending
+    {{ icon('automation') }}Automation Pending
     <span class="badge badge-yellow">Awaiting confirmation</span>
   </h2>
   <p style="margin-bottom:1rem;">
@@ -41,7 +42,7 @@
     <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/confirm"
           onsubmit="return confirm('Run {{ action_labels.get(pending_action.action_type, pending_action.action_type) }} on {{ registry_row.asset_tag }} now? This can\'t be undone.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-danger">✅ Confirm &amp; Run</button>
+      <button type="submit" class="btn btn-danger">{{ icon('success') }}Confirm &amp; Run</button>
     </form>
     <form method="POST" action="/admin/pending_actions/{{ pending_action.id }}/dismiss">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -83,7 +84,7 @@
 
   {% if registry_row.is_loaner %}
   <p style="color:var(--muted);font-size:.88rem;">
-    🎒 This device is in the loaner pool, so it can't be permanently assigned here — check it out via
+    {{ icon('loaner') }}This device is in the loaner pool, so it can't be permanently assigned here — check it out via
     <a href="/loaner_checkinout">Loaner Check In / Out</a> instead, or unmark it as a loaner above first.
   </p>
   <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/loaner_label"
@@ -146,7 +147,7 @@
 </div>
 
 <div class="card">
-  <h2>📜 Assignment &amp; Loaner History</h2>
+  <h2>{{ icon('history') }}Assignment &amp; Loaner History</h2>
   {% if combined_history %}
   <div style="overflow-x:auto;">
   <table>
@@ -178,7 +179,7 @@
 </div>
 
 <div class="card">
-  <h2>🔄 Check-In/Out Log</h2>
+  <h2>{{ icon('sync') }}Check-In/Out Log</h2>
   {% if events %}
   <div style="overflow-x:auto;">
   <table>
@@ -207,9 +208,9 @@
 
 <div class="card">
   <div style="display:flex;align-items:center;gap:.6rem;">
-    <h2 style="margin:0;">🛠️ Incidents / Damage Reports</h2>
+    <h2 style="margin:0;">{{ icon('repair') }}Incidents / Damage Reports</h2>
     {% if incidents %}
-    <a href="/admin/assets/{{ registry_row.asset_tag }}/invoice" target="_blank" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.8rem;margin-left:auto;">🖨️ Print Invoice</a>
+    <a href="/admin/assets/{{ registry_row.asset_tag }}/invoice" target="_blank" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.8rem;margin-left:auto;">{{ icon('print') }}Print Invoice</a>
     {% endif %}
   </div>
   {% if asset and asset.assigned_to and current_person_incident_count %}
@@ -220,10 +221,10 @@
   {% endif %}
   {% if asset and asset.assigned_to and asset.assigned_to.insurance_opted_in %}
     <p style="margin:.8rem 0;">
-      <span class="badge badge-blue">🛡️ {{ asset.assigned_to.full_name }} has the device protection plan — check before charging a fee.</span>
+      <span class="badge badge-blue">{{ icon('protection-plan') }}{{ asset.assigned_to.full_name }} has the device protection plan — check before charging a fee.</span>
     </p>
   {% endif %}
-  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" style="margin:1rem 0;">
+  <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/incidents" enctype="multipart/form-data" style="margin:1rem 0;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% if repair_categories %}
     <div style="margin-bottom:.8rem;">
@@ -254,6 +255,19 @@
       <input id="incidentFeeCharged" type="checkbox" name="fee_charged" style="width:auto;" />
       Fee charged for this incident
     </label>
+    {{ macros.photo_input('Damage Photos (optional)') }}
+    {% if asset and asset.assigned_to %}
+      {% if asset.assigned_to.guardian_email and email_enabled %}
+      <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" name="notify_guardian" style="width:auto;" />
+        Email a damage notice to {{ asset.assigned_to.guardian_name or 'the parent/guardian' }} ({{ asset.assigned_to.guardian_email }})
+      </label>
+      {% elif asset.assigned_to.role == 'student' and not asset.assigned_to.guardian_email %}
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:.8rem;">
+        No parent/guardian email on file for {{ asset.assigned_to.full_name }} — <a href="/admin/people/{{ asset.assigned_to.id }}/edit" class="tag-link">add one</a> to send damage notices.
+      </p>
+      {% endif %}
+    {% endif %}
     <button type="submit" class="btn btn-ghost" style="color:var(--warning);border-color:var(--warning);">Log Incident</button>
   </form>
   <script>
@@ -285,7 +299,10 @@
       <tr>
         <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--muted);">{{ inc.person_name or '—' }}</td>
-        <td>{{ inc.description }}{% if inc.repair_category and inc.repair_category.name != inc.description %}<span style="color:var(--muted);font-size:.78rem;"> — {{ inc.repair_category.name }}</span>{% endif %}</td>
+        <td>{{ inc.description }}{% if inc.repair_category and inc.repair_category.name != inc.description %}<span style="color:var(--muted);font-size:.78rem;"> — {{ inc.repair_category.name }}</span>{% endif %}
+          {% if inc.guardian_notified_at %}<span class="badge badge-blue" style="font-size:.68rem;" title="Damage notice emailed {{ inc.guardian_notified_at.strftime('%Y-%m-%d %H:%M') }} UTC">{{ icon('email') }}Guardian notified</span>{% endif %}
+          {{ macros.attachment_thumbs(incident_attachments[inc.id]) }}
+        </td>
         <td style="white-space:nowrap;">
           {% if inc.fee_charged %}
             {% if inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% endif %}
@@ -306,6 +323,18 @@
           <div class="row-menu" style="display:inline-block;">
             <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
             <div class="row-menu-items" style="min-width:240px;">
+              <form method="POST" action="/admin/attachments/incident/{{ inc.id }}" enctype="multipart/form-data" style="padding:.4rem;border-bottom:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Add Photos</label>
+                <input type="file" name="photos" accept="image/*,application/pdf" multiple data-photo-input required style="margin-bottom:.5rem;padding:.3rem;" />
+                <button type="submit" class="btn btn-ghost" style="width:100%;">{{ icon('camera') }}Upload</button>
+              </form>
+              {% if email_enabled and inc.person_id %}
+              <form method="POST" action="/admin/incidents/{{ inc.id }}/notify_guardian" style="padding:.4rem;border-bottom:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-ghost" style="width:100%;">{{ icon('email') }}{{ 'Re-send' if inc.guardian_notified_at else 'Email' }} Guardian Notice</button>
+              </form>
+              {% endif %}
               <form method="POST" action="/admin/incidents/{{ inc.id }}/fee" style="padding:.4rem;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">
@@ -334,20 +363,20 @@
 
 {% if can('repairs') %}
 <div class="card">
-  <h2>🛠️ Repair</h2>
+  <h2>{{ icon('repair') }}Repair</h2>
   {% if open_repair %}
     <p style="color:var(--muted);font-size:.88rem;margin-bottom:.5rem;">
       Sent {{ open_repair.sent_at.strftime('%Y-%m-%d') }}{% if open_repair.repair_category %} — {{ open_repair.repair_category.name }}{% endif %}
       {% if open_repair.ticket_number %} &mdash; ticket #{{ open_repair.ticket_number }}{% endif %}.
       {% if open_repair.expected_return_at %}Expected back {{ open_repair.expected_return_at.strftime('%Y-%m-%d') }}.{% endif %}
-      {% if open_repair.ticket_id %}<a href="/admin/tickets/{{ open_repair.ticket_id }}">🎫 View Ticket #{{ open_repair.ticket_id }}</a>{% endif %}
+      {% if open_repair.ticket_id %}<a href="/admin/tickets/{{ open_repair.ticket_id }}">{{ icon('ticket') }}View Ticket #{{ open_repair.ticket_id }}</a>{% endif %}
     </p>
     {% if open_repair.issue_description %}
     <p style="color:var(--muted);font-size:.85rem;margin-bottom:1rem;">Issue: {{ open_repair.issue_description }}</p>
     {% endif %}
 
     <details style="margin-bottom:1rem;">
-      <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">✏️ Edit repair details</summary>
+      <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">{{ icon('edit') }}Edit repair details</summary>
       <form method="POST" action="/admin/repairs/{{ open_repair.id }}/edit" style="margin-top:.8rem;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div style="margin-bottom:.8rem;">
@@ -445,7 +474,7 @@
 
 <div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
-    🔗 Google Workspace Info
+    {{ icon('integration') }}Google Workspace Info
     <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}" style="font-size:.7rem;">
       {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
     </span>
@@ -455,7 +484,13 @@
   <table style="margin-bottom:1rem;">
     <tr><td style="color:var(--muted);">Model</td><td>{{ asset.google_model or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Org Unit</td><td>{{ asset.google_org_unit or '—' }}</td></tr>
-    <tr><td style="color:var(--muted);">Recent User</td><td>{{ asset.google_recent_user or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">Recent User</td><td>{{ asset.google_recent_user or '—' }}
+      {% if signin_flag %}<a href="/admin/signin_mismatches" class="badge {{ {'high': 'badge-red', 'medium': 'badge-yellow', 'low': 'badge-blue'}[signin_flag.severity] }}" style="margin-left:.4rem;text-decoration:none;">{{ icon('flag') }}{{ signin_flag.label }}</a>{% endif %}
+      {% if asset.google_recent_users and asset.google_recent_users|length > 1 %}
+      <div style="font-size:.75rem;color:var(--muted);margin-top:.2rem;">Before that: {{ asset.google_recent_users[1:]|join(', ') }}</div>
+      {% endif %}
+    </td></tr>
+    {% if asset.google_last_activity %}<tr><td style="color:var(--muted);">Last Online</td><td>{{ asset.google_last_activity.strftime('%Y-%m-%d %H:%M') }} UTC <span style="color:var(--muted);">({{ asset.google_last_activity|ago }})</span></td></tr>{% endif %}
     <tr><td style="color:var(--muted);">Status</td><td>
       {% if asset.google_enabled is none %}
       <span class="badge badge-yellow">Unknown</span>
@@ -483,9 +518,9 @@
           onsubmit="return confirm('{{ 'Disable' if asset.google_enabled else 'Enable' }} {{ registry_row.asset_tag }} in Google Workspace?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% if asset.google_enabled %}
-      <button type="submit" class="btn btn-danger">🚫 Disable in Google</button>
+      <button type="submit" class="btn btn-danger">{{ icon('disable') }}Disable in Google</button>
       {% else %}
-      <button type="submit" class="btn btn-primary">✅ Enable in Google</button>
+      <button type="submit" class="btn btn-primary">{{ icon('success') }}Enable in Google</button>
       {% endif %}
     </form>
     {% endif %}
@@ -493,7 +528,7 @@
     <form method="POST" action="/admin/assets/{{ registry_row.asset_tag }}/profile_clear"
           onsubmit="return confirm('Clear all local user profiles on {{ registry_row.asset_tag }}? This wipes every account\'s local data on the device (not just one) and can\'t be undone.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-danger">🧹 Profile Clear</button>
+      <button type="submit" class="btn btn-danger">{{ icon('profile-clear') }}Profile Clear</button>
     </form>
     {% endif %}
   </div>
@@ -508,13 +543,13 @@
     {% endfor %}
   </table>
   <p style="color:var(--muted);font-size:.78rem;margin-top:.5rem;">
-    🧩 Bulk-synced via <a href="/admin/google_field_mapping?entity=device">Google Field Mapping</a>.
+    {{ icon('custom-fields') }}Bulk-synced via <a href="/admin/google_field_mapping?entity=device">Google Field Mapping</a>.
   </p>
   {% endif %}
 </div>
 
 <div class="card">
-  <h2>🖨️ Print Label</h2>
+  <h2>{{ icon('print') }}Print Label</h2>
   <p style="color:var(--muted);font-size:.78rem;margin-bottom:1rem;">
     Requires DYMO Connect installed and running on this device. Label stock: 30252 Address.
   </p>

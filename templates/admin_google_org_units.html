@@ -2,12 +2,12 @@
 {% block title %}Org Units{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🗂️ Org Units</h1>
+  <h1 style="margin:0;">{{ icon('org-unit') }}Org Units</h1>
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/google_field_mapping" class="btn btn-ghost">🔗 Google Field Mapping</a>
+  <a href="/admin/google_field_mapping" class="btn btn-ghost">{{ icon('integration') }}Google Field Mapping</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
@@ -31,7 +31,7 @@
   <form method="POST" action="/admin/google_org_units/refresh">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-primary" {{ 'disabled' if not google_sync_enabled }}>
-      🔄 Refresh from Google{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
+      {{ icon('sync') }}Refresh from Google{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
     </button>
   </form>
 </div>
@@ -56,8 +56,8 @@
           <td>
             <select name="category_{{ ou.id }}">
               <option value="unclassified" {{ 'selected' if ou.category == 'unclassified' }}>— Unclassified —</option>
-              <option value="staff"   {{ 'selected' if ou.category == 'staff' }}>🧑‍💼 Staff</option>
-              <option value="student" {{ 'selected' if ou.category == 'student' }}>🎓 Student</option>
+              <option value="staff"   {{ 'selected' if ou.category == 'staff' }}>Staff</option>
+              <option value="student" {{ 'selected' if ou.category == 'student' }}>Student</option>
             </select>
           </td>
           <td>

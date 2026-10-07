@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Loaner Check In / Out{% endblock %}
 {% block content %}
-<h1>🎒 Loaner Check In / Out</h1>
+<h1>{{ icon('loaner') }}Loaner Check In / Out</h1>
 
 <div class="card" style="max-width:480px;">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1.2rem;">
@@ -77,14 +77,14 @@
           if (data.checked_out) {
             checkoutFields.style.display = 'none';
             acknowledgedByInput.required = false;
-            lookupStatus.textContent = '✅ ' + data.asset_tag + ' is checked out to ' + data.checked_out_to + ' — checking it in…';
+            lookupStatus.textContent = '' + data.asset_tag + ' is checked out to ' + data.checked_out_to + ' — checking it in…';
             submitBtn.disabled = false;
             submitBtn.textContent = 'Check In';
             if (autoSubmitOnCheckin) form.submit();
           } else {
             checkoutFields.style.display = 'block';
             acknowledgedByInput.required = true;
-            lookupStatus.textContent = '🎒 ' + data.asset_tag + ' is available — enter your name below to check it out.';
+            lookupStatus.textContent = '' + data.asset_tag + ' is available — enter your name below to check it out.';
             submitBtn.disabled = false;
             submitBtn.textContent = 'Check Out';
             document.getElementById('personSearchInput').focus();

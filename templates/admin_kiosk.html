@@ -3,7 +3,7 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🖥️ Kiosk Devices</h1>
+  <h1 style="margin:0;">{{ icon('computer') }}Kiosk Devices</h1>
   <span class="badge badge-blue">{{ devices|length }} enrolled</span>
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin" class="btn btn-ghost">← Back</a>
@@ -19,7 +19,7 @@
   <h2>Enroll This Device</h2>
   {% if current_device %}
     <p style="color:var(--success);font-size:.9rem;">
-      ✅ This device is already enrolled as "<strong>{{ current_device.label or 'Unnamed device' }}</strong>".
+      {{ icon('success') }}This device is already enrolled as "<strong>{{ current_device.label or 'Unnamed device' }}</strong>".
     </p>
   {% else %}
     <form method="POST" action="/admin/kiosk/enable">

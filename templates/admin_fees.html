@@ -3,7 +3,7 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">💵 Billing</h1>
+  <h1 style="margin:0;">{{ icon('billing') }}Billing</h1>
   <span class="badge {{ 'badge-red' if (status == 'unpaid' and grand_total) else 'badge-green' }}">
     ${{ '%.2f'|format(grand_total) }} {{ 'outstanding' if status == 'unpaid' else ('collected' if status == 'paid' else 'total billed') }}
   </span>
@@ -90,7 +90,7 @@
 {% else %}
 <div class="card">
   <p style="color:var(--muted);text-align:center;padding:1rem;">
-    {% if status == 'unpaid' %}Nobody owes anything right now. 🎉{% else %}No billing records match.{% endif %}
+    {% if status == 'unpaid' %}Nobody owes anything right now. {% else %}No billing records match.{% endif %}
   </p>
 </div>
 {% endif %}

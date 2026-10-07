@@ -3,17 +3,17 @@
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">👤 People</h1>
+  <h1 style="margin:0;">{{ icon('person') }}People</h1>
   <span class="badge badge-blue">{{ pagination.total }} shown</span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/people/import" class="btn btn-ghost">📥 Import CSV</a>
-  <a href="/admin/people/graduate" class="btn btn-ghost">🎓 Graduate Students</a>
+  <a href="/admin/people/import" class="btn btn-ghost">{{ icon('import') }}Import CSV</a>
+  <a href="/admin/people/graduate" class="btn btn-ghost">{{ icon('graduate') }}Graduate Students</a>
   <a href="/admin/people/new" class="btn btn-primary">+ Add Person</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
 <div class="card" style="margin-bottom:1.5rem;">
-  <h2 style="margin-top:0;">⚡ Quick Add</h2>
+  <h2 style="margin-top:0;">Quick Add</h2>
   <p style="color:var(--muted);font-size:.82rem;margin-bottom:1rem;">
     For entering a short roster by hand — add one, land right back here with the next entry ready to go.
     Role and site carry over between entries.
@@ -89,7 +89,7 @@
         <td>
           {{ person.full_name }}
           {% if not person.is_active %}<span class="badge badge-yellow" style="font-size:.7rem;">Graduated</span>{% endif %}
-          {% if person.insurance_opted_in %}<span class="badge badge-blue" style="font-size:.7rem;" title="Device protection plan">🛡️</span>{% endif %}
+          {% if person.insurance_opted_in %}<span class="badge badge-blue" style="font-size:.7rem;" title="Device protection plan">{{ icon('protection-plan') or 'Plan' }}</span>{% endif %}
         </td>
         <td style="color:var(--muted);">{{ person.email }}</td>
         <td style="color:var(--muted);">{{ person.external_id or '—' }}</td>
@@ -108,17 +108,17 @@
           <div class="row-menu">
             <button type="button">⋮</button>
             <div class="row-menu-items">
-              <a href="/admin/people/{{ person.id }}/history">📜 History</a>
+              <a href="/admin/people/{{ person.id }}/history">{{ icon('history') }}History</a>
               {% if not person.is_active %}
               <form method="POST" action="/admin/people/{{ person.id }}/reactivate">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit">↩️ Reactivate</button>
+                <button type="submit">↩ Reactivate</button>
               </form>
               {% endif %}
               <form method="POST" action="/admin/people/{{ person.id }}/delete"
                     onsubmit="return confirm('Permanently delete {{ person.full_name }}? Any assigned assets will be unassigned. Prefer Graduate Students for leaving students.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="danger">🗑️ Delete</button>
+                <button type="submit" class="danger">{{ icon('delete') }}Delete</button>
               </form>
             </div>
           </div>

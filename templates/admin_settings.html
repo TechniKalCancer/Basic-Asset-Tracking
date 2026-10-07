@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>{{ icon('settings') }}Settings</h1>
+{% for title, items in sections %}
+<h2 class="settings-group">{{ title }}</h2>
+<div class="settings-grid">
+  {% for item in items %}
+  <a class="settings-card" href="{{ item.url }}">
+    <span class="settings-title">{{ icon(item.icon) }}{{ item.title }}</span>
+    <span class="settings-desc">{{ item.desc }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endfor %}
+<style>
+  .settings-group { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 1.6rem 0 .7rem; }
+  .settings-group:first-of-type { margin-top: 0; }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: .8rem; }
+  .settings-card {
+    display: flex; flex-direction: column; gap: .3rem; padding: 1rem 1.1rem; min-height: 88px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); text-decoration: none; transition: border-color .15s, background .15s;
+  }
+  .settings-card:hover, .settings-card:focus-visible { border-color: var(--accent); background: var(--surface2); }
+  .settings-title { font-weight: 600; display: flex; align-items: center; }
+  .settings-desc { color: var(--muted); font-size: .84rem; line-height: 1.35; }
+</style>
+{% endblock %}

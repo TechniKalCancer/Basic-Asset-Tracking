@@ -2,13 +2,13 @@
 {% block title %}Google Field Mapping{% endblock %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">🔗 Google Field Mapping</h1>
+  <h1 style="margin:0;">{{ icon('integration') }}Google Field Mapping</h1>
   <span class="badge {{ 'badge-green' if google_sync_enabled else 'badge-yellow' }}">
     {{ 'Configured' if google_sync_enabled else 'Not Configured' }}
   </span>
   <span class="spacer" style="flex:1;"></span>
-  <a href="/admin/google_org_units" class="btn btn-ghost">🗂️ Org Units</a>
-  <a href="/admin/custom_fields" class="btn btn-ghost">🧩 Custom Fields</a>
+  <a href="/admin/google_org_units" class="btn btn-ghost">{{ icon('org-unit') }}Org Units</a>
+  <a href="/admin/custom_fields" class="btn btn-ghost">{{ icon('custom-fields') }}Custom Fields</a>
   <a href="/admin/google_setup" class="btn btn-ghost">Google Sync Setup</a>
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
@@ -39,13 +39,13 @@
   <form method="POST" action="/admin/google_field_mapping/sync/{{ 'people' if entity_type == 'person' else 'devices' }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-primary" {{ 'disabled' if not google_sync_enabled or not mappings }}>
-      ▶️ Run Sync Now{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
+      ▶ Run Sync Now{{ '' if google_sync_enabled else ' (set up Google Sync first)' }}
     </button>
   </form>
 </div>
 
 <div class="card">
-  <h2 style="margin-top:0;">➕ Add a Mapping</h2>
+  <h2 style="margin-top:0;">{{ icon('add') }}Add a Mapping</h2>
   <form method="POST" action="/admin/google_field_mapping/new" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="entity_type" value="{{ entity_type }}">
@@ -131,7 +131,7 @@
         <td><code>{{ m.google_field }}</code></td>
         <td>
           {% if m.target_field.startswith('custom:') %}
-            🧩 {{ custom_fields|selectattr('field_key', 'equalto', m.target_field[7:])|map(attribute='label')|first or m.target_field }}
+            {{ icon('custom-fields') }}{{ custom_fields|selectattr('field_key', 'equalto', m.target_field[7:])|map(attribute='label')|first or m.target_field }}
           {% else %}
             {{ real_fields.get(m.target_field, m.target_field) }}
           {% endif %}

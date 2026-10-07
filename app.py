@@ -7234,6 +7234,8 @@ SIGNIN_CATEGORIES = OrderedDict([
                            'Marked lost or retired, but someone has been signing in to it.')),
     ('unassigned_in_use', ('Unassigned device in use', 'medium',
                            'Nobody is assigned (or no loaner is checked out), but someone signed in after it was returned.')),
+    ('same_name',         ('Same name, different account', 'medium',
+                           'Signed in with a different People record that has the holder\'s exact name — one student with two accounts, or two students who share a name.')),
     ('unknown_account',   ('Account not in People', 'medium',
                            'Signed in with an account that doesn\'t match anyone in People.')),
     ('previous_holder',   ('Previous holder still signing in', 'low',
@@ -7350,6 +7352,14 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
                 note.append(f'Handed to the current holder {(now - held_since).days} day(s) ago.')
         elif not signer.is_active:
             category = 'inactive_person'
+        elif any(p.full_name.strip().lower() == signer.full_name.strip().lower() for p in expected):
+            # Most often a student whose Google account changed (a new
+            # account got auto-created in People, the device is still on the
+            # old record) — a records problem, not a student on someone
+            # else's device. Never auto-merged: some really are two kids.
+            category = 'same_name'
+            note.append(f'Signed in as {signin_email}; the device is assigned to '
+                        f'{", ".join(p.email for p in expected)}.')
         elif signer.role == 'staff':
             category = 'staff_signin'
         else:

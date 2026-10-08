@@ -11,7 +11,7 @@ district only sees what it uses.
 
 ## Phase 1 — Foundation
 - [x] Test suite (pytest, real migrations, fresh DB per test) + GitHub Actions
-- [ ] Split `app.py` into modules (behavior and URLs unchanged)
+- [x] Split `app.py` into the `foxdesk/` package (behavior and URLs unchanged)
 - [ ] Module on/off switches (Settings → Features)
 - [ ] Identity model: person identities + device directory records; migrate existing data
 

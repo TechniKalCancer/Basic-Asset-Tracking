@@ -1,0 +1,17 @@
+"""Page routes, one module per area. Importing this registers them all on the app."""
+from foxdesk.views import activity  # noqa: F401
+from foxdesk.views import assignment  # noqa: F401
+from foxdesk.views import attachments  # noqa: F401
+from foxdesk.views import auth  # noqa: F401
+from foxdesk.views import dashboard  # noqa: F401
+from foxdesk.views import devices  # noqa: F401
+from foxdesk.views import help  # noqa: F401
+from foxdesk.views import incidents  # noqa: F401
+from foxdesk.views import insights  # noqa: F401
+from foxdesk.views import integrations  # noqa: F401
+from foxdesk.views import loaners  # noqa: F401
+from foxdesk.views import people  # noqa: F401
+from foxdesk.views import public  # noqa: F401
+from foxdesk.views import repairs  # noqa: F401
+from foxdesk.views import settings  # noqa: F401
+from foxdesk.views import tickets  # noqa: F401

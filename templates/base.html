@@ -15,7 +15,7 @@
       --surface2: #22263a;
       --border: #2e3352;
       /* Brand colors — auto-derived from one admin-picked primary color at
-         /admin/branding, see generate_palette() in app.py. Falls back to
+         /admin/branding, see generate_palette() in foxdesk/services/branding.py. Falls back to
          these exact literals (matching the app's original look) until
          branding is configured. */
       --accent: {{ branding.accent }};
@@ -279,7 +279,7 @@
     .stat-card .num { font-size: 2rem; font-weight: 700; color: var(--accent); }
     .stat-card .lbl { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
 
-    /* Drop-in icons (see icon() in app.py and static/icons/README.md) —
+    /* Drop-in icons (see icon() in foxdesk/web.py and static/icons/README.md) —
        a CSS mask, so a single-color SVG takes the surrounding text color. */
     .icon {
       display: inline-block; flex: none; width: 1.15em; height: 1.15em; margin-right: .4em; vertical-align: -.2em;

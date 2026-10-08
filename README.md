@@ -119,7 +119,7 @@ means:
 
 **Making a schema change going forward:**
 
-1. Edit the model(s) in `app.py`.
+1. Edit the model(s) in `foxdesk/models.py`.
 2. Generate a migration script from the diff:
    ```sh
    docker compose exec web flask db migrate -m "short description of the change"
@@ -144,15 +144,41 @@ pulling any update that adds a new migration file.
 
 ## Project Structure
 
-- `app.py`: The main Flask application file.
-- `models.py`: Contains the SQLAlchemy models for the database.
-- `static/`: Contains static files like CSS, JavaScript, and images.
-- `templates/`: Contains HTML templates for rendering the web pages.
-- `Dockerfile`: Docker configuration file for building the Docker image.
-- `docker-compose.yml`: Docker Compose configuration file for setting up the services.
-- `.env`: Environment variables file (not included in the repository).
-- `.dockerignore`: Specifies which files and directories to ignore when building the Docker image.
-- `.gitignore`: Specifies which files and directories to ignore in the Git repository.
+```
+app.py                  entry point only (gunicorn app:app, FLASK_APP=app.py, python app.py)
+foxdesk/
+  core.py               Flask app, config from environment variables, db, CSRF, error pages
+  models.py             SQLAlchemy models
+  web.py                template helpers: nav, icons, Settings hub, filters
+  services/             shared logic, no pages: auth, scoping, emailer, assignments,
+                        incidents, helpdesk (tickets + repairs), labels, attachments,
+                        reports (dashboard, data quality, sign-in check), scheduler
+  integrations/         google.py (Workspace), kace.py (KACE SMA)
+  views/                pages, one module per area (devices, people, loaners, tickets, ...)
+templates/  static/     Jinja templates; CSS/JS/icons (static/icons/README.md lists the icon set)
+migrations/             Alembic migrations (flask db upgrade runs on container start)
+maintenance/            one-off production data fixes, kept for the record
+tests/                  pytest suite — run `pytest`
+docs/ROADMAP.md         productization plan
+```
+
+Layering: `core` → `models` → `services` / `integrations` → `web` → `views`. Lower layers never
+import higher ones, so there are no import cycles. URLs and endpoint names are unchanged from
+when this was a single `app.py`.
+
+### Running the tests
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+```bash
+pytest
+```
+
+Every test gets a fresh SQLite database built by the real migrations, and the environment is
+pinned in `tests/conftest.py`, so a developer's own `.env` (real SMTP/Google/KACE credentials) is
+never used. GitHub Actions runs the suite on every push.
 
 ## API Endpoints
 

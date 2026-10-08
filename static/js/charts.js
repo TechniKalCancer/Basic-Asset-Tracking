@@ -1,6 +1,6 @@
 // Small dependency-free SVG charts for the Dashboard. Each chart is a
 // <div class="viz" data-chart-id="..."> holding a <script type="application/json">
-// spec built by _dashboard_charts() in app.py:
+// spec built by _dashboard_charts() in foxdesk/services/reports.py:
 //   {type: 'columns'|'hbar', stacked?, money?, unit?, series: [{name}], rows: [{label, tip?, values: [...]}]}
 // Marks follow the dashboard chart spec: ≤24px bars with a 4px rounded data
 // end and square baseline, 2px surface gaps between stacked segments,

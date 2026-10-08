@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ branding.app_name or 'FoxDesk' }}{% endblock %}
 {% block content %}
-{# Kiosk landing page — logged-in users are redirected to their own landing page instead (see index() in app.py). #}
+{# Kiosk landing page — logged-in users are redirected to their own landing page instead (see index() in foxdesk/views/public.py). #}
 <h1>{{ branding.app_name or 'FoxDesk' }}</h1>
 <p style="color:var(--muted);margin-top:-.6rem;margin-bottom:1.5rem;">Check a device in or out, or get help with one.</p>
 <div class="kiosk-grid">

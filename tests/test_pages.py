@@ -62,3 +62,9 @@ def test_no_emoji_in_rendered_pages(client, make):
     for url in ('/admin', '/admin/registry', '/admin/people', '/admin/settings', '/report_problem'):
         found = set(emoji.findall(client.get(url).get_data(as_text=True))) - {'☰'}  # ☰ is the text fallback for the menu icon
         assert not found, f'{url}: {found}'
+
+
+def test_static_files_served_from_project_root(anon_client):
+    # foxdesk/core.py points Flask's root at the project, not the package dir
+    for path in ('/static/js/charts.js', '/static/js/camera_scan.js', '/static/icons/devices.svg'):
+        assert anon_client.get(path).status_code == 200, path

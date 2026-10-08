@@ -36,8 +36,37 @@ os.environ.update({
 })
 sys.path.insert(0, ROOT)
 
-import app as A  # noqa: E402  (must come after the environment is pinned)
+import foxdesk  # noqa: E402,F401  (must come after the environment is pinned)
 from flask_migrate import upgrade  # noqa: E402
+
+
+def _foxdesk_modules():
+    return [m for name, m in sorted(sys.modules.items()) if name.startswith('foxdesk') and m is not None]
+
+
+class _AnyModule:
+    """`A.Name` finds Name in whichever foxdesk module defines it, so tests
+    don't have to track which module each helper lives in."""
+    def __getattr__(self, name):
+        for m in _foxdesk_modules():
+            if name in vars(m):
+                return vars(m)[name]
+        raise AttributeError(name)
+
+
+A = _AnyModule()
+
+
+def patch_everywhere(monkeypatch, name, value):
+    """Replace `name` in every foxdesk module that has it — needed because
+    modules import helpers/constants by name (`from ... import send_email`),
+    so patching only the defining module wouldn't reach the callers."""
+    hits = 0
+    for m in _foxdesk_modules():
+        if name in vars(m):
+            monkeypatch.setattr(m, name, value)
+            hits += 1
+    assert hits, f'{name} not found in any foxdesk module'
 
 A.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
 
@@ -84,9 +113,10 @@ def sent_emails(monkeypatch):
     """Turns email 'on' and captures every send instead of hitting SMTP.
     Background sends run inline so tests can assert on them immediately."""
     sent = []
-    monkeypatch.setattr(A, 'EMAIL_ENABLED', True)
-    monkeypatch.setattr(A, 'send_email', lambda to, subject, body: sent.append((to, subject, body)))
-    monkeypatch.setattr(A, '_send_email_in_background', lambda to, s, b: A.send_email(to, s, b))
+    fake_send = lambda to, subject, body: sent.append((to, subject, body))  # noqa: E731
+    patch_everywhere(monkeypatch, 'EMAIL_ENABLED', True)
+    patch_everywhere(monkeypatch, 'send_email', fake_send)
+    patch_everywhere(monkeypatch, '_send_email_in_background', fake_send)
     return sent
 
 

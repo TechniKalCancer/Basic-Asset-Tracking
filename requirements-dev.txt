@@ -1,3 +1,4 @@
 # Test/dev-only dependencies — not installed in the production image.
 -r requirements.txt
 pytest==8.3.5
+pyflakes==3.2.0

@@ -4,11 +4,12 @@ from datetime import datetime, timedelta
 
 from flask import flash, redirect, render_template, request, url_for
 
-from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, AD_SYNC_ENABLED, app, db
+from foxdesk.core import app, db
 from foxdesk.models import Asset, AssetRegistry, DeviceRecord, Person, PersonIdentity
 from foxdesk.integrations.active_directory import (
-    STALE_DAYS, DirectoryError, ad_settings, build_tree, connect, default_selection, describe_summary,
-    read_directory, run_ad_sync, server_certificate, trust_certificate, verified_by_ca,
+    STALE_DAYS, DirectoryError, ad_config, ad_settings, build_tree, connect, default_selection, describe_summary,
+    encrypt_secret, forget_config_cache, read_directory, run_ad_sync, server_certificate, trust_certificate,
+    validate_connection_form, verified_by_ca,
 )
 from foxdesk.services.auth import _current_site_ids, _log_activity, require_permission, require_super_admin
 from foxdesk.services.identities import accounts_to_review_query
@@ -52,9 +53,9 @@ def _render_setup(checks=None):
     users_sel, computers_sel = ((settings.user_containers or [], settings.computer_containers or []) if chosen
                                 else default_selection(tree))
     db.session.commit()  # ad_settings() may have created the row
-    return render_template('admin_directory.html', configured=AD_SYNC_ENABLED, servers=AD_SERVERS,
-                           base_dn=AD_BASE_DN, bind_user=AD_BIND_USER, password_set=bool(AD_BIND_PASSWORD),
-                           ca_file=AD_CA_FILE, settings=settings, tree=tree, chosen=chosen,
+    cfg = ad_config()
+    return render_template('admin_directory.html', cfg=cfg, configured=cfg['configured'],
+                           settings=settings, tree=tree, chosen=chosen,
                            users_sel=set(users_sel), computers_sel=set(computers_sel), checks=checks,
                            counts=_ad_counts(), schedule=_get_or_create_sync_schedule('ad'),
                            intervals=SYNC_SCHEDULE_INTERVALS, describe=describe_summary)
@@ -66,18 +67,51 @@ def admin_directory():
     return _render_setup()
 
 
+@app.route('/admin/directory/connection', methods=['POST'])
+@require_super_admin
+def admin_directory_connection():
+    """Save the connection. A blank field falls back to its AD_* variable in
+    .env; a blank password keeps the one already saved."""
+    settings = ad_settings()
+    if request.form.get('action') == 'clear':
+        settings.servers = settings.base_dn = settings.bind_user = settings.bind_password = settings.ca_pem = None
+        _log_activity('directory_settings', 'Cleared the saved Active Directory connection (using .env values).')
+        db.session.commit()
+        forget_config_cache()
+        flash('Cleared. Anything set in .env is used instead.', 'success')
+        return redirect(url_for('admin_directory'))
+    try:
+        hosts, base_dn, bind_user, password, ca_pem = validate_connection_form(
+            request.form.get('servers'), request.form.get('base_dn'), request.form.get('bind_user'),
+            request.form.get('password'), request.form.get('ca_pem'))
+    except ValueError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('admin_directory'))
+    settings.servers = ', '.join(hosts) or None
+    settings.base_dn, settings.bind_user, settings.ca_pem = base_dn, bind_user, ca_pem
+    if password:
+        settings.bind_password = encrypt_secret(password)
+    _log_activity('directory_settings', 'Saved the Active Directory connection'
+                  + (' (new password)' if password else '') + '.')
+    db.session.commit()
+    forget_config_cache()
+    flash('Saved. Check the connection to test it.', 'success')
+    return redirect(url_for('admin_directory'))
+
+
 @app.route('/admin/directory/check', methods=['POST'])
 @require_super_admin
 def admin_directory_check():
     """Each DC: does it present a certificate, is it trusted, can the
     account log in. Nothing is saved."""
-    if not AD_SYNC_ENABLED:
-        flash('Set AD_SERVERS, AD_BASE_DN, AD_BIND_USER and AD_BIND_PASSWORD in .env and restart first.', 'error')
+    cfg = ad_config()
+    if not cfg['configured']:
+        flash('Fill in the domain controllers, search base, account and password first.', 'error')
         return redirect(url_for('admin_directory'))
     settings = ad_settings()
     pins = settings.trusted_certs or {}
     checks = []
-    for host in AD_SERVERS:
+    for host in cfg['servers']:
         check = dict(host=host, cert=None, error=None, pinned=False, pin_changed=False, ca_ok=False,
                      bind_ok=False, bind_error=None)
         try:

@@ -21,7 +21,7 @@ from collections import OrderedDict
 
 from flask import g, has_request_context, render_template, request, session
 
-from foxdesk.core import AD_SYNC_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db
+from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db
 from foxdesk.models import FeatureToggle
 
 FEATURES = OrderedDict([
@@ -63,10 +63,16 @@ FEATURES = OrderedDict([
                     desc='Sync Chromebooks and people from Google Admin, push asset tags and org units back.')),
     ('kace', dict(group='Integrations', label='KACE SMA', configured=lambda: KACE_SYNC_ENABLED,
                   desc='Sync Windows and Mac inventory from Quest KACE.')),
-    ('active_directory', dict(group='Integrations', label='Active Directory', configured=lambda: AD_SYNC_ENABLED,
+    ('active_directory', dict(group='Integrations', label='Active Directory', configured=lambda: _ad_configured(),
                               desc='Attach AD accounts to the people you already have and AD computers to your '
                                    'devices, and see which computers are domain-joined. Read-only.')),
 ])
+def _ad_configured():
+    # Entered on the Active Directory page (or .env), so it's looked up, not a constant.
+    from foxdesk.integrations.active_directory import ad_config
+    return ad_config()['configured']
+
+
 FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Automation', 'Integrations']
 
 # Area permissions that belong to a module — off module, no permission.

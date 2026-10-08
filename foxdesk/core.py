@@ -172,17 +172,16 @@ KACE_SYNC_ENABLED = bool(KACE_URL and KACE_USERNAME and KACE_PASSWORD)
 
 
 # ─── Active Directory sync config ───────────────────────────────────────────────
-# Read-only: a plain Domain Users account binds over LDAPS (636) and reads
-# users and computers. Nothing is ever written back to AD. A DC with a
-# self-signed certificate is trusted from the Active Directory page after an
-# admin compares its thumbprint; AD_CA_FILE is for DCs whose certificate comes
-# from your own CA (a PEM bundle path inside the container).
+# Optional defaults: the connection is normally entered on the Active
+# Directory page (Settings), and anything left blank there falls back to
+# these. Read-only — a plain Domain Users account binds over LDAPS (636).
+# AD_CA_FILE is for DCs whose certificate comes from your own CA (a PEM bundle
+# path inside the container); the page also takes a pasted CA certificate.
 AD_SERVERS       = [s.strip() for s in os.environ.get('AD_SERVERS', '').split(',') if s.strip()]
 AD_BASE_DN       = os.environ.get('AD_BASE_DN', '').strip()
 AD_BIND_USER     = os.environ.get('AD_BIND_USER', '').strip()
 AD_BIND_PASSWORD = os.environ.get('AD_BIND_PASSWORD', '')
 AD_CA_FILE       = os.environ.get('AD_CA_FILE', '').strip() or None
-AD_SYNC_ENABLED  = bool(AD_SERVERS and AD_BASE_DN and AD_BIND_USER and AD_BIND_PASSWORD)
 
 
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──

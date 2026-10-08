@@ -2,7 +2,7 @@
 import threading
 import time
 from datetime import datetime
-from foxdesk.core import AD_SYNC_ENABLED, EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db, logger
+from foxdesk.core import EMAIL_ENABLED, app, db, logger
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import SyncSchedule
 from foxdesk.services.auth import _log_activity
@@ -107,10 +107,10 @@ def _scheduled_sync_loop():
             logger.error('Scheduled sync background loop error: %s', e)
 
 
-# Any integration needs the loop — this used to start only for Google,
-# so a KACE-only install never ran its scheduled syncs.
-if GOOGLE_SYNC_ENABLED or KACE_SYNC_ENABLED or AD_SYNC_ENABLED:
-    threading.Thread(target=_scheduled_sync_loop, daemon=True).start()
+# Always running: Active Directory can be connected from its settings page
+# at any time, not only through .env at startup, and each pass skips
+# integrations that aren't usable anyway.
+threading.Thread(target=_scheduled_sync_loop, daemon=True).start()
 
 
 def _automation_loop():

@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from flask import request, session
 from markupsafe import Markup, escape
-from foxdesk.core import AD_SYNC_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
+from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
 from foxdesk.integrations.active_directory import short_dn
 from foxdesk.services.features import feature_enabled, feature_switch
 from foxdesk.services.identities import accounts_to_review_query
@@ -159,7 +159,7 @@ def inject_permission_helper():
         'active_section': _active_nav_section(),
         'google_sync_enabled': GOOGLE_SYNC_ENABLED,
         'kace_sync_enabled': KACE_SYNC_ENABLED,
-        'ad_sync_enabled': AD_SYNC_ENABLED,
+        'ad_sync_enabled': feature_enabled('active_directory'),
         'landing_pages': LANDING_PAGES,
         'available_icons': sorted(AVAILABLE_ICONS),
     }
@@ -196,7 +196,7 @@ def _settings_sections():
             (sup and feature_enabled('google'), 'org-unit', 'Google Org Units', 'Map org units to sites and roles; push loaners to an OU.', '/admin/google_org_units'),
             (sup and feature_switch('kace'), 'integration', 'KACE', 'Connect the KACE SMA inventory.', '/admin/kace_setup'),
             (sup and feature_switch('active_directory'), 'integration', 'Active Directory',
-             'Attach AD accounts and computers to the people and devices you have; domain-join status.', '/admin/directory'),
+             'Connect your domain controllers, pick OUs, and sync people and computers.', '/admin/directory'),
             (sup, 'sync', 'Scheduled Syncs', 'How often Google, KACE and Active Directory syncs run.', '/admin/sync_schedule'),
         ]),
         ('Automation', [

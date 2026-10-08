@@ -905,9 +905,13 @@ class DeviceRecord(db.Model):
 
 class DirectorySettings(db.Model):
     """
-    What an admin chose for a directory sync (one row per source; only 'ad'
-    today). Connection details and the password live in the environment
-    (AD_*); this holds the in-app choices and the last run.
+    A directory sync's settings (one row per source; only 'ad' today).
+
+    The connection — servers (comma-separated), base_dn, bind_user,
+    bind_password (encrypted with a key derived from SECRET_KEY; see
+    integrations/active_directory.encrypt_secret) and an optional ca_pem —
+    is entered on the Active Directory page. A blank one falls back to the
+    matching AD_* environment variable.
 
     user_containers / computer_containers are container DNs (lowercase).
     Only objects directly inside a chosen container sync — sub-OUs are
@@ -921,6 +925,11 @@ class DirectorySettings(db.Model):
     __tablename__ = 'directory_settings'
     id                  = db.Column(db.Integer, primary_key=True)
     source              = db.Column(db.String(20), nullable=False, unique=True)
+    servers             = db.Column(db.String(500), nullable=True)
+    base_dn             = db.Column(db.String(255), nullable=True)
+    bind_user           = db.Column(db.String(255), nullable=True)
+    bind_password       = db.Column(db.Text, nullable=True)   # encrypted, never shown
+    ca_pem              = db.Column(db.Text, nullable=True)
     user_containers     = db.Column(db.JSON, nullable=True)
     computer_containers = db.Column(db.JSON, nullable=True)
     trusted_certs       = db.Column(db.JSON, nullable=True)

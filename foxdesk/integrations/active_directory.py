@@ -4,18 +4,25 @@ the people and devices FoxDesk already has (see services/identities).
 Read-only. The bind account is a plain Domain Users member, the connection
 is opened read-only, and nothing is ever written to AD.
 
-Connecting: each DC in AD_SERVERS is tried in order, and its certificate has
-to be trusted before the password is sent. Either it chains to AD_CA_FILE or
-a system CA, or an admin trusted that exact certificate on the Active
-Directory page after comparing its thumbprint with the one on the DC
-(DirectorySettings.trusted_certs) — the usual case for a school DC with a
-self-signed certificate.
+Settings: the connection (DCs, search base, account, password, optional CA
+certificate) is entered on the Active Directory page and saved on
+DirectorySettings, the password encrypted with a key derived from
+SECRET_KEY. Anything left blank there falls back to the AD_* environment
+variables, so an install configured through .env keeps working.
 
-Scope: everything under AD_BASE_DN is read (a district is a few thousand
+Connecting: each DC is tried in order, and its certificate has to be
+trusted before the password is sent. Either it chains to the CA certificate
+(saved, or AD_CA_FILE) or a system CA, or an admin trusted that exact
+certificate on the page after comparing its thumbprint with the one on the
+DC (DirectorySettings.trusted_certs) — the usual case for a school DC with
+a self-signed certificate.
+
+Scope: everything under the search base is read (a district is a few thousand
 objects), but only objects directly inside a container the admin picked are
 placed. An account that's already linked keeps updating after it moves out
 of scope — typically into a Disabled OU — so FoxDesk learns it was disabled.
 """
+import base64
 import hashlib
 import re
 import socket
@@ -24,7 +31,9 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta
 
-from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, db, logger
+from flask import has_request_context, request
+
+from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, app, db, logger
 from foxdesk.models import DeviceRecord, DirectorySettings, PersonIdentity
 from foxdesk.services.auth import _log_activity
 from foxdesk.services.identities import find_person, find_registry_row, place_account, place_device_record
@@ -53,6 +62,94 @@ def ad_settings():
     return row
 
 
+# ─── connection settings ──────────────────────────────────────────────────────
+
+def _fernet():
+    from cryptography.fernet import Fernet
+    key = hashlib.sha256(('foxdesk-directory-password:' + app.secret_key).encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def encrypt_secret(value):
+    return _fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_secret(token):
+    """None if it can't be read — usually SECRET_KEY changed since it was saved."""
+    from cryptography.fernet import InvalidToken
+    try:
+        return _fernet().decrypt(token.encode()).decode()
+    except (InvalidToken, ValueError):
+        return None
+
+
+def split_servers(text):
+    """'ldaps://ad1.x.org:636, ad2.x.org' -> ['ad1.x.org', 'ad2.x.org']."""
+    hosts = []
+    for item in re.split(r'[\s,;]+', text or ''):
+        host = re.sub(r'^ldaps?://', '', item.strip(), flags=re.IGNORECASE).split('/')[0].split(':')[0]
+        if host and host.lower() not in [h.lower() for h in hosts]:
+            hosts.append(host)
+    return hosts
+
+
+def ad_config():
+    """The connection settings in effect: saved on the Active Directory page,
+    else the AD_* environment variables. `sources` says where each came from
+    ('saved' / 'env' / None). Cached per request — feature checks ask often."""
+    if has_request_context() and getattr(request, '_ad_config', None) is not None:
+        return request._ad_config
+    row = DirectorySettings.query.filter_by(source=SOURCE).first()
+    sources, cfg = {}, {}
+
+    def pick(key, saved, env):
+        sources[key] = 'saved' if saved else ('env' if env else None)
+        return saved or env
+
+    cfg['servers'] = pick('servers', split_servers(row.servers) if row and row.servers else [], AD_SERVERS)
+    cfg['base_dn'] = pick('base_dn', row.base_dn if row else None, AD_BASE_DN)
+    cfg['bind_user'] = pick('bind_user', row.bind_user if row else None, AD_BIND_USER)
+    saved_password = decrypt_secret(row.bind_password) if row and row.bind_password else None
+    cfg['password_unreadable'] = bool(row and row.bind_password and saved_password is None)
+    cfg['password'] = pick('password', saved_password, AD_BIND_PASSWORD)
+    cfg['ca_pem'] = (row.ca_pem if row else None) or None
+    cfg['ca_file'] = AD_CA_FILE
+    cfg['sources'] = sources
+    cfg['configured'] = bool(cfg['servers'] and cfg['base_dn'] and cfg['bind_user'] and cfg['password'])
+    if has_request_context():
+        request._ad_config = cfg
+    return cfg
+
+
+def forget_config_cache():
+    if has_request_context():
+        request._ad_config = None
+
+
+def validate_connection_form(servers, base_dn, bind_user, password, ca_pem):
+    """Cleaned values, or ValueError with a message for the admin."""
+    hosts = split_servers(servers)
+    if any(not re.fullmatch(r'[A-Za-z0-9.-]+', h) for h in hosts):
+        raise ValueError('Domain controllers should be host names like ad1.yourdistrict.org, separated by commas.')
+    base_dn = (base_dn or '').strip()
+    if base_dn and 'dc=' not in base_dn.lower():
+        raise ValueError('The search base should look like DC=yourdistrict,DC=org.')
+    bind_user = (bind_user or '').strip()
+    if bind_user and '@' not in bind_user and '\\' not in bind_user and '=' not in bind_user:
+        raise ValueError('Enter the account as svc-foxdesk@yourdistrict.org (or DOMAIN\\svc-foxdesk).')
+    if password and len(password) > 256:
+        raise ValueError('That password is too long.')
+    ca_pem = (ca_pem or '').strip() or None
+    if ca_pem:
+        if '-----BEGIN CERTIFICATE-----' not in ca_pem:
+            raise ValueError('Paste the CA certificate in PEM form (it starts with -----BEGIN CERTIFICATE-----).')
+        try:
+            ssl.create_default_context(cadata=ca_pem)
+        except (ssl.SSLError, ValueError):
+            raise ValueError('That CA certificate couldn\'t be read.')
+    return hosts, base_dn or None, bind_user or None, password or None, ca_pem
+
+
 # ─── DNs ──────────────────────────────────────────────────────────────────────
 
 _RDN_SPLIT = re.compile(r'(?<!\\),')
@@ -66,10 +163,10 @@ def dn_parent(dn):
     return ','.join(dn_rdns(dn)[1:])
 
 
-def short_dn(dn):
+def short_dn(dn, base=None):
     """The DN without the domain part, for display: 'OU=2029' instead of 'OU=2029,DC=fchs,DC=net'."""
-    base = AD_BASE_DN.lower()
-    if base and dn.lower().endswith(',' + base):
+    base = (base if base is not None else ad_config()['base_dn'] or '').lower()
+    if base and (dn or '').lower().endswith(',' + base):
         return dn[:-(len(base) + 1)]
     return dn
 
@@ -210,9 +307,10 @@ def server_certificate(host, timeout=6):
 
 
 def verified_by_ca(host, timeout=6):
-    """True if the DC's certificate chains to AD_CA_FILE (or a system CA) and names this host."""
+    """True if the DC's certificate chains to the CA certificate (or a system CA) and names this host."""
+    cfg = ad_config()
     try:
-        ctx = ssl.create_default_context(cafile=AD_CA_FILE) if AD_CA_FILE else ssl.create_default_context()
+        ctx = ssl.create_default_context(cafile=cfg['ca_file'], cadata=cfg['ca_pem'])
         with socket.create_connection((host, LDAPS_PORT), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host):
                 return True
@@ -224,7 +322,7 @@ def trust_certificate(settings, host, sha256):
     """Trust the certificate `host` presents now — but only if it is the one
     the admin was shown (sha256), so a swap in between can't sneak in."""
     host = host.lower()
-    if host not in [h.lower() for h in AD_SERVERS]:
+    if host not in [h.lower() for h in ad_config()['servers']]:
         raise DirectoryError(f'{host} isn\'t one of the configured domain controllers.')
     current = server_certificate(host)
     if current['sha256'] != (sha256 or '').lower():
@@ -244,11 +342,11 @@ _BIND_ERRORS = {
 }
 
 
-def _bind_error(result):
+def _bind_error(result, user):
     message = (result or {}).get('message') or ''
     m = re.search(r'data ([0-9a-f]{3})', message)
     reason = _BIND_ERRORS.get(m.group(1)) if m else None
-    return f'login as {AD_BIND_USER} failed: {reason or (result or {}).get("description") or message}'
+    return f'login as {user} failed: {reason or (result or {}).get("description") or message}'
 
 
 def connect(settings, hosts=None):
@@ -256,14 +354,17 @@ def connect(settings, hosts=None):
     Returns (connection, host)."""
     import ldap3
     from ldap3.core.exceptions import LDAPException
+    cfg = ad_config()
+    if not cfg['configured']:
+        raise DirectoryError('Fill in the domain controllers, search base, account and password first.')
     pins = {h.lower(): v for h, v in ((settings.trusted_certs if settings else None) or {}).items()}
     problems = []
-    for host in hosts or AD_SERVERS:
+    for host in hosts or cfg['servers']:
         pin = pins.get(host.lower())
-        tls = ldap3.Tls(validate=ssl.CERT_NONE if pin else ssl.CERT_REQUIRED,
-                        ca_certs_file=None if pin else AD_CA_FILE, valid_names=[host])
+        tls = ldap3.Tls(validate=ssl.CERT_NONE if pin else ssl.CERT_REQUIRED, valid_names=[host],
+                        ca_certs_file=None if pin else cfg['ca_file'], ca_certs_data=None if pin else cfg['ca_pem'])
         server = ldap3.Server(host, port=LDAPS_PORT, use_ssl=True, tls=tls, get_info=ldap3.NONE, connect_timeout=8)
-        conn = ldap3.Connection(server, user=AD_BIND_USER, password=AD_BIND_PASSWORD, read_only=True,
+        conn = ldap3.Connection(server, user=cfg['bind_user'], password=cfg['password'], read_only=True,
                                 receive_timeout=60, raise_exceptions=False, auto_referrals=False)
         try:
             conn.open()
@@ -276,7 +377,7 @@ def connect(settings, hosts=None):
                                     'If the DC\'s certificate was renewed, check and trust the new one.')
                     continue
             if not conn.bind():
-                problems.append(f'{host}: {_bind_error(conn.result)}.')
+                problems.append(f'{host}: {_bind_error(conn.result, cfg["bind_user"])}.')
                 conn.unbind()
                 continue
             conn.raise_exceptions = True
@@ -285,15 +386,15 @@ def connect(settings, hosts=None):
             cause = e.__context__ if isinstance(e.__context__, (OSError, ssl.SSLError)) else e
             problems.append(_explain(host, cause))
     if not problems:
-        problems.append('No domain controllers are configured (AD_SERVERS).')
+        problems.append('No domain controllers are set.')
     raise DirectoryError(' '.join(problems))
 
 
-def _paged(conn, search_filter, attributes):
+def _paged(conn, base_dn, search_filter, attributes):
     import ldap3
     from ldap3.core.exceptions import LDAPException
     try:
-        for entry in conn.extend.standard.paged_search(AD_BASE_DN, search_filter, search_scope=ldap3.SUBTREE,
+        for entry in conn.extend.standard.paged_search(base_dn, search_filter, search_scope=ldap3.SUBTREE,
                                                        attributes=attributes, paged_size=500, generator=True):
             if entry.get('type') == 'searchResEntry':
                 yield entry['dn'], entry.get('raw_attributes') or {}
@@ -302,9 +403,10 @@ def _paged(conn, search_filter, attributes):
 
 
 def fetch_directory(conn):
-    """Every user and computer under AD_BASE_DN, as plain dicts."""
-    users = [parse_user(dn, raw) for dn, raw in _paged(conn, '(&(objectCategory=person)(objectClass=user))', USER_ATTRS)]
-    computers = [parse_computer(dn, raw) for dn, raw in _paged(conn, '(objectCategory=computer)', COMPUTER_ATTRS)]
+    """Every user and computer under the search base, as plain dicts."""
+    base = ad_config()['base_dn']
+    users = [parse_user(dn, raw) for dn, raw in _paged(conn, base, '(&(objectCategory=person)(objectClass=user))', USER_ATTRS)]
+    computers = [parse_computer(dn, raw) for dn, raw in _paged(conn, base, '(objectCategory=computer)', COMPUTER_ATTRS)]
     return dict(users=users, computers=computers)
 
 
@@ -325,7 +427,7 @@ def build_tree(snapshot):
     """Containers that hold users or computers, plus their parent OUs, in
     tree order: [{dn, label, path, depth, users, users_off, computers, stale}].
     dn is lowercase (what the selection stores); label and path keep AD's case."""
-    base = AD_BASE_DN.lower()
+    base = (ad_config()['base_dn'] or '').lower()
     nodes = {}
 
     def node(dn):
@@ -333,7 +435,7 @@ def build_tree(snapshot):
         if key not in nodes:
             root = key == base
             nodes[key] = dict(dn=key, label='(domain root)' if root else dn_rdns(dn)[0].split('=', 1)[-1],
-                              path='' if root else short_dn(dn), users=0, users_off=0, computers=0, stale=0)
+                              path='' if root else short_dn(dn, base), users=0, users_off=0, computers=0, stale=0)
             rdns = dn_rdns(dn)
             for i in range(1, len(rdns)):  # add parent OUs so the list reads as a tree
                 parent = ','.join(rdns[i:])
@@ -397,7 +499,8 @@ def run_ad_sync(snapshot=None):
     settings.tree_updated_at = now
     if not snapshot['users']:
         db.session.commit()
-        raise DirectoryError(f'AD returned no users under {AD_BASE_DN}, so nothing was changed. Check AD_BASE_DN.')
+        raise DirectoryError(f'AD returned no users under {ad_config()["base_dn"]}, so nothing was changed. '
+                             'Check the search base.')
     if settings.user_containers is None and settings.computer_containers is None:
         db.session.commit()
         raise DirectoryError('Choose which OUs to sync first, then save.')

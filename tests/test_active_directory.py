@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytest
 from flask import g
 
-from conftest import A, patch_everywhere
+from conftest import ADMIN_PASSWORD, A, patch_everywhere
 
 BASE = 'DC=fchs,DC=net'
 
@@ -16,7 +16,6 @@ def ad_env(monkeypatch):
     patch_everywhere(monkeypatch, 'AD_SERVERS', ['ad1.fchs.net', 'ad2.fchs.net'])
     patch_everywhere(monkeypatch, 'AD_BIND_USER', 'svc-foxdesk@fchs.net')
     patch_everywhere(monkeypatch, 'AD_BIND_PASSWORD', 'not-a-real-password')
-    patch_everywhere(monkeypatch, 'AD_SYNC_ENABLED', True)
 
 
 def filetime(days_ago):
@@ -66,7 +65,7 @@ def test_parse_user(ad_env):
 
 
 def test_errors_are_explained():
-    assert 'password is wrong' in A._bind_error({'message': '80090308: LdapErr: ... data 52e, v4563'})
+    assert 'password is wrong' in A._bind_error({'message': '80090308: LdapErr: ... data 52e, v4563'}, 'svc@fchs.net')
     assert 'no LDAPS certificate' in A._explain('ad1', ConnectionResetError(104, 'Connection reset by peer'))
     assert 'isn\'t trusted' in A._explain('ad1', Exception('[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed'))
 
@@ -194,7 +193,52 @@ def test_computers_match_by_serial_or_name(ad_env, make, client):
 
 def test_setup_page_before_configuration(client):
     body = client.get('/admin/directory').get_data(as_text=True)
-    assert 'Not configured' in body and 'AD_BIND_PASSWORD=' in body
+    assert 'Not configured' in body and 'Before you start' in body and 'Save all four fields first' in body
+
+
+def test_connection_settings_saved_in_the_app(client, monkeypatch):
+    assert not A.feature_enabled('active_directory'), 'nothing configured yet'
+    r = client.post('/admin/directory/connection', data={
+        'servers': 'ldaps://ad1.fchs.net:636, ad2.fchs.net ad1.fchs.net', 'base_dn': 'DC=fchs,DC=net',
+        'bind_user': 'svc-foxdesk@fchs.net', 'password': 'Sup3rSecretPw', 'ca_pem': ''}, follow_redirects=True)
+    assert b'Saved' in r.data
+    row = A.ad_settings()
+    assert row.servers == 'ad1.fchs.net, ad2.fchs.net' and row.base_dn == 'DC=fchs,DC=net'
+    assert row.bind_password and 'Sup3rSecretPw' not in row.bind_password, 'stored encrypted'
+    cfg = A.ad_config()
+    assert cfg['configured'] and cfg['password'] == 'Sup3rSecretPw' and cfg['sources']['password'] == 'saved'
+    assert A.feature_enabled('active_directory')
+    body = client.get('/admin/directory').get_data(as_text=True)
+    assert 'Sup3rSecretPw' not in body and 'Saved. Leave blank to keep it' in body
+
+    client.post('/admin/directory/connection', data={'servers': 'ad1.fchs.net', 'base_dn': 'DC=fchs,DC=net',
+                                                      'bind_user': 'svc-foxdesk@fchs.net', 'password': ''})
+    assert A.ad_config()['password'] == 'Sup3rSecretPw', 'a blank password keeps the saved one'
+
+    for bad, message in [({'servers': 'not a host!'}, b'host names'), ({'base_dn': 'OU=Students'}, b'DC=yourdistrict'),
+                         ({'bind_user': 'svcfoxdesk'}, b'svc-foxdesk@'), ({'ca_pem': 'hello'}, b'PEM form')]:
+        r = client.post('/admin/directory/connection', data=dict({'servers': 'ad1.fchs.net', 'base_dn': 'DC=fchs,DC=net',
+                                                                  'bind_user': 'svc@fchs.net'}, **bad), follow_redirects=True)
+        assert message in r.data, bad
+
+    monkeypatch.setattr(A.app, 'secret_key', 'a-different-secret')
+    cfg = A.ad_config()
+    assert cfg['password_unreadable'] and not cfg['configured'], 'a changed SECRET_KEY asks for the password again'
+    fresh = A.app.test_client()  # the old session cookie was signed with the old key
+    fresh.post('/admin/login', data={'username': '', 'password': ADMIN_PASSWORD})
+    assert b"can't be read any more" in fresh.get('/admin/directory').data
+
+
+def test_saved_values_win_over_env_and_clear_falls_back(ad_env, client):
+    assert A.ad_config()['sources'] == dict(servers='env', base_dn='env', bind_user='env', password='env')
+    assert b'from .env' in client.get('/admin/directory').data
+    client.post('/admin/directory/connection', data={'servers': 'dc9.fchs.net', 'base_dn': 'DC=fchs,DC=net',
+                                                      'bind_user': 'other@fchs.net', 'password': 'NewPw123'})
+    cfg = A.ad_config()
+    assert cfg['servers'] == ['dc9.fchs.net'] and cfg['bind_user'] == 'other@fchs.net' and cfg['password'] == 'NewPw123'
+    client.post('/admin/directory/connection', data={'action': 'clear'})
+    cfg = A.ad_config()
+    assert cfg['servers'] == ['ad1.fchs.net', 'ad2.fchs.net'] and cfg['password'] == 'not-a-real-password'
 
 
 def test_pick_containers_and_sync_now(ad_env, client, make, monkeypatch):

@@ -646,8 +646,13 @@ member and nothing is written to AD. **It never creates people or devices.**
 - Sync now from the page, or on a timer from Scheduled Syncs. A sync where AD returns no users changes
   nothing.
 
-Setup: a service account in Domain Users only, an LDAPS certificate on each DC (self-signed is fine),
-then in `.env`:
+Setup: a service account in Domain Users only and an LDAPS certificate on each DC (self-signed is
+fine). Then fill in the **Connection** card on the Active Directory page: domain controllers, search
+base, account and password (plus a CA certificate if your DCs' certificates come from your own CA).
+The password is stored encrypted with a key derived from `SECRET_KEY`; if `SECRET_KEY` ever changes,
+the page asks for the password again.
+
+Any field left blank falls back to `.env`, so an install can also be configured there:
 
 ```bash
 AD_SERVERS=ad1.yourdistrict.org,ad2.yourdistrict.org
@@ -656,7 +661,7 @@ AD_BIND_USER=svc-foxdesk@yourdistrict.org
 AD_BIND_PASSWORD=lettersanddigitsonly
 ```
 
-Keep the password to letters and digits: Docker Compose reads `$` in `.env` as a variable.
+In `.env`, keep the password to letters and digits: Docker Compose reads `$` as a variable.
 
 ## Automations
 

@@ -3,7 +3,6 @@ import time
 from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
 from foxdesk.core import (
-    AD_SYNC_ENABLED,
     GOOGLE_ADMIN_IMPERSONATE_EMAIL,
     GOOGLE_LOANER_AUTO_DISABLE_ENABLED,
     GOOGLE_SCOPE_READONLY,
@@ -26,6 +25,7 @@ from foxdesk.models import (
     Site,
 )
 from foxdesk.services.auth import _current_site_ids, _log_activity, require_permission, require_super_admin
+from foxdesk.services.features import feature_enabled
 from foxdesk.services.scoping import _scope_registry
 from foxdesk.integrations.google import (
     DEVICE_SYNC_TARGET_FIELDS,
@@ -478,7 +478,7 @@ def admin_sync_schedule():
     return render_template('admin_sync_schedule.html', person_schedule=person_schedule, device_schedule=device_schedule,
                            kace_schedule=kace_schedule, ad_schedule=ad_schedule, intervals=SYNC_SCHEDULE_INTERVALS,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED, kace_sync_enabled=KACE_SYNC_ENABLED,
-                           ad_sync_enabled=AD_SYNC_ENABLED)
+                           ad_sync_enabled=feature_enabled('active_directory'))
 
 
 @app.route('/admin/sync_schedule/<string:sync_type>', methods=['POST'])

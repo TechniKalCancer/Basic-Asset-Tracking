@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Active Directory{% endblock %}
 {% block content %}
+{% macro source_badge(src) %}{% if src == 'env' %}<span class="badge badge-blue dir-src">from .env</span>{% endif %}{% endmacro %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
   <h1 style="margin:0;">{{ icon('integration') }}Active Directory</h1>
   <span class="badge {{ 'badge-green' if configured else 'badge-yellow' }}">{{ 'Configured' if configured else 'Not configured' }}</span>
@@ -16,46 +17,75 @@
 
 {% if not configured %}
 <div class="card">
-  <h2>Set up</h2>
+  <h2>Before you start</h2>
   <ol class="dir-steps">
     <li>In AD, create a service account that is only in <strong>Domain Users</strong>. It needs no admin rights or
       delegation; any domain user can read users and computers.</li>
     <li>Give each domain controller an LDAPS certificate (port 636). A self-signed certificate is fine: you'll compare
       its thumbprint here before FoxDesk trusts it.</li>
-    <li>Add these to <code>.env</code> on the FoxDesk server and restart the container:
-      <pre class="dir-env">AD_SERVERS=dc1.yourdistrict.org,dc2.yourdistrict.org
-AD_BASE_DN=DC=yourdistrict,DC=org
-AD_BIND_USER=svc-foxdesk@yourdistrict.org
-AD_BIND_PASSWORD=&lt;the account's password&gt;</pre>
-      Use letters and digits only in the password: Docker treats <code>$</code> in <code>.env</code> as a variable.
-    </li>
+    <li>Fill in the connection below, save, then click <strong>Check connection</strong>.</li>
   </ol>
 </div>
 {% endif %}
 
-<div class="card">
+<div class="card" id="connection">
   <h2>Connection</h2>
-  <table class="dir-kv">
-    <tr><td>Domain controllers</td><td>{{ servers|join(', ') if servers else '(AD_SERVERS not set)' }}</td></tr>
-    <tr><td>Search base</td><td>{{ base_dn or '(AD_BASE_DN not set)' }}</td></tr>
-    <tr><td>Account</td><td>{{ bind_user or '(AD_BIND_USER not set)' }} {% if password_set %}<span class="badge badge-green">password set</span>{% else %}<span class="badge badge-yellow">no password</span>{% endif %}</td></tr>
-    {% if ca_file %}<tr><td>CA file</td><td><code>{{ ca_file }}</code></td></tr>{% endif %}
-    <tr><td>Trusted certificates</td><td>
-      {% for host, sha in (settings.trusted_certs or {}).items() %}
-      <div class="dir-trusted">
-        <code>{{ host }}</code> <span class="dir-muted">SHA-256 {{ sha[:16] }}…</span>
-        <form method="POST" action="/admin/directory/untrust" onsubmit="return confirm('Stop trusting {{ host }}\'s certificate?');">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="host" value="{{ host }}">
-          <button type="submit" class="btn btn-ghost btn-small">Remove</button>
-        </form>
-      </div>
-      {% else %}<span class="dir-muted">None yet. Check the connection to see each DC's certificate.</span>{% endfor %}
-    </td></tr>
-  </table>
+  {% if cfg.password_unreadable %}
+  <p class="dir-note">The saved password can't be read any more (the server's SECRET_KEY changed). Enter it again.</p>
+  {% endif %}
+  <form method="POST" action="/admin/directory/connection" class="dir-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="dir-field">
+      <label for="adServers">Domain controllers {{ source_badge(cfg.sources.servers) }}</label>
+      <input id="adServers" name="servers" value="{{ cfg.servers|join(', ') }}" placeholder="ad1.yourdistrict.org, ad2.yourdistrict.org">
+      <span class="dir-help">Host names, separated by commas. They're tried in order.</span>
+    </div>
+    <div class="dir-field">
+      <label for="adBase">Search base {{ source_badge(cfg.sources.base_dn) }}</label>
+      <input id="adBase" name="base_dn" value="{{ cfg.base_dn or '' }}" placeholder="DC=yourdistrict,DC=org">
+      <span class="dir-help">Usually your domain, as DC=…,DC=…. Everything under it is read.</span>
+    </div>
+    <div class="dir-field">
+      <label for="adUser">Account {{ source_badge(cfg.sources.bind_user) }}</label>
+      <input id="adUser" name="bind_user" value="{{ cfg.bind_user or '' }}" placeholder="svc-foxdesk@yourdistrict.org">
+    </div>
+    <div class="dir-field">
+      <label for="adPassword">Password {{ source_badge(cfg.sources.password) }}</label>
+      <input id="adPassword" name="password" type="password" autocomplete="new-password"
+             placeholder="{{ 'Saved. Leave blank to keep it' if cfg.sources.password == 'saved' else ('Set in .env. Leave blank to keep it' if cfg.sources.password == 'env' else 'The account\'s password') }}">
+      <span class="dir-help">Stored encrypted and never shown again.</span>
+    </div>
+    <details class="dir-advanced" {{ 'open' if cfg.ca_pem }}>
+      <summary>Certificate authority (optional)</summary>
+      <p class="dir-help">Only if your DCs' certificates come from your own CA. Paste its certificate (PEM) and FoxDesk
+        trusts every DC certificate it issued. Self-signed DC certificates don't need this.
+        {% if cfg.ca_file %}A CA file is also set in .env: <code>{{ cfg.ca_file }}</code>.{% endif %}</p>
+      <textarea name="ca_pem" rows="5" placeholder="-----BEGIN CERTIFICATE-----" aria-label="CA certificate (PEM)">{{ cfg.ca_pem or '' }}</textarea>
+    </details>
+    <div class="dir-actions">
+      <button type="submit" class="btn btn-primary">Save</button>
+      {% if 'saved' in cfg.sources.values() or cfg.ca_pem %}
+      <button type="submit" name="action" value="clear" class="btn btn-ghost"
+              onclick="return confirm('Clear the saved connection? Anything set in .env is used instead.');">Clear saved values</button>
+      {% endif %}
+    </div>
+  </form>
+
+  <div class="dir-subhead">Trusted certificates</div>
+  {% for host, sha in (settings.trusted_certs or {}).items() %}
+  <div class="dir-trusted">
+    <code>{{ host }}</code> <span class="dir-muted">SHA-256 {{ sha[:16] }}…</span>
+    <form method="POST" action="/admin/directory/untrust" onsubmit="return confirm('Stop trusting {{ host }}\'s certificate?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="host" value="{{ host }}">
+      <button type="submit" class="btn btn-ghost btn-small">Remove</button>
+    </form>
+  </div>
+  {% else %}<p class="dir-muted" style="margin:.2rem 0 0;">None yet. Check the connection to see each DC's certificate.</p>{% endfor %}
   <form method="POST" action="/admin/directory/check" style="margin-top:1rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-primary" {{ 'disabled' if not configured }}>Check connection</button>
+    {% if not configured %}<span class="dir-muted">Save all four fields first.</span>{% endif %}
   </form>
 
   {% if checks %}
@@ -188,6 +218,16 @@ AD_BIND_PASSWORD=&lt;the account's password&gt;</pre>
   .dir-env { background: var(--surface2); border: 1px solid var(--border); border-radius: 7px; padding: .7rem 1rem;
              margin: .5rem 0; font-size: .82rem; white-space: pre-wrap; word-break: break-all; }
   .dir-kv td:first-child { color: var(--muted); width: 170px; vertical-align: top; }
+  .dir-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: .9rem 1.2rem; max-width: 900px; }
+  .dir-field { display: flex; flex-direction: column; gap: .3rem; }
+  .dir-field label { color: var(--muted); font-size: .85rem; display: flex; align-items: center; gap: .4rem; }
+  .dir-help { color: var(--muted); font-size: .76rem; }
+  .dir-src { font-size: .66rem; }
+  .dir-advanced { grid-column: 1 / -1; font-size: .88rem; }
+  .dir-advanced summary { cursor: pointer; color: var(--muted); }
+  .dir-advanced textarea { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: .78rem; margin-top: .4rem; }
+  .dir-actions { grid-column: 1 / -1; display: flex; gap: .6rem; flex-wrap: wrap; }
+  .dir-subhead { margin: 1.3rem 0 .4rem; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
   .dir-muted { color: var(--muted); font-size: .82rem; }
   .dir-trusted { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .3rem; }
   .dir-trusted form { margin: 0; }

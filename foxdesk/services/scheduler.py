@@ -104,3 +104,21 @@ def _scheduled_sync_loop():
 # so a KACE-only install never ran its scheduled syncs.
 if GOOGLE_SYNC_ENABLED or KACE_SYNC_ENABLED:
     threading.Thread(target=_scheduled_sync_loop, daemon=True).start()
+
+
+def _automation_loop():
+    """Background daemon: every 15 minutes, check the scheduled automation
+    triggers (overdue repairs and loaners, expiring warranties, sign-in
+    flags). Each rule fires once per subject; the unique run row it claims
+    first makes this safe to run in every gunicorn worker at once."""
+    from foxdesk.automation.engine import run_scheduled
+    while True:
+        time.sleep(900)
+        try:
+            with app.app_context():
+                run_scheduled()
+        except Exception as e:
+            logger.error('Automation background loop error: %s', e)
+
+
+threading.Thread(target=_automation_loop, daemon=True).start()

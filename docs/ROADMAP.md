@@ -14,6 +14,9 @@ district only sees what it uses.
 - [x] Split `app.py` into the `foxdesk/` package (behavior and URLs unchanged)
 - [x] Module on/off switches (Settings → Features)
 - [x] Identity model: person accounts + device records; Accounts to Review; Google people sync uses it (no more same-name duplicates)
+- [x] Automation engine: when / only if / then rules, prefilled from district data, 13 templates, dry-run test,
+      run history, scheduled triggers that fire once per item. Later features (scheduled reports, directory
+      sync events, warranty) add triggers and actions to it instead of building their own.
 
 ## Phase 2 — Directories
 - [ ] Active Directory (LDAPS): users → identities on existing people; computers → device records
@@ -31,7 +34,7 @@ district only sees what it uses.
 ## Phase 5 — Features
 - [ ] Assign-from-Google-sign-in review page (propose holder per unassigned device, approve in batches)
 - [ ] Parts inventory + Dell/Lenovo warranty lookup and claims
-- [ ] Scheduled report emails (e.g. weekly summary per principal)
+- [ ] Scheduled report emails (e.g. weekly summary per principal), as an automation trigger + action
 
 ## Phase 6 — Ship-ready
 - [ ] Privacy: policy page, data retention/purge schedule, SDPC NDPA template

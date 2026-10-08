@@ -482,13 +482,14 @@
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>
         <a href="/admin/ticket_categories">Categories</a>
-        {% if is_super_admin() and feature('ticket_automations') %}<a href="/admin/automations">Automations</a>{% endif %}
+        {% if is_super_admin() and feature('automations') %}<a href="/admin/rules">Automations</a>{% endif %}
       {% elif active_section == 'admin' %}
         <a href="/admin/settings">All Settings</a>
         {% if can('admin') %}
         {% if feature('kiosk') %}<a href="/admin/kiosk">Kiosk Devices</a>{% endif %}
         {% if feature('reminders') %}<a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>{% endif %}
         <a href="/admin/activity">Activity Log</a>
+        {% if is_super_admin() and feature('automations') %}<a href="/admin/rules">Automations</a>{% endif %}
         {% if feature('help') %}<a href="/admin/help">Manage Help Content</a>{% endif %}
         {% endif %}
         {% if can('manage_users') %}

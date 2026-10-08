@@ -5,7 +5,6 @@ from foxdesk.models import (
     AUTOMATION_ACTIONS,
     Asset,
     AssetRegistry,
-    PendingDeviceAction,
     Repair,
     RepairCategory,
     TICKET_PRIORITIES,
@@ -134,7 +133,7 @@ def _notify_ticket_requester(ticket, kind, extra_vars=None, force=False):
     return True
 
 
-def _execute_device_automation_action(action_type, asset_tag, ticket=None, automation=None):
+def _execute_device_automation_action(action_type, asset_tag, ticket=None, automation=None, params=None):
     """
     Runs one automation action_type against a device by asset_tag —
     structured as a dispatch so one more action type is just one more
@@ -149,7 +148,11 @@ def _execute_device_automation_action(action_type, asset_tag, ticket=None, autom
     from the automation's own config, since neither has anywhere else to
     come from when this fires automatically with no human filling out a
     form.
+
+    params is the same settings from an automation rule instead
+    ({'repair_category': id, 'org_unit': path}); it wins over automation.
     """
+    params = params or {}
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
     if not registry_row:
         return 'error', f'"{asset_tag}" was not found in the asset registry.'
@@ -187,7 +190,8 @@ def _execute_device_automation_action(action_type, asset_tag, ticket=None, autom
         return 'ok', f'{asset_tag} disabled in Google Workspace.'
 
     if action_type == 'send_to_repair':
-        repair_category_id = automation.repair_category_id if automation else None
+        repair_category_id = (int(params['repair_category']) if str(params.get('repair_category') or '').isdigit()
+                              else (automation.repair_category_id if automation else None))
         if ticket:
             issue_description = f'Auto-sent to repair via automation from ticket #{ticket.id}: {ticket.subject}'
         else:
@@ -195,7 +199,7 @@ def _execute_device_automation_action(action_type, asset_tag, ticket=None, autom
         return _send_device_to_repair(asset_tag, repair_category_id, None, issue_description, None, site_ids=None)
 
     if action_type == 'move_device':
-        target_ou = automation.target_org_unit_path if automation else None
+        target_ou = params.get('org_unit') or (automation.target_org_unit_path if automation else None)
         if not target_ou:
             return 'error', 'No target org unit is configured on this automation.'
         if not GOOGLE_SYNC_ENABLED:
@@ -223,10 +227,10 @@ def _run_pending_device_action(action, resolved_by='Automatic', automation=None)
     already has it in hand; the confirm route doesn't, so it's re-derived
     here from the ticket's category — cheap, and avoids needing a second
     FK just to remember which automation staged a given action."""
-    if automation is None and action.ticket:
+    if automation is None and action.ticket and not action.rule_id:
         automation = TicketAutomation.query.filter_by(ticket_category_id=action.ticket.category_id).first()
     status, message = _execute_device_automation_action(
-        action.action_type, action.asset_tag, ticket=action.ticket, automation=automation)
+        action.action_type, action.asset_tag, ticket=action.ticket, automation=automation, params=action.params)
     action.status = 'confirmed' if status == 'ok' else 'failed'
     action.error_message = None if status == 'ok' else message
     action.resolved_at = datetime.utcnow()
@@ -236,39 +240,3 @@ def _run_pending_device_action(action, resolved_by='Automatic', automation=None)
     _log_activity('automation_run', f'{action_label} on {action.asset_tag}: {outcome}', ticket_id=action.ticket_id)
     db.session.commit()
     return status, message
-
-
-def _check_ticket_automation(ticket):
-    """
-    Checks whether the ticket's category has an active TicketAutomation
-    configured, and if so, either stages it as a PendingDeviceAction for
-    an admin to confirm, or fires it immediately — per that automation's
-    own require_confirmation setting. No-ops if there's no device attached
-    to the ticket (nothing to act on) or no matching automation.
-
-    Called by each ticket-creation route AFTER its own db.session.commit()
-    has already succeeded, same reasoning as _sync_device_google_state
-    being called post-commit elsewhere in this file: a Google-side failure
-    here shouldn't affect whether the ticket itself was saved.
-    """
-    if not ticket.asset_tag:
-        return
-    automation = TicketAutomation.query.filter_by(
-        ticket_category_id=ticket.category_id, is_active=True).first()
-    if not automation:
-        return
-
-    action = PendingDeviceAction(
-        ticket_id=ticket.id, asset_tag=ticket.asset_tag,
-        action_type=automation.action_type, status='pending',
-    )
-    db.session.add(action)
-    db.session.flush()
-
-    if automation.require_confirmation:
-        action_label = AUTOMATION_ACTIONS.get(automation.action_type, automation.action_type)
-        _log_activity('automation_staged', f'Staged {action_label} for {ticket.asset_tag} — awaiting confirmation.',
-                       ticket_id=ticket.id)
-        db.session.commit()
-    else:
-        _run_pending_device_action(action, resolved_by='Automatic', automation=automation)

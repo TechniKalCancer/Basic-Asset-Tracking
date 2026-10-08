@@ -6,6 +6,7 @@ from decimal import Decimal
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
+from foxdesk.automation.engine import emit
 from foxdesk.models import AssignmentHistory, CustomField, Incident, LoanerCheckout, Person, PersonIdentity, Site, Ticket
 from foxdesk.services.util import _parse_bool_csv
 from foxdesk.services.identities import accounts_to_review_query, add_alias, link_account, unlink_account
@@ -412,6 +413,10 @@ def admin_person_delete(person_id):
         Incident.query.filter_by(person_id=person.id).update({'person_id': None})
         LoanerCheckout.query.filter_by(person_id=person.id).update({'person_id': None})
         Ticket.query.filter_by(requester_person_id=person.id).update({'requester_person_id': None})
+        # Their extra emails go with them; synced accounts go back to Accounts to Review.
+        PersonIdentity.query.filter_by(person_id=person.id, source='alias').delete()
+        PersonIdentity.query.filter_by(person_id=person.id).update({'person_id': None, 'review_status': None})
+        PersonIdentity.query.filter_by(suggested_person_id=person.id).update({'suggested_person_id': None})
         db.session.delete(person)
         _log_activity('person_delete', f'Deleted {person_name}.', site_id=person_site_id)
         db.session.commit()
@@ -604,12 +609,18 @@ def admin_people_graduate():
 
         unassigned_total = 0
         fees_total = Decimal('0')
+        released = {}
         for student in students:
-            unassigned_total += _release_person_assets(student, condition_in='Graduated')
+            released[student.id] = _release_person_assets(student, condition_in='Graduated')
+            unassigned_total += released[student.id]
             fees_total += _person_unpaid_fee_total(student.id)
             student.is_active = False
         _log_activity('people_graduate', f'Graduated {len(students)} student(s), class of {grad_year}.')
         db.session.commit()
+        for student in students:
+            # graduation already unassigned their devices in FoxDesk, but they
+            # still physically have them — rules see how many they held
+            emit('person.deactivated', student, device_count=released[student.id])
 
         msg = (f'Graduated {len(students)} student{"s" if len(students) != 1 else ""} '
                f'(class of {grad_year}). Unassigned {unassigned_total} device'

@@ -154,6 +154,8 @@ foxdesk/
                         incidents, helpdesk (tickets + repairs), labels, attachments,
                         reports (dashboard, data quality, sign-in check), scheduler
   integrations/         google.py (Workspace), kace.py (KACE SMA)
+  automation/           rule engine: triggers.py (what can start a rule + the fields it can test),
+                        actions.py (what a rule can do), engine.py (runs rules), templates.py
   views/                pages, one module per area (devices, people, loaners, tickets, ...)
 templates/  static/     Jinja templates; CSS/JS/icons (static/icons/README.md lists the icon set)
 migrations/             Alembic migrations (flask db upgrade runs on container start)
@@ -162,7 +164,7 @@ tests/                  pytest suite — run `pytest`
 docs/ROADMAP.md         productization plan
 ```
 
-Layering: `core` → `models` → `services` / `integrations` → `web` → `views`. Lower layers never
+Layering: `core` → `models` → `services` / `integrations` → `automation` → `web` → `views`. Lower layers never
 import higher ones, so there are no import cycles. URLs and endpoint names are unchanged from
 when this was a single `app.py`.
 
@@ -615,6 +617,37 @@ Checkout. They search for their own name, scan or type the asset tag/serial, and
 problem; it's logged as an ordinary incident (no fee fields exposed — assessing a fee stays an
 office decision made later from the device's assign page) snapshotting the *reporter's own*
 identity, the same self-service pattern the Loaner Checkout page already uses.
+
+## Automations
+
+Settings → Automations (`/admin/rules`, super admins) is a small rule builder: **when** something
+happens, **only if** it matches, **then** do one or more things. Every dropdown is prefilled from
+your own data (ticket categories, schools, staff, device models, repair categories, Google org
+units), so nobody types an ID.
+
+- **Triggers:** a ticket is created or changes status, damage is reported, a device is assigned,
+  unassigned or changes status, a repair is sent or comes back, a loaner is checked out or in, a
+  student is graduated/withdrawn. Scheduled triggers are checked every 15 minutes and fire **once
+  per item**: repair out too long, loaner overdue, warranty ending, Google sign-in flag.
+- **Conditions:** any field of the ticket, device, holder, person, damage report, repair or loaner,
+  e.g. "damage reports for this person ≥ 2", "has the protection plan: no", "device model is …".
+- **Actions:** email (requester, holder, person, parent/guardian, or a fixed address), post to a
+  Teams/Slack/Google Chat incoming webhook, set ticket priority/status/category/assignee, add a
+  comment or charge, create a ticket, set the device status, set a damage fee, send the guardian
+  damage notice, and the device actions (send to repair, clear Chromebook profiles, disable in
+  Google, move OU). Device actions can wait for a tech to confirm; waiting ones are listed on the
+  rule's page and on the ticket/device page. Text fields take placeholders like `{asset_tag}`,
+  `{person_name}`, `{ticket_id}`.
+- **Templates:** 13 ready-made rules (second damage report → $45 fee + parent email, repair out 14
+  days → chase the vendor, overdue loaner → ticket + staged disable, lost device turns up → urgent
+  ticket, …). They open in the builder with best-guess values so you can adjust before saving.
+- **Test** runs a rule against recent items without changing anything and shows what each action
+  would do. Every real run is in the rule's history and the Activity Log.
+
+A failing action never blocks what triggered it (the ticket is still created, the device is still
+assigned); the error is recorded on the run. The old per-category ticket automations were converted to rules by the
+`0617146b9543` migration; `/admin/automations` redirects here. Turn the whole module off under
+Settings → Features → Automations.
 
 ## Activity Log
 

@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block title %}{{ rule.name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('automation') }}{{ rule.name }}</h1>
+  <span class="badge {{ 'badge-green' if rule.enabled else 'badge-yellow' }}">{{ 'On' if rule.enabled else 'Paused' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/rules" class="btn btn-ghost">← Automations</a>
+</div>
+{% if rule.description %}<p style="color:var(--muted);font-size:.9rem;max-width:72ch;margin:0 0 1rem;">{{ rule.description }}</p>{% endif %}
+
+<div class="detail-actions">
+  <a href="/admin/rules/{{ rule.id }}/edit" class="btn btn-primary">Edit</a>
+  <form method="POST" action="/admin/rules/{{ rule.id }}/test">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost">Test (changes nothing)</button>
+  </form>
+  <form method="POST" action="/admin/rules/{{ rule.id }}/toggle">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="detail">
+    <button type="submit" class="btn {{ 'btn-ghost' if rule.enabled else 'btn-success' }}">{{ 'Pause' if rule.enabled else 'Turn on' }}</button>
+  </form>
+  <form method="POST" action="/admin/rules/{{ rule.id }}/delete"
+        onsubmit="return confirm('Delete this rule and its run history? Device actions it already staged stay on their tickets.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Delete</button>
+  </form>
+</div>
+
+<div class="card rule-summary">
+  <dl>
+    <dt>When</dt>
+    <dd>
+      {{ summary.when }}
+      {% if summary.scheduled %}<span class="badge badge-purple">checked every 15 min, once per item</span>{% endif %}
+      {% if summary.trigger_off %}<span class="badge badge-yellow">Its module is turned off, so this rule won't run</span>{% endif %}
+    </dd>
+    <dt>Only if</dt>
+    <dd>
+      {% if summary.conditions %}
+      {{ 'Any' if summary.match == 'any' else 'All' }} of:
+      <ul>{% for c in summary.conditions %}<li>{{ c }}</li>{% endfor %}</ul>
+      {% else %}Every time{% endif %}
+    </dd>
+    <dt>Where</dt>
+    <dd>{{ rule.site.name if rule.site else 'All schools' }}</dd>
+    <dt>Then</dt>
+    <dd>
+      <ol>
+        {% for label, details, off in summary.steps %}
+        <li>
+          {{ label }}{% if off %} <span class="badge badge-yellow">module off, skipped</span>{% endif %}
+          {% if details %}<span class="step-details">{{ details|join(' · ') }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </dd>
+  </dl>
+  <p class="rule-foot">
+    Ran {{ rule.run_count }} time{{ '' if rule.run_count == 1 else 's' }}{% if rule.last_run_at %}, last {{ rule.last_run_at|ago }}{% endif %}.
+    {% if rule.created_by %}Created by {{ rule.created_by }}.{% endif %}
+  </p>
+</div>
+
+{% if pending %}
+<h2 class="detail-heading">Waiting for a tech to confirm <span class="badge badge-yellow">{{ pending|length }}</span></h2>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Device</th><th>Action</th><th>Staged</th><th></th></tr></thead>
+    <tbody>
+      {% for p in pending %}
+      <tr>
+        <td><a href="/admin/assets/{{ p.asset_tag }}/assign">{{ p.asset_tag }}</a>{% if p.ticket_id %} · <a href="/admin/tickets/{{ p.ticket_id }}">ticket #{{ p.ticket_id }}</a>{% endif %}</td>
+        <td>{{ action_labels.get(p.action_type, p.action_type) }}</td>
+        <td style="white-space:nowrap;">{{ p.created_at|ago }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          <form method="POST" action="/admin/pending_actions/{{ p.id }}/confirm" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-success btn-small" aria-label="Run {{ action_labels.get(p.action_type, p.action_type) }} on {{ p.asset_tag }}">Run it</button>
+          </form>
+          <form method="POST" action="/admin/pending_actions/{{ p.id }}/dismiss" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-small" aria-label="Dismiss {{ action_labels.get(p.action_type, p.action_type) }} on {{ p.asset_tag }}">Dismiss</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if test_results is not none %}
+<h2 class="detail-heading" id="test-results" tabindex="-1">Test results</h2>
+<p class="detail-sub">
+  {% set matched = test_results|selectattr('matched')|list %}
+  {% if summary.scheduled %}Checked everything currently due.{% else %}Checked the most recent {{ test_results|length }} item{{ '' if test_results|length == 1 else 's' }}.{% endif %}
+  <strong>{{ matched|length }}</strong> would match. Nothing was changed.
+</p>
+{% if test_results %}
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Item</th><th>Match</th><th>What it would do</th></tr></thead>
+    <tbody>
+      {% for t in test_results|sort(attribute='matched', reverse=True) %}
+      <tr>
+        <td>{{ t.label }}</td>
+        <td>
+          <span class="badge {{ 'badge-green' if t.matched else 'badge-blue' }}">{{ 'Yes' if t.matched else 'No' }}</span>
+          <details class="reasons"><summary>Why</summary><ul>{% for r in t.reasons %}<li>{{ r }}</li>{% endfor %}</ul></details>
+        </td>
+        <td>
+          {% if t.results %}
+          <ul class="result-list">
+            {% for r in t.results %}<li><span class="status status-{{ r.status }}">{{ r.status }}</span> {{ r.message }}</li>{% endfor %}
+          </ul>
+          {% else %}<span style="color:var(--muted);">—</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);">Nothing to test against yet. There are no recent items for this trigger.</div>
+{% endif %}
+<script>document.getElementById('test-results').focus();</script>
+{% endif %}
+
+<h2 class="detail-heading">Run history</h2>
+{% if runs %}
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>When</th><th>Item</th><th>Result</th></tr></thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td style="white-space:nowrap;" title="{{ run.created_at.strftime('%Y-%m-%d %H:%M') }} UTC">{{ run.created_at|ago }}</td>
+        <td>{{ run.subject_label or '—' }}</td>
+        <td>
+          <ul class="result-list">
+            {% for r in run.results or [] %}<li><span class="status status-{{ r.status }}">{{ r.status }}</span> {{ r.message }}</li>{% endfor %}
+          </ul>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);">This rule hasn't run yet.</div>
+{% endif %}
+
+<style>
+  .detail-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .detail-actions form { margin: 0; }
+  .btn-small { padding: .3rem .7rem; font-size: .82rem; }
+  .rule-summary dl { display: grid; grid-template-columns: 7rem 1fr; gap: .7rem 1rem; margin: 0; }
+  .rule-summary dt { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; padding-top: .15rem; }
+  .rule-summary dd { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+  .rule-summary ul, .rule-summary ol { margin: .3rem 0 0; padding-left: 1.2rem; }
+  .step-details { display: block; color: var(--muted); font-size: .84rem; }
+  .rule-foot { color: var(--muted); font-size: .82rem; margin: 1rem 0 0; }
+  .detail-heading { font-size: 1.05rem; margin: 1.8rem 0 .6rem; }
+  .detail-heading:focus { outline: none; }
+  .detail-sub { color: var(--muted); font-size: .88rem; margin: 0 0 .8rem; }
+  .reasons { font-size: .8rem; color: var(--muted); margin-top: .3rem; }
+  .reasons summary { cursor: pointer; }
+  .reasons ul, .result-list { margin: .3rem 0 0; padding-left: 0; list-style: none; }
+  .result-list li { font-size: .85rem; margin-bottom: .2rem; }
+  .status { display: inline-block; min-width: 3.6rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+            font-weight: 700; padding: .05rem .4rem; border-radius: 4px; text-align: center; margin-right: .3rem; }
+  .status-ok { background: rgba(34, 197, 94, .15); color: var(--success); }
+  .status-skipped { background: var(--surface2); color: var(--muted); }
+  .status-error { background: rgba(239, 68, 68, .15); color: var(--danger); }
+  @media (max-width: 640px) {
+    .rule-summary dl { grid-template-columns: 1fr; gap: .2rem; }
+    .rule-summary dd { margin-bottom: .7rem; }
+  }
+</style>
+{% endblock %}

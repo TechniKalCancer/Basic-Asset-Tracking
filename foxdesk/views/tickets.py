@@ -2,11 +2,11 @@
 from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
 from foxdesk.core import EMAIL_ENABLED, app, db
+from foxdesk.automation.engine import emit
 from foxdesk.models import (
     AUTOMATION_ACTIONS,
     ActivityLog,
     AssetRegistry,
-    GoogleOrgUnit,
     PendingDeviceAction,
     Person,
     REPAIR_OUTCOMES,
@@ -37,7 +37,6 @@ from foxdesk.services.scoping import (
     _ticket_assignees,
 )
 from foxdesk.services.helpdesk import (
-    _check_ticket_automation,
     _create_ticket,
     _execute_device_automation_action,
     _notify_ticket_requester,
@@ -87,7 +86,7 @@ def submit_ticket_page():
             photo_count = _save_attachments('ticket', ticket.id, request.files.getlist('photos'),
                                             uploaded_by=person.full_name)
             db.session.commit()
-            _check_ticket_automation(ticket)
+            emit('ticket.created', ticket)
             emailed = _notify_ticket_requester(ticket, 'ticket_received')
             flash(f'Thanks — your ticket #{ticket.id} has been submitted'
                   f'{f" with {photo_count} photo(s)" if photo_count else ""}.'
@@ -199,7 +198,7 @@ def admin_ticket_new():
             _, actor_label, _ = _current_actor()
             _save_attachments('ticket', ticket.id, request.files.getlist('photos'), uploaded_by=actor_label)
             db.session.commit()
-            _check_ticket_automation(ticket)
+            emit('ticket.created', ticket)
             if request.form.get('notify_requester') == 'on':
                 _notify_ticket_requester(ticket, 'ticket_received')
             flash('Ticket created.', 'success')
@@ -352,6 +351,8 @@ def admin_ticket_status(ticket_id):
     # bookkeeping, not news to the requester.
     if ticket.status in ('resolved', 'closed') and old_status not in ('resolved', 'closed'):
         _notify_ticket_requester(ticket, 'ticket_resolved')
+    if old_status != ticket.status:
+        emit('ticket.status_changed', ticket, old_status=old_status)
     flash(f'Ticket #{ticket.id} updated.', 'success')
     return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
 
@@ -530,121 +531,9 @@ def admin_ticket_category_delete(category_id):
 @app.route('/admin/automations')
 @require_super_admin
 def admin_automations():
-    automations = TicketAutomation.query.join(TicketCategory).order_by(TicketCategory.name).all()
-    return render_template('admin_automations.html', automations=automations, action_labels=AUTOMATION_ACTIONS)
-
-
-def _automation_form_extras():
-    """Repair categories and org units — only relevant to specific action
-    types (send_to_repair / move_device respectively), same catalogs
-    already used elsewhere (Send to Repair, Site's Loaner Org Unit)."""
-    repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
-    org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
-    return repair_categories, org_units
-
-
-@app.route('/admin/automations/new', methods=['GET', 'POST'])
-@require_super_admin
-def admin_automation_new():
-    available_categories = TicketCategory.query.filter(
-        ~TicketCategory.id.in_(db.session.query(TicketAutomation.ticket_category_id))
-    ).order_by(TicketCategory.name).all()
-    repair_categories, org_units = _automation_form_extras()
-    if request.method == 'POST':
-        ticket_category_id = request.form.get('ticket_category_id', type=int)
-        action_type = request.form.get('action_type', '').strip()
-        require_confirmation = bool(request.form.get('require_confirmation'))
-        repair_category_id = request.form.get('repair_category_id', type=int)
-        target_org_unit_path = request.form.get('target_org_unit_path', '').strip() or None
-
-        def _redisplay():
-            return render_template('admin_automation_form.html', automation=None, form=request.form,
-                                    categories=available_categories, action_types=AUTOMATION_ACTIONS,
-                                    repair_categories=repair_categories, org_units=org_units)
-
-        if not ticket_category_id or not TicketCategory.query.get(ticket_category_id):
-            flash('Choose a ticket category.', 'error')
-            return _redisplay()
-        if action_type not in AUTOMATION_ACTIONS:
-            flash('Choose an action.', 'error')
-            return _redisplay()
-        if TicketAutomation.query.filter_by(ticket_category_id=ticket_category_id).first():
-            flash('That category already has an automation — edit it instead of adding another.', 'error')
-            return _redisplay()
-        if action_type == 'move_device' and not target_org_unit_path:
-            flash('Choose a target org unit for a Move to Org Unit automation.', 'error')
-            return _redisplay()
-
-        category = TicketCategory.query.get(ticket_category_id)
-        db.session.add(TicketAutomation(
-            ticket_category_id=ticket_category_id, action_type=action_type,
-            require_confirmation=require_confirmation,
-            repair_category_id=repair_category_id if action_type == 'send_to_repair' else None,
-            target_org_unit_path=target_org_unit_path if action_type == 'move_device' else None,
-        ))
-        _log_activity('automation_add',
-                       f'Added automation: "{category.name}" tickets → {AUTOMATION_ACTIONS[action_type]}'
-                       f' ({"confirm first" if require_confirmation else "runs automatically"}).')
-        db.session.commit()
-        flash('Automation added.', 'success')
-        return redirect(url_for('admin_automations'))
-
-    return render_template('admin_automation_form.html', automation=None, form=None,
-                            categories=available_categories, action_types=AUTOMATION_ACTIONS,
-                            repair_categories=repair_categories, org_units=org_units)
-
-
-@app.route('/admin/automations/<int:automation_id>/edit', methods=['GET', 'POST'])
-@require_super_admin
-def admin_automation_edit(automation_id):
-    automation = TicketAutomation.query.get_or_404(automation_id)
-    repair_categories, org_units = _automation_form_extras()
-    if request.method == 'POST':
-        action_type = request.form.get('action_type', '').strip()
-        require_confirmation = bool(request.form.get('require_confirmation'))
-        is_active = bool(request.form.get('is_active'))
-        repair_category_id = request.form.get('repair_category_id', type=int)
-        target_org_unit_path = request.form.get('target_org_unit_path', '').strip() or None
-        if action_type not in AUTOMATION_ACTIONS:
-            flash('Choose an action.', 'error')
-            return render_template('admin_automation_form.html', automation=automation, form=None,
-                                    categories=None, action_types=AUTOMATION_ACTIONS,
-                                    repair_categories=repair_categories, org_units=org_units)
-        if action_type == 'move_device' and not target_org_unit_path:
-            flash('Choose a target org unit for a Move to Org Unit automation.', 'error')
-            return render_template('admin_automation_form.html', automation=automation, form=None,
-                                    categories=None, action_types=AUTOMATION_ACTIONS,
-                                    repair_categories=repair_categories, org_units=org_units)
-
-        automation.action_type = action_type
-        automation.require_confirmation = require_confirmation
-        automation.is_active = is_active
-        automation.repair_category_id = repair_category_id if action_type == 'send_to_repair' else None
-        automation.target_org_unit_path = target_org_unit_path if action_type == 'move_device' else None
-        _log_activity('automation_edit',
-                       f'Edited automation: "{automation.ticket_category.name}" tickets → '
-                       f'{AUTOMATION_ACTIONS[action_type]} '
-                       f'({"confirm first" if require_confirmation else "runs automatically"}, '
-                       f'{"active" if is_active else "inactive"}).')
-        db.session.commit()
-        flash('Automation updated.', 'success')
-        return redirect(url_for('admin_automations'))
-
-    return render_template('admin_automation_form.html', automation=automation, form=None,
-                            categories=None, action_types=AUTOMATION_ACTIONS,
-                            repair_categories=repair_categories, org_units=org_units)
-
-
-@app.route('/admin/automations/<int:automation_id>/delete', methods=['POST'])
-@require_super_admin
-def admin_automation_delete(automation_id):
-    automation = TicketAutomation.query.get_or_404(automation_id)
-    category_name = automation.ticket_category.name
-    db.session.delete(automation)
-    _log_activity('automation_delete', f'Deleted automation for "{category_name}" tickets.')
-    db.session.commit()
-    flash('Automation deleted.', 'success')
-    return redirect(url_for('admin_automations'))
+    """The old per-category ticket automations became general automation
+    rules (the migration converted every one) — this keeps old links working."""
+    return redirect(url_for('admin_rules'))
 
 
 @app.route('/admin/pending_actions/<int:action_id>/confirm', methods=['POST'])

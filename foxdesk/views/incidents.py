@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from flask import abort, flash, redirect, render_template, request, url_for
 from foxdesk.core import app, db
+from foxdesk.automation.engine import emit
 from foxdesk.models import (
     Asset,
     AssetRegistry,
@@ -68,6 +69,7 @@ def admin_incident_add(asset_tag):
     if request.form.get('notify_guardian') == 'on':
         ok, message = _send_damage_notice(incident)
         flash(message, 'success' if ok else 'error')
+    emit('incident.created', incident)
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
@@ -119,6 +121,7 @@ def report_problem_page():
             db.session.flush()
             _save_attachments('incident', incident.id, request.files.getlist('photos'), uploaded_by=person.full_name)
             db.session.commit()
+            emit('incident.created', incident)
             flash('Thanks — your report has been logged.', 'success')
         except Exception as e:
             db.session.rollback()

@@ -2,6 +2,7 @@
 from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
 from foxdesk.core import app, db
+from foxdesk.automation.engine import emit
 from foxdesk.models import (
     Asset,
     AssetRegistry,
@@ -31,11 +32,19 @@ def admin_repair_send(asset_tag):
         status, message = _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_description,
                                                    expected_return_at, site_ids=_current_site_ids())
         (db.session.commit if status == 'ok' else db.session.rollback)()
+        if status == 'ok':
+            _emit_repair_sent(asset_tag)
         flash(message, 'success' if status == 'ok' else 'error')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not send device to repair: {e}', 'error')
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
+
+
+def _emit_repair_sent(asset_tag):
+    repair = Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).order_by(Repair.id.desc()).first()
+    if repair:
+        emit('repair.sent', repair)
 
 
 @app.route('/admin/repairs/send', methods=['POST'])
@@ -61,6 +70,8 @@ def admin_repair_send_quick():
         status, message = _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_description,
                                                    expected_return_at, site_ids=_current_site_ids())
         (db.session.commit if status == 'ok' else db.session.rollback)()
+        if status == 'ok':
+            _emit_repair_sent(asset_tag)
         flash(message, 'success' if status == 'ok' else 'error')
     except Exception as e:
         db.session.rollback()
@@ -125,6 +136,7 @@ def admin_repair_return(repair_id):
                        site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
         open_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
         db.session.commit()
+        emit('repair.returned', repair)
         msg = f'{repair.asset_tag} marked returned ({REPAIR_OUTCOMES[outcome]}).'
         if open_loaner:
             msg += f' Note: loaner {open_loaner.asset_tag} is still checked out to {open_loaner.person_name} — check it in once it\'s back.'

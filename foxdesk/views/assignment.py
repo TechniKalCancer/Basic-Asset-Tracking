@@ -4,6 +4,7 @@ import io
 from datetime import datetime
 from flask import abort, flash, redirect, render_template, request, url_for
 from foxdesk.core import EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, app, db
+from foxdesk.automation.engine import emit
 from foxdesk.models import (
     ASSET_STATUSES,
     AUTOMATION_ACTIONS,
@@ -63,6 +64,8 @@ def admin_asset_assign(asset_tag):
         person = _scope_people(Person.query, site_ids).filter_by(id=person_id).first_or_404()
         status, message = _assign_asset_to_person(asset_tag, person, condition_out, due_date,
                                                     acknowledged_by=acknowledged_by)
+        if status == 'assigned':
+            emit('device.assigned', registry_row, person=person)
         if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
             message += ' Note: this device and person are at different sites.'
         flash(message, 'info' if status == 'already' else ('success' if status == 'assigned' else 'error'))
@@ -201,6 +204,8 @@ def admin_bulk_assign():
                         continue
 
                 status, message = _assign_asset_to_person(asset_tag, person, due_date=due_date)
+                if status == 'assigned':
+                    emit('device.assigned', registry_row, person=person)
                 if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
                     message += ' (different sites)'
                 results.append({'asset_tag': asset_tag, 'email': email, 'ok': status != 'error', 'message': message})
@@ -358,11 +363,13 @@ def admin_asset_unassign(asset_tag):
     asset = Asset.query.filter_by(asset_tag=asset_tag).first_or_404()
     condition_in = request.form.get('condition_in', '').strip() or None
     try:
+        previous_holder = asset.assigned_to
         _close_open_assignment(asset_tag, condition_in=condition_in)
         asset.assigned_to_id = None
         asset.status = 'available'
         _log_activity('device_unassign', f'Unassigned {asset_tag}.', site_id=registry_row.site_id)
         db.session.commit()
+        emit('device.unassigned', registry_row, person=previous_holder)
         flash(f'Unassigned {asset_tag}.', 'success')
     except Exception as e:
         db.session.rollback()
@@ -399,6 +406,7 @@ def admin_asset_status(asset_tag):
             open_repair.notes = ((open_repair.notes + ' ') if open_repair.notes else '') + '[auto-closed: status changed manually]'
         _log_activity('device_status', f'Set {asset_tag} status to {new_status}.', site_id=registry_row.site_id)
         db.session.commit()
+        emit('device.status_changed', registry_row)
         flash(f'{asset_tag} status set to {new_status}.', 'success')
     except Exception as e:
         db.session.rollback()

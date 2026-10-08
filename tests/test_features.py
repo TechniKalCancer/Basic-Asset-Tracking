@@ -27,9 +27,9 @@ def test_turning_loaners_off_hides_and_blocks_it(client):
 
 
 def test_dependency_blocks_child_module(client):
-    save(client, 'tickets')
-    r = client.get('/admin/automations')
-    assert r.status_code == 404 and b'needs Tickets' in r.data
+    save(client, 'google')
+    r = client.get('/admin/signin_mismatches')
+    assert r.status_code == 404 and b'needs Google Workspace' in r.data
 
 
 def test_device_page_sections_follow_switches(client, make):

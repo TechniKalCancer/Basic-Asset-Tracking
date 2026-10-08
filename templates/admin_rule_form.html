@@ -1,0 +1,429 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit rule' if rule.id else 'New rule' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('automation') }}{{ 'Edit rule' if rule.id else 'New rule' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="{{ '/admin/rules/%d' % rule.id if rule.id else '/admin/rules' }}" class="btn btn-ghost">Cancel</a>
+</div>
+
+{% if rule.template_key and not rule.id %}
+<p class="builder-note">
+  Started from a template. Dropdowns are filled in with a best guess from your own categories and staff, so check each
+  one before you save.
+</p>
+{% endif %}
+<p class="builder-note" id="droppedNote" hidden></p>
+
+<form method="POST" id="ruleForm" class="rule-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="template_key" value="{{ rule.template_key or '' }}">
+  <input type="hidden" name="conditions_json" id="conditionsJson">
+  <input type="hidden" name="actions_json" id="actionsJson">
+
+  <section class="card builder-section">
+    <div class="field">
+      <label for="ruleName">Name</label>
+      <input id="ruleName" name="name" maxlength="160" required value="{{ rule.name or '' }}">
+    </div>
+    <div class="field" style="margin-bottom:0;">
+      <label for="ruleDescription">Notes (optional)</label>
+      <textarea id="ruleDescription" name="description" rows="2">{{ rule.description or '' }}</textarea>
+    </div>
+  </section>
+
+  <section class="card builder-section" aria-labelledby="whenHeading">
+    <h2 id="whenHeading"><span class="step-num" aria-hidden="true">1</span>When</h2>
+    <div class="field" style="margin-bottom:0;">
+      <label for="trigger">This happens</label>
+      <select id="trigger" name="trigger" required>
+        <option value="">— Choose —</option>
+        {% for group in trigger_groups %}
+        {% set items = schema.triggers.items()|selectattr('1.group', 'equalto', group)|list %}
+        {% if items %}
+        <optgroup label="{{ group }}">
+          {% for key, t in items %}
+          <option value="{{ key }}">{{ t.label }}{{ ' (checked every 15 min)' if t.scheduled }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
+        {% endfor %}
+      </select>
+      <p class="hint" id="triggerHint"></p>
+    </div>
+  </section>
+
+  <section class="card builder-section" aria-labelledby="ifHeading">
+    <h2 id="ifHeading"><span class="step-num" aria-hidden="true">2</span>Only if</h2>
+    <p class="match-line">
+      <label for="match">Match</label>
+      <select id="match" name="match" style="width:auto;">
+        <option value="all">all</option>
+        <option value="any">any</option>
+      </select>
+      <span>of these conditions. With no conditions the rule runs every time.</span>
+    </p>
+    <div id="conditions" class="cond-list"></div>
+    <button type="button" class="btn btn-ghost" id="addCondition">Add condition</button>
+    <div class="field" style="margin:1.2rem 0 0;max-width:320px;">
+      <label for="siteId">Only at</label>
+      <select id="siteId" name="site_id">
+        <option value="">All schools</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if rule.site_id == s.id }}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </section>
+
+  <section class="card builder-section" aria-labelledby="thenHeading">
+    <h2 id="thenHeading"><span class="step-num" aria-hidden="true">3</span>Then</h2>
+    <ol id="actions" class="action-list"></ol>
+    <div class="add-action">
+      <label for="newAction" class="sr-only">Action to add</label>
+      <select id="newAction"></select>
+      <button type="button" class="btn btn-ghost" id="addAction">Add action</button>
+    </div>
+    <details class="placeholders">
+      <summary>Placeholders for subjects and messages</summary>
+      <p class="hint">Click one to insert it where your cursor is. It's replaced with the real value when the rule runs.</p>
+      <div class="chip-row">
+        {% for p in schema.placeholders %}<button type="button" class="chip" data-placeholder="{{ p }}">{{ '{' ~ p ~ '}' }}</button>{% endfor %}
+      </div>
+    </details>
+  </section>
+
+  <section class="card builder-section builder-save">
+    <label class="enable-row" for="ruleEnabled">
+      <span class="switch">
+        <input type="checkbox" id="ruleEnabled" name="enabled" {{ 'checked' if rule.enabled }}>
+        <span class="switch-track" aria-hidden="true"></span>
+      </span>
+      <span>Rule is on</span>
+    </label>
+    <span class="spacer" style="flex:1;"></span>
+    <button type="submit" class="btn btn-primary">Save rule</button>
+  </section>
+</form>
+
+<script id="ruleSchema" type="application/json">{{ schema|tojson }}</script>
+<script id="ruleInitial" type="application/json">{{ initial|tojson }}</script>
+<script>
+(function () {
+  const schema = JSON.parse(document.getElementById('ruleSchema').textContent);
+  const initial = JSON.parse(document.getElementById('ruleInitial').textContent);
+  const form = document.getElementById('ruleForm');
+  const triggerSel = document.getElementById('trigger');
+  const condBox = document.getElementById('conditions');
+  const actBox = document.getElementById('actions');
+  const newAction = document.getElementById('newAction');
+  const droppedNote = document.getElementById('droppedNote');
+  const NO_VALUE = ['empty', 'not_empty', 'true', 'false'];
+  let uid = 0;
+  let lastText = null;
+
+  function el(tag, attrs, text) {
+    const node = document.createElement(tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') node.className = v; else node.setAttribute(k, v === true ? '' : v);
+    });
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function fillSelect(select, items, selected, blank) {
+    select.innerHTML = '';
+    if (blank) select.append(el('option', { value: '' }, blank));
+    const wanted = Array.isArray(selected) ? selected.map(String) : [selected === null || selected === undefined ? '' : String(selected)];
+    items.forEach(([value, label]) => {
+      const opt = el('option', { value: value }, label);
+      if (wanted.includes(String(value))) opt.selected = true;
+      select.append(opt);
+    });
+  }
+
+  function trigger() { return schema.triggers[triggerSel.value]; }
+
+  // ─── conditions ─────────────────────────────────────────────────────────
+
+  function renderValue(row, value) {
+    const box = row.querySelector('.cond-value');
+    box.innerHTML = '';
+    const field = schema.fields[row.querySelector('.cond-field').value];
+    const op = row.querySelector('.cond-op').value;
+    if (!field || NO_VALUE.includes(op)) return;
+    let input;
+    if (field.choices && op === 'in') {
+      input = el('select', { multiple: true, size: Math.min(6, Math.max(3, field.choices.length)) });
+      fillSelect(input, field.choices, Array.isArray(value) ? value : String(value || '').split(',').map(s => s.trim()));
+    } else if (field.choices) {
+      input = el('select');
+      fillSelect(input, field.choices, Array.isArray(value) ? value[0] : value, '— Choose —');
+    } else if (field.type === 'number') {
+      input = el('input', { type: 'number', step: 'any', inputmode: 'decimal' });
+      input.value = value === null || value === undefined ? '' : value;
+    } else {
+      input = el('input', { type: 'text' });
+      input.value = value === null || value === undefined ? '' : value;
+    }
+    input.classList.add('cond-input');
+    input.setAttribute('aria-label', field.label + ' value');
+    box.append(input);
+  }
+
+  function renderOps(row, op) {
+    const field = schema.fields[row.querySelector('.cond-field').value];
+    const select = row.querySelector('.cond-op');
+    const ops = schema.operators[field ? field.type : 'text'];
+    fillSelect(select, ops, op && ops.some(o => o[0] === op) ? op : ops[0][0]);
+  }
+
+  function addCondition(c) {
+    const t = trigger();
+    if (!t) return;
+    c = c || {};
+    const row = el('div', { class: 'cond-row' });
+    const fieldSel = el('select', { class: 'cond-field', 'aria-label': 'Condition field' });
+    fillSelect(fieldSel, t.fields.map(f => [f, schema.fields[f].label]), c.field || t.fields[0]);
+    const opSel = el('select', { class: 'cond-op', 'aria-label': 'Comparison' });
+    const remove = el('button', { type: 'button', class: 'btn btn-ghost btn-small', 'aria-label': 'Remove this condition' }, 'Remove');
+    row.append(fieldSel, opSel, el('div', { class: 'cond-value' }), remove);
+    condBox.append(row);
+    renderOps(row, c.op);
+    renderValue(row, c.value);
+    fieldSel.addEventListener('change', () => { renderOps(row); renderValue(row); });
+    opSel.addEventListener('change', () => {
+      const input = row.querySelector('.cond-input');
+      renderValue(row, input ? readValue(input) : undefined);
+    });
+    remove.addEventListener('click', () => { row.remove(); document.getElementById('addCondition').focus(); });
+    return row;
+  }
+
+  function readValue(input) {
+    if (input.multiple) return Array.from(input.selectedOptions).map(o => o.value);
+    return input.value;
+  }
+
+  function readCondition(row) {
+    const input = row.querySelector('.cond-input');
+    return { field: row.querySelector('.cond-field').value, op: row.querySelector('.cond-op').value,
+             value: input ? readValue(input) : null };
+  }
+
+  // ─── actions ────────────────────────────────────────────────────────────
+
+  function paramField(param, value) {
+    const id = 'param' + (++uid);
+    const wrap = el('div', { class: 'param', 'data-key': param.key, 'data-type': param.type });
+    let input;
+    if (param.type === 'bool') {
+      input = el('input', { type: 'checkbox', id: id });
+      input.checked = !!value;
+      const label = el('label', { for: id, class: 'param-check' });
+      label.append(input, document.createTextNode(' ' + param.label));
+      wrap.append(label);
+      return wrap;
+    }
+    if (param.type === 'choice') {
+      input = el('select', { id: id });
+      fillSelect(input, param.choices || [], value, param.default === null ? '— None —' : null);
+    } else if (param.type === 'textarea') {
+      input = el('textarea', { id: id, rows: 4 });
+      input.value = value || '';
+    } else if (param.type === 'number') {
+      input = el('input', { id: id, type: 'number', step: '0.01', min: '0', inputmode: 'decimal' });
+      input.value = value === null || value === undefined ? '' : value;
+    } else {
+      input = el('input', { id: id, type: param.key === 'url' ? 'url' : 'text' });
+      input.value = value || '';
+    }
+    wrap.append(el('label', { for: id }, param.label), input);
+    return wrap;
+  }
+
+  function syncEmailAddress(card) {
+    const to = card.querySelector('.param[data-key="to"] select');
+    const address = card.querySelector('.param[data-key="address"]');
+    if (to && address) address.hidden = to.value !== 'address';
+  }
+
+  function renumber() {
+    const cards = Array.from(actBox.children);
+    cards.forEach((card, i) => {
+      card.querySelector('.action-num').textContent = i + 1;
+      card.querySelector('.move-up').disabled = i === 0;
+      card.querySelector('.move-down').disabled = i === cards.length - 1;
+    });
+  }
+
+  function addAction(a) {
+    const spec = schema.actions[a.type];
+    if (!spec) return null;
+    const params = a.params || {};
+    const card = el('li', { class: 'action-card', 'data-type': a.type });
+    const head = el('div', { class: 'action-head' });
+    head.append(el('span', { class: 'action-num', 'aria-hidden': 'true' }), el('span', { class: 'action-label' }, spec.label));
+    const up = el('button', { type: 'button', class: 'btn btn-ghost btn-small move-up', 'aria-label': 'Move ' + spec.label + ' up' }, 'Up');
+    const down = el('button', { type: 'button', class: 'btn btn-ghost btn-small move-down', 'aria-label': 'Move ' + spec.label + ' down' }, 'Down');
+    const remove = el('button', { type: 'button', class: 'btn btn-ghost btn-small', 'aria-label': 'Remove ' + spec.label }, 'Remove');
+    head.append(el('span', { class: 'spacer', style: 'flex:1' }), up, down, remove);
+    card.append(head);
+    if (spec.params.length) {
+      const body = el('div', { class: 'action-params' });
+      spec.params.forEach(p => body.append(paramField(p, p.key in params ? params[p.key] : p.default)));
+      card.append(body);
+    }
+    actBox.append(card);
+    up.addEventListener('click', () => { card.previousElementSibling && actBox.insertBefore(card, card.previousElementSibling); renumber(); up.focus(); });
+    down.addEventListener('click', () => { card.nextElementSibling && actBox.insertBefore(card.nextElementSibling, card); renumber(); down.focus(); });
+    remove.addEventListener('click', () => { card.remove(); renumber(); newAction.focus(); });
+    const to = card.querySelector('.param[data-key="to"] select');
+    if (to) to.addEventListener('change', () => syncEmailAddress(card));
+    syncEmailAddress(card);
+    renumber();
+    return card;
+  }
+
+  function readAction(card) {
+    const params = {};
+    card.querySelectorAll('.param').forEach(p => {
+      const input = p.querySelector('input, select, textarea');
+      params[p.dataset.key] = p.dataset.type === 'bool' ? input.checked : input.value;
+    });
+    return { type: card.dataset.type, params: params };
+  }
+
+  // ─── trigger ────────────────────────────────────────────────────────────
+
+  function renderTrigger() {
+    const t = trigger();
+    document.getElementById('triggerHint').textContent = !t ? 'Choose what starts the rule.'
+      : t.scheduled ? 'Checked every 15 minutes. The rule runs once for each item that matches; it won\'t repeat for the same item.'
+      : 'The rule runs right after this happens.';
+    fillSelect(newAction, t ? t.actions.map(k => [k, schema.actions[k].label]) : [], null, '— Choose an action —');
+    document.getElementById('addCondition').disabled = !t;
+    document.getElementById('addAction').disabled = !t;
+  }
+
+  function rebuild(conditions, actions) {
+    const t = trigger();
+    const dropped = [];
+    condBox.innerHTML = '';
+    actBox.innerHTML = '';
+    (conditions || []).forEach(c => {
+      if (t && t.fields.includes(c.field)) addCondition(c);
+      else if (schema.fields[c.field]) dropped.push('the "' + schema.fields[c.field].label + '" condition');
+    });
+    (actions || []).forEach(a => {
+      if (t && t.actions.includes(a.type)) addAction(a);
+      else dropped.push('"' + (schema.actions[a.type] ? schema.actions[a.type].label : a.type) + '"');
+    });
+    droppedNote.hidden = !dropped.length;
+    droppedNote.textContent = dropped.length
+      ? 'Left out ' + dropped.join(', ') + ': not available for this trigger, or its module is turned off.' : '';
+  }
+
+  triggerSel.addEventListener('change', () => {
+    const conditions = Array.from(condBox.children).map(readCondition);
+    const actions = Array.from(actBox.children).map(readAction);
+    renderTrigger();
+    rebuild(conditions, actions);
+  });
+  document.getElementById('addCondition').addEventListener('click', () => {
+    const row = addCondition();
+    if (row) row.querySelector('select').focus();
+  });
+  document.getElementById('addAction').addEventListener('click', () => {
+    if (!newAction.value) { newAction.focus(); return; }
+    const card = addAction({ type: newAction.value });
+    newAction.value = '';
+    if (card) (card.querySelector('.action-params input, .action-params select, .action-params textarea') || card.querySelector('button')).focus();
+  });
+
+  // Placeholders go into whichever subject/message box was last focused.
+  actBox.addEventListener('focusin', e => {
+    if (e.target.matches('input[type=text], input[type=url], textarea')) lastText = e.target;
+  });
+  document.querySelectorAll('[data-placeholder]').forEach(chip => chip.addEventListener('click', () => {
+    if (!lastText || !document.body.contains(lastText)) return;
+    const token = '{' + chip.dataset.placeholder + '}';
+    const start = lastText.selectionStart ?? lastText.value.length;
+    const end = lastText.selectionEnd ?? start;
+    lastText.value = lastText.value.slice(0, start) + token + lastText.value.slice(end);
+    lastText.focus();
+    lastText.setSelectionRange(start + token.length, start + token.length);
+  }));
+
+  form.addEventListener('submit', () => {
+    document.getElementById('conditionsJson').value = JSON.stringify(Array.from(condBox.children).map(readCondition));
+    document.getElementById('actionsJson').value = JSON.stringify(Array.from(actBox.children).map(readAction));
+  });
+
+  triggerSel.value = schema.triggers[initial.trigger] ? initial.trigger : '';
+  document.getElementById('match').value = initial.match === 'any' ? 'any' : 'all';
+  renderTrigger();
+  rebuild(initial.conditions, initial.actions);
+})();
+</script>
+
+<style>
+  .rule-form { display: flex; flex-direction: column; gap: 1rem; max-width: 860px; }
+  .builder-section { margin: 0; }
+  .builder-section h2 { font-size: 1.05rem; margin: 0 0 .9rem; display: flex; align-items: center; gap: .6rem; }
+  .step-num { display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem;
+              border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: .85rem; }
+  .field { margin-bottom: 1rem; }
+  .field label, .param label { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .85rem; }
+  .hint { color: var(--muted); font-size: .8rem; margin: .4rem 0 0; }
+  .builder-note { color: var(--muted); font-size: .88rem; max-width: 72ch; margin: 0 0 1rem; padding: .6rem .9rem;
+                  border-left: 3px solid var(--warning); background: var(--surface); border-radius: 4px; }
+  .match-line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .88rem; margin: 0 0 .8rem; }
+  .match-line label { color: var(--text); }
+  .cond-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .8rem; }
+  .cond-list:empty { display: none; }
+  .cond-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .8fr) minmax(0, 1.3fr) auto; gap: .5rem; align-items: start; }
+  .cond-value select[multiple] { min-height: 5.5rem; }
+  .btn-small { padding: .3rem .7rem; font-size: .82rem; }
+  .action-list { list-style: none; margin: 0 0 .8rem; padding: 0; display: flex; flex-direction: column; gap: .7rem; }
+  .action-list:empty { display: none; }
+  .action-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); padding: .7rem .9rem; }
+  .action-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .action-num { display: inline-flex; align-items: center; justify-content: center; min-width: 1.4rem; height: 1.4rem;
+                border-radius: 50%; border: 1px solid var(--border); font-size: .78rem; color: var(--muted); }
+  .action-label { font-weight: 600; }
+  .action-params { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .7rem; margin-top: .7rem; }
+  .action-params .param[data-type="textarea"] { grid-column: 1 / -1; }
+  .param[hidden] { display: none; }
+  .param-check { display: flex !important; align-items: center; gap: .5rem; color: var(--text) !important; cursor: pointer; }
+  .param-check input { width: auto; }
+  .add-action { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .add-action select { flex: 1; min-width: 220px; max-width: 420px; }
+  .placeholders { margin-top: 1rem; font-size: .88rem; }
+  .placeholders summary { cursor: pointer; color: var(--muted); }
+  .chip-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+  .chip { font: inherit; font-size: .78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding: .2rem .55rem;
+          border-radius: 99px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; }
+  .chip:hover, .chip:focus-visible { border-color: var(--accent); }
+  .builder-save { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .enable-row { display: flex; align-items: center; gap: .7rem; cursor: pointer; }
+  .switch { position: relative; flex: none; width: 46px; height: 26px; }
+  .switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch-track { position: absolute; inset: 0; border-radius: 99px; background: var(--border); transition: background .15s; }
+  .switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked + .switch-track { background: var(--success); }
+  .switch input:checked + .switch-track::after { transform: translateX(20px); }
+  .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+  @media (max-width: 640px) {
+    .cond-row { grid-template-columns: 1fr auto; grid-template-areas: "field field" "op remove" "value value";
+                padding-bottom: .6rem; border-bottom: 1px solid var(--border); }
+    .cond-row .cond-field { grid-area: field; }
+    .cond-row .cond-op { grid-area: op; }
+    .cond-row .cond-value { grid-area: value; }
+    .cond-row > button { grid-area: remove; }
+    .cond-row .cond-value:empty { display: none; }
+  }
+</style>
+{% endblock %}

@@ -13,5 +13,6 @@ from foxdesk.views import loaners  # noqa: F401
 from foxdesk.views import people  # noqa: F401
 from foxdesk.views import public  # noqa: F401
 from foxdesk.views import repairs  # noqa: F401
+from foxdesk.views import rules  # noqa: F401
 from foxdesk.views import settings  # noqa: F401
 from foxdesk.views import tickets  # noqa: F401

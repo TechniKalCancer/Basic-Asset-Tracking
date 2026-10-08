@@ -1,6 +1,7 @@
 """Assigning devices to people, loaner checkout/checkin, and overdue lookups."""
 from datetime import datetime, timedelta
 from foxdesk.core import EMAIL_ENABLED, db, logger
+from foxdesk.automation.engine import emit
 from foxdesk.models import Asset, AssetRegistry, AssignmentHistory, LoanerCheckout, Person
 from foxdesk.services.emailer import _render_email_template, send_email
 from foxdesk.services.auth import _log_activity
@@ -188,15 +189,17 @@ def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledg
     resolved_due_date = due_date
     if resolved_due_date is None and not repair_id:
         resolved_due_date = datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)
-    db.session.add(LoanerCheckout(
+    checkout = LoanerCheckout(
         asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
         due_date=resolved_due_date, acknowledged_by=acknowledged_by, repair_id=repair_id,
-    ))
+    )
+    db.session.add(checkout)
     log_message = f'Checked out loaner {asset_tag} to {person.full_name}.' if not repair_id \
         else f'Checked out repair loaner {asset_tag} to {person.full_name}.'
     _log_activity('loaner_checkout', log_message, site_id=row.site_id)
     db.session.commit()
     _sync_device_google_state(row, enabled=True, person=person)
+    emit('loaner.checked_out', checkout)
     message = f'Checked out {asset_tag} to {person.full_name}.'
     if row.site_id and person.site_id and row.site_id != person.site_id:
         message += ' Note: this loaner and person are at different sites.'
@@ -221,4 +224,5 @@ def _checkin_loaner(asset_tag, condition_notes=None, site_ids=None):
     db.session.commit()
     if registry_row:
         _sync_device_google_state(registry_row, enabled=False)
+    emit('loaner.checked_in', open_row)
     return 'ok', f'Checked in {asset_tag} (was with {open_row.person_name}).'

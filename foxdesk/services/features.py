@@ -41,8 +41,7 @@ FEATURES = OrderedDict([
                      desc='Send devices out for repair or RMA and track them until they come back.')),
     ('tickets', dict(group='Help desk', label='Tickets',
                      desc='A help-desk queue with categories, comments, charges and requester emails.')),
-    ('ticket_automations', dict(group='Help desk', label='Ticket automations', requires=('tickets',),
-                                desc='Run a device action (clear profiles, disable, send to repair) from a ticket category.')),
+
     ('attachments', dict(group='Help desk', label='Photos and files',
                          desc='Attach photos or PDFs to damage reports, tickets and repairs.')),
     ('kiosk', dict(group='Self-service', label='Kiosk mode',
@@ -57,12 +56,15 @@ FEATURES = OrderedDict([
                           desc='Duplicate serials, devices held by people who left, missing sites and more.')),
     ('signin_check', dict(group='Reports', label='Google sign-in check', requires=('google',),
                           desc='Flags students signing in to devices that aren\'t theirs ("Possible Violators").')),
+    ('automations', dict(group='Automation', label='Automations',
+                         desc='Rules that act on their own: "when a ticket is created and it mentions a screen, make it '
+                              'high priority", "when a repair is out 14 days, email the team", and more.')),
     ('google', dict(group='Integrations', label='Google Workspace', configured=lambda: GOOGLE_SYNC_ENABLED,
                     desc='Sync Chromebooks and people from Google Admin, push asset tags and org units back.')),
     ('kace', dict(group='Integrations', label='KACE SMA', configured=lambda: KACE_SYNC_ENABLED,
                   desc='Sync Windows and Mac inventory from Quest KACE.')),
 ])
-FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Integrations']
+FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Automation', 'Integrations']
 
 # Area permissions that belong to a module — off module, no permission.
 PERMISSION_FEATURES = {'loaners': 'loaners', 'loaner_checkinout': 'loaners', 'repairs': 'repairs', 'tickets': 'tickets'}
@@ -73,9 +75,8 @@ ENDPOINT_FEATURES = {
     'admin_incident_notify_guardian': 'guardian_notices',
     'admin_repair_categories': None, 'admin_repair_category_new': None,   # shared by damage reports and repairs
     'admin_repair_category_edit': None, 'admin_repair_category_delete': None,
-    'admin_automations': 'ticket_automations', 'admin_automation_new': 'ticket_automations',
-    'admin_automation_edit': 'ticket_automations', 'admin_automation_delete': 'ticket_automations',
-    'admin_pending_action_confirm': 'ticket_automations', 'admin_pending_action_dismiss': 'ticket_automations',
+    'admin_automations': 'automations',
+    'admin_pending_action_confirm': 'automations', 'admin_pending_action_dismiss': 'automations',
     'admin_asset_profile_clear': 'google',
     'submit_ticket_page': 'tickets',
     'admin_data_quality': 'data_quality',
@@ -96,6 +97,7 @@ MODULE_FEATURES = {
     'foxdesk.views.tickets': 'tickets',
     'foxdesk.views.attachments': 'attachments',
     'foxdesk.views.help': 'help',
+    'foxdesk.views.rules': 'automations',
 }
 
 

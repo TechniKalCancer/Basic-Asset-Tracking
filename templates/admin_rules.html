@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Automations{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('automation') }}Automations</h1>
+  <span class="badge badge-blue">{{ rules|selectattr('enabled')|list|length }} on</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/rules/new" class="btn btn-primary">New rule</a>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;margin-bottom:1.4rem;max-width:72ch;">
+  A rule says <strong>when</strong> something happens, <strong>only if</strong> it matches, <strong>then</strong> do this.
+  Start from a template below or build your own. Device actions like a profile clear or a Google disable can wait for
+  a tech to confirm before they run.
+</p>
+
+<h2 class="rules-heading">Your rules</h2>
+{% if rules %}
+<div class="rule-list">
+  {% for r in rules %}
+  {% set s = summaries[r.id] %}
+  <div class="rule-row{{ '' if r.enabled else ' rule-paused' }}">
+    <div class="rule-main">
+      <a href="/admin/rules/{{ r.id }}" class="rule-name">{{ r.name }}</a>
+      <div class="rule-sentence">
+        <span class="rule-kw">When</span> {{ s.when|lower }}{% if s.scheduled %} <span class="badge badge-purple">checked every 15 min</span>{% endif %}
+        {% if s.conditions %}<span class="rule-kw">and</span> {{ s.conditions|join(' ' ~ ('or' if s.match == 'any' else 'and') ~ ' ') }}{% endif %}
+        {% if r.site %}<span class="rule-kw">at</span> {{ r.site.name }}{% endif %}
+        <span class="rule-kw">then</span> {{ s.steps|map('first')|map('lower')|join(', ') }}
+      </div>
+      <div class="rule-meta">
+        {% if s.trigger_off %}<span class="badge badge-yellow">Its module is turned off</span>{% endif %}
+        Ran {{ r.run_count }} time{{ '' if r.run_count == 1 else 's' }}{% if r.last_run_at %}, last {{ r.last_run_at|ago }}{% endif %}
+      </div>
+    </div>
+    <form method="POST" action="/admin/rules/{{ r.id }}/toggle" class="rule-toggle">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn {{ 'btn-ghost' if r.enabled else 'btn-success' }}"
+              aria-label="{{ 'Pause' if r.enabled else 'Turn on' }} {{ r.name }}">
+        {{ 'Pause' if r.enabled else 'Turn on' }}
+      </button>
+    </form>
+    <span class="badge {{ 'badge-green' if r.enabled else 'badge-yellow' }} rule-state">{{ 'On' if r.enabled else 'Paused' }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:2rem;">
+  No rules yet. Pick a template below to get started. Each one opens prefilled with your own categories and staff, so you
+  can adjust it before saving.
+</div>
+{% endif %}
+
+<h2 class="rules-heading" style="margin-top:2.2rem;">Templates</h2>
+{% for group, items in template_groups.items() %}
+<h3 class="template-group">{{ group }}</h3>
+<div class="template-grid">
+  {% for t in items %}
+  <a class="template-card" href="/admin/rules/new?template={{ t.key }}">
+    <span class="template-name">{{ t.name }}</span>
+    <span class="template-desc">{{ t.description }}</span>
+    <span class="template-when">{{ t.when }}{% if t.key in used_templates %} <span class="badge badge-green">In use</span>{% endif %}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<style>
+  .rules-heading { font-size: 1.05rem; margin: 0 0 .8rem; }
+  .rule-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .rule-row { display: flex; align-items: center; gap: 1rem; padding: .9rem 1.1rem; border-top: 1px solid var(--border); }
+  .rule-row:first-child { border-top: none; }
+  .rule-paused .rule-main { opacity: .7; }
+  .rule-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .3rem; }
+  .rule-name { font-weight: 600; color: var(--text); text-decoration: none; }
+  .rule-name:hover, .rule-name:focus-visible { text-decoration: underline; }
+  .rule-sentence { font-size: .87rem; color: var(--text); line-height: 1.5; overflow-wrap: anywhere; }
+  .rule-kw { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: .72rem; letter-spacing: .05em; margin: 0 .15rem; }
+  .rule-meta { font-size: .78rem; color: var(--muted); display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .rule-toggle { margin: 0; }
+  .rule-toggle .btn { padding: .35rem .8rem; }
+  .rule-state { min-width: 4.2rem; text-align: center; }
+  .template-group { font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 1.3rem 0 .6rem; }
+  .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; }
+  .template-card { display: flex; flex-direction: column; gap: .35rem; padding: .9rem 1rem; background: var(--surface);
+                   border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); text-decoration: none; }
+  .template-card:hover, .template-card:focus-visible { border-color: var(--accent); background: var(--surface2); }
+  .template-name { font-weight: 600; }
+  .template-desc { font-size: .85rem; color: var(--muted); flex: 1; }
+  .template-when { font-size: .75rem; color: var(--muted); }
+  @media (max-width: 640px) {
+    .rule-row { flex-wrap: wrap; }
+    .rule-main { flex-basis: 100%; }
+  }
+</style>
+{% endblock %}

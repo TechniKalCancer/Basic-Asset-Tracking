@@ -24,4 +24,4 @@ __pycache__/
 *.log
 Pipfile
 Pipfile.lock
-models.py
+.pytest_cache/

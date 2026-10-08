@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Disabled in AD{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('person') }}Active here, disabled in AD</h1>
+  <span class="badge {{ 'badge-yellow' if rows else 'badge-green' }}">{{ rows|length }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/accounts/review?source=ad" class="btn btn-ghost">AD accounts to review</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:75ch;margin:0 0 1rem;">
+  People who are active in FoxDesk but whose AD account is disabled or gone, which usually means they left.
+  Check whether they still hold a device, then mark them inactive (or graduate them) as usual. FoxDesk doesn't
+  change anyone on its own.
+</p>
+
+<div class="card" style="padding:0;">
+  {% if rows %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Person</th><th>AD account</th><th>Where in AD</th><th class="num">Devices held</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a class="tag-link" href="/admin/people/{{ r.person.id }}/edit">{{ r.person.full_name }}</a>
+          <div style="font-size:.78rem;color:var(--muted);">{{ r.person.role|capitalize }}{% if r.person.grad_year %} · {{ r.person.grad_year }}{% endif %}</div></td>
+        <td><code>{{ r.username or r.email }}</code>
+          {% if (r.raw or {}).get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD {{ r.raw.removed_from_ad }}</span>
+          {% else %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}</td>
+        <td style="font-size:.8rem;color:var(--muted);">{{ (r.directory_path or '')|short_dn }}</td>
+        <td class="num">{% if held.get(r.person_id) %}<a href="/admin/people/{{ r.person.id }}/history" class="badge badge-red" style="text-decoration:none;">{{ held[r.person_id] }}</a>{% else %}<span style="color:var(--muted);">0</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);text-align:center;padding:2rem;margin:0;">Nobody. Everyone active in FoxDesk has an enabled AD account, or none at all.</p>
+  {% endif %}
+</div>
+<style>.num { text-align: right; white-space: nowrap; }</style>
+{% endblock %}

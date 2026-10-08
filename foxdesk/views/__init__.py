@@ -5,6 +5,7 @@ from foxdesk.views import attachments  # noqa: F401
 from foxdesk.views import auth  # noqa: F401
 from foxdesk.views import dashboard  # noqa: F401
 from foxdesk.views import devices  # noqa: F401
+from foxdesk.views import directory  # noqa: F401
 from foxdesk.views import help  # noqa: F401
 from foxdesk.views import incidents  # noqa: F401
 from foxdesk.views import insights  # noqa: F401

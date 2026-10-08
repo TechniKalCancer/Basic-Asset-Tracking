@@ -179,7 +179,7 @@ def place_device_record(source, external_key, serial_number=None, hostname=None,
     for key, value in fields.items():
         setattr(rec, key, value)
     rec.last_synced_at = datetime.utcnow()
-    if rec.registry_id is None:
+    if rec.registry_id is None and rec.review_status != 'ignored':
         row = find_registry_row(serial_number=serial_number, hostname=hostname)
         if row:
             rec.registry_id = row.id

@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}Computers in AD{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('computer') }}Computers in AD</h1>
+  <span class="spacer" style="flex:1;"></span>
+  {% if is_super_admin() %}<a href="/admin/directory" class="btn btn-ghost">{{ icon('integration') }}Active Directory setup</a>{% endif %}
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:75ch;margin:0 0 1rem;">
+  Which devices are joined to the domain. AD computers are matched to devices by serial number, or by computer name
+  when the name is the serial or service tag. FoxDesk only reads AD; clean-up of old computer objects happens in AD.
+</p>
+
+<div class="dir-tabs" role="navigation" aria-label="Computer lists">
+  {% for key, label in tabs %}
+  <a href="?show={{ key }}" class="{{ 'active' if tab == key }}" {{ 'aria-current="page"'|safe if tab == key }}>{{ label }} <span class="badge {{ 'badge-yellow' if key in ('unmatched', 'stale', 'workgroup') and counts[key] else 'badge-blue' }}">{{ counts[key] }}</span></a>
+  {% endfor %}
+</div>
+
+<p class="dir-sub">
+  {% if tab == 'linked' %}AD computers matched to a FoxDesk device.
+  {% elif tab == 'unmatched' %}In AD, but no FoxDesk device has their serial or name. Link one to its asset tag, or ignore it (servers, VMs, things you don't track).
+  {% elif tab == 'stale' %}Enabled in AD, but no domain login in {{ stale_days }} days or more. Candidates for clean-up in AD, or devices that went missing.
+  {% elif tab == 'workgroup' %}FoxDesk devices typed {{ workgroup_types|join(' or ') }} that aren't in AD at all: on a workgroup, or joined somewhere else.
+  {% else %}Computers you marked as not a FoxDesk device. They're never matched automatically.{% endif %}
+</p>
+
+<div class="card" style="padding:0;">
+  {% if rows %}
+  <div style="overflow-x:auto;">
+  <table>
+    {% if tab == 'workgroup' %}
+    <thead><tr><th>Asset tag</th><th>Serial</th><th>Description</th><th>Type</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ r.asset_tag }}/assign">{{ r.asset_tag }}</a></td>
+        <td><code>{{ r.serial_number or '—' }}</code></td>
+        <td>{{ r.description or '—' }}</td>
+        <td>{{ r.device_type }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% else %}
+    <thead><tr><th>Computer</th><th>Device</th><th>OS</th><th>OU</th><th>Last AD login</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><code>{{ r.hostname }}</code>{% if r.enabled == false %} <span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}
+          {% if (r.raw or {}).get('removed_from_ad') %} <span class="badge badge-red" style="font-size:.68rem;">gone from AD</span>{% endif %}</td>
+        <td>{% if r.registry_row %}<a class="tag-link" href="/admin/assets/{{ r.registry_row.asset_tag }}/assign">{{ r.registry_row.asset_tag }}</a>{% else %}<span style="color:var(--muted);">—</span>{% endif %}</td>
+        <td>{{ r.os_name or '—' }}{% if r.os_version %} <span style="color:var(--muted);font-size:.78rem;">{{ r.os_version }}</span>{% endif %}</td>
+        <td style="font-size:.8rem;color:var(--muted);">{{ (r.directory_path or '')|short_dn|replace('CN=' ~ r.hostname ~ ',', '') }}</td>
+        <td style="white-space:nowrap;">{{ r.last_seen_at|ago if r.last_seen_at else 'never' }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if tab == 'unmatched' %}
+          <form method="POST" action="/admin/directory/computers/{{ r.id }}" class="dir-link">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="link">
+            <input type="text" name="asset_tag" placeholder="Asset tag" required aria-label="Asset tag for {{ r.hostname }}">
+            <button type="submit" class="btn btn-ghost btn-small">Link</button>
+          </form>
+          {% endif %}
+          <form method="POST" action="/admin/directory/computers/{{ r.id }}" style="display:inline;"
+                {% if tab == 'linked' %}onsubmit="return confirm('Unlink {{ r.hostname }} from {{ r.registry_row.asset_tag if r.registry_row else '' }}? It won\'t be matched again automatically.');"{% endif %}>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if tab == 'ignored' %}
+            <button type="submit" name="action" value="restore" class="btn btn-ghost btn-small">Put back</button>
+            {% elif tab in ('unmatched', 'linked') %}
+            <button type="submit" name="action" value="ignore" class="btn btn-ghost btn-small">{{ 'Unlink' if tab == 'linked' else 'Ignore' }}</button>
+            {% endif %}
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% endif %}
+  </table>
+  </div>
+  {% if rows|length == 500 %}<p style="color:var(--muted);font-size:.8rem;padding:.6rem 1rem;">Showing the first 500.</p>{% endif %}
+  {% else %}
+  <p style="color:var(--muted);text-align:center;padding:2rem;margin:0;">Nothing here.</p>
+  {% endif %}
+</div>
+
+<style>
+  .dir-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .8rem; }
+  .dir-tabs a { padding: .4rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+  .dir-tabs a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .dir-tabs a:hover, .dir-tabs a:focus-visible { border-color: var(--accent); }
+  .dir-sub { color: var(--muted); font-size: .85rem; max-width: 80ch; margin: 0 0 .8rem; }
+  .btn-small { padding: .25rem .65rem; font-size: .8rem; }
+  .dir-link { display: inline-flex; gap: .3rem; margin: 0 .3rem 0 0; }
+  .dir-link input { width: 8rem; padding: .25rem .5rem; font-size: .82rem; }
+</style>
+{% endblock %}

@@ -556,6 +556,31 @@
 {% endif %}
 
 {% if feature('labels') %}
+{% if registry_row.records %}
+<div class="card" id="directory">
+  <h2 style="display:flex;align-items:center;gap:.6rem;">{{ icon('computer') }}Directory
+    {% for r in registry_row.records if r.source == 'ad' %}<span class="badge {{ 'badge-green' if r.enabled != false else 'badge-yellow' }}" style="font-size:.7rem;">{{ r.join_label or r.source_label }}{{ '' if r.enabled != false else ', disabled' }}</span>{% endfor %}
+  </h2>
+  <table>
+    {% for r in registry_row.records|sort(attribute='source') %}
+    <tr>
+      <td style="color:var(--muted);width:140px;vertical-align:top;">{{ r.source_label }}</td>
+      <td>
+        <code>{{ r.hostname or r.external_key }}</code>
+        {% if r.enabled == false %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}
+        {% if (r.raw or {}).get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD</span>{% endif %}
+        {% if r.os_name %}<div style="font-size:.8rem;">{{ r.os_name }} {{ r.os_version or '' }}</div>{% endif %}
+        {% if r.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ r.directory_path|short_dn }}</div>{% endif %}
+        <div style="font-size:.75rem;color:var(--muted);">
+          {% if r.last_seen_at %}Last login {{ r.last_seen_at|ago }}{% else %}No login recorded{% endif %}{% if r.last_synced_at %} · synced {{ r.last_synced_at|ago }}{% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>{{ icon('print') }}Print Label</h2>
   <p style="color:var(--muted);font-size:.78rem;margin-bottom:1rem;">

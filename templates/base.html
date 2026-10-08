@@ -440,6 +440,7 @@
             <a href="/admin/bulk_assign">Bulk Assign</a>
             {% if feature('labels') %}<a href="/admin/bulk_print">Print Labels</a>{% endif %}
             <a href="/admin/collection">Collection (Who Has What)</a>
+            {% if feature('active_directory') %}<a href="/admin/directory/computers">Computers in AD</a>{% endif %}
             <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
             <a href="/asset_history">Asset History</a>
             {% if can('checkinout') and feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
@@ -475,6 +476,7 @@
         <a href="/admin/people/import">Import People CSV</a>
         <a href="/admin/people/graduate">Graduate Students</a>
         <a href="/admin/accounts/review">Accounts to Review {% if nav_accounts_review_count %}<span class="nav-tab-badge">{{ nav_accounts_review_count }}</span>{% endif %}</a>
+        {% if feature('active_directory') %}<a href="/admin/directory/people">Disabled in AD</a>{% endif %}
       {% elif active_section == 'loaners' %}
         {% if can('loaner_checkinout') %}<a href="/loaner_checkinout">Check In / Out</a>{% endif %}
         {% if can('loaners') %}<a href="/admin/loaners">Loaner Pool</a>{% endif %}
@@ -503,9 +505,9 @@
         <a href="/admin/emails">Email</a>
         <a href="/admin/custom_fields">Custom Fields</a>
         <a href="/admin/features">Features</a>
-        {% if feature_on('google') or feature_on('kace') %}
+        {% if feature_on('google') or feature_on('kace') or feature_on('active_directory') %}
         <div class="row-menu nav-dropdown">
-          <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
+          <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled or ad_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
           <div class="row-menu-items">
             <a href="/admin/sync_schedule">{{ icon('schedule') }}Scheduled Syncs</a>
             {% if feature_on('google') %}
@@ -528,6 +530,12 @@
             {% else %}
             <a href="/admin/kace_setup">Set Up KACE Sync</a>
             {% endif %}
+            {% endif %}
+            {% if feature_on('active_directory') %}
+            <div class="nav-dropdown-divider"></div>
+            <div class="nav-dropdown-label">Active Directory {% if ad_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
+            <a href="/admin/directory">{{ 'Setup / Status' if ad_sync_enabled else 'Set Up Active Directory' }}</a>
+            {% if ad_sync_enabled %}<a href="/admin/directory/computers">Computers in AD</a>{% endif %}
             {% endif %}
           </div>
         </div>

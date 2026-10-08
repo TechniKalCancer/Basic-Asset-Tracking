@@ -317,7 +317,7 @@ class Asset(db.Model):
 ASSET_STATUSES = ['available', 'assigned', 'repair', 'lost', 'retired']
 
 
-DEVICE_TYPES = ['chromebook', 'laptop', 'ipad', 'charger', 'hotspot', 'other']
+DEVICE_TYPES = ['chromebook', 'laptop', 'desktop', 'ipad', 'charger', 'hotspot', 'other']
 
 
 class Person(db.Model):
@@ -834,7 +834,7 @@ class PersonIdentity(db.Model):
     directory_path = db.Column(db.String(512), nullable=True)   # Google org unit, AD distinguished name, Entra department
     enabled        = db.Column(db.Boolean, nullable=True)
     suggested_person_id = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
-    review_status  = db.Column(db.String(20), nullable=True)    # None | 'ignored'
+    review_status  = db.Column(db.String(20), nullable=True)    # None | 'ignored' | 'inactive' (disabled in its source and nobody's — kept off the review list)
     raw            = db.Column(db.JSON, nullable=True)          # extra attributes from the source, for display only
     last_synced_at = db.Column(db.DateTime, nullable=True)
     created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -884,7 +884,7 @@ class DeviceRecord(db.Model):
     os_version     = db.Column(db.String(120), nullable=True)
     directory_path = db.Column(db.String(512), nullable=True)
     enabled        = db.Column(db.Boolean, nullable=True)
-    review_status  = db.Column(db.String(20), nullable=True)    # None | 'ignored'
+    review_status  = db.Column(db.String(20), nullable=True)    # None | 'ignored' (not a FoxDesk device; never auto-linked)
     raw            = db.Column(db.JSON, nullable=True)
     last_seen_at   = db.Column(db.DateTime, nullable=True)      # the device's own last logon/check-in in that system
     last_synced_at = db.Column(db.DateTime, nullable=True)
@@ -897,6 +897,38 @@ class DeviceRecord(db.Model):
     @property
     def source_label(self):
         return DEVICE_RECORD_SOURCES.get(self.source, self.source)
+
+    @property
+    def join_label(self):
+        return JOIN_TYPES.get(self.join_type, self.join_type)
+
+
+class DirectorySettings(db.Model):
+    """
+    What an admin chose for a directory sync (one row per source; only 'ad'
+    today). Connection details and the password live in the environment
+    (AD_*); this holds the in-app choices and the last run.
+
+    user_containers / computer_containers are container DNs (lowercase).
+    Only objects directly inside a chosen container sync — sub-OUs are
+    chosen on their own — which is what makes "U_Teachers but not
+    U_Teachers/Disabled" possible. None means never chosen (the first sync
+    waits for an admin to pick). trusted_certs is {host: sha256 hex} for DCs
+    with a self-signed certificate, added after the admin compares the
+    thumbprint with the one shown on the DC. tree caches the container list
+    with counts so the picker doesn't query AD on every page load.
+    """
+    __tablename__ = 'directory_settings'
+    id                  = db.Column(db.Integer, primary_key=True)
+    source              = db.Column(db.String(20), nullable=False, unique=True)
+    user_containers     = db.Column(db.JSON, nullable=True)
+    computer_containers = db.Column(db.JSON, nullable=True)
+    trusted_certs       = db.Column(db.JSON, nullable=True)
+    tree                = db.Column(db.JSON, nullable=True)
+    tree_updated_at     = db.Column(db.DateTime, nullable=True)
+    last_sync_at        = db.Column(db.DateTime, nullable=True)
+    last_sync_summary   = db.Column(db.JSON, nullable=True)
+    last_error          = db.Column(db.Text, nullable=True)
 
 
 class AutomationRule(db.Model):

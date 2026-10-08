@@ -14,3 +14,7 @@ google-auth-httplib2
 
 # KACE SMA sync
 requests
+
+# Active Directory sync (read-only LDAPS)
+ldap3==2.9.1
+cryptography

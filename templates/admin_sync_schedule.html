@@ -9,6 +9,11 @@
   <span class="badge {{ 'badge-green' if kace_sync_enabled else 'badge-yellow' }}">
     KACE: {{ 'Configured' if kace_sync_enabled else 'Not Configured' }}
   </span>
+  {% if feature_on('active_directory') %}
+  <span class="badge {{ 'badge-green' if ad_sync_enabled else 'badge-yellow' }}">
+    AD: {{ 'Configured' if ad_sync_enabled else 'Not Configured' }}
+  </span>
+  {% endif %}
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/google_field_mapping" class="btn btn-ghost">{{ icon('integration') }}Google Field Mapping</a>
   <a href="/admin/kace_field_mapping" class="btn btn-ghost">{{ icon('computer') }}KACE Field Mapping</a>
@@ -16,7 +21,7 @@
 </div>
 
 <p style="color:var(--muted);font-size:.85rem;margin-bottom:1.5rem;">
-  Runs People, Device, and/or KACE syncs automatically on a timer, instead of only when someone clicks
+  Runs People, Device, KACE and/or Active Directory syncs automatically on a timer, instead of only when someone clicks
   "Run Sync Now" on <a href="/admin/google_field_mapping">Google Field Mapping</a> or
   <a href="/admin/kace_field_mapping">KACE Field Mapping</a>. Uses whatever mappings are already
   configured there — this page only controls when each one runs.
@@ -26,10 +31,15 @@
   {% if not kace_sync_enabled %}
   <br><strong style="color:var(--warning);">KACE Sync isn't configured yet</strong> — its schedule saves, but won't run until it is. See <a href="/admin/kace_setup">KACE Setup</a>.
   {% endif %}
+  {% if feature_on('active_directory') and not ad_sync_enabled %}
+  <br><strong style="color:var(--warning);">Active Directory isn't configured yet</strong> — its schedule saves, but won't run until it is. See <a href="/admin/directory">Active Directory</a>.
+  {% endif %}
 </p>
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(420px, 1fr));gap:1.5rem;">
-  {% for label, entity, schedule in [('People Sync', 'person', person_schedule), ('Device Sync', 'device', device_schedule), ('KACE Sync', 'kace', kace_schedule)] %}
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(min(420px, 100%), 1fr));gap:1.5rem;">
+  {% set syncs = [('People Sync', 'person', person_schedule), ('Device Sync', 'device', device_schedule), ('KACE Sync', 'kace', kace_schedule)] %}
+  {% if feature_on('active_directory') %}{% set syncs = syncs + [('Active Directory Sync', 'ad', ad_schedule)] %}{% endif %}
+  {% for label, entity, schedule in syncs %}
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:.6rem;">
       {{ label }}

@@ -19,10 +19,10 @@ district only sees what it uses.
       sync events, warranty) add triggers and actions to it instead of building their own.
 
 ## Phase 2 — Directories
-- [ ] Active Directory (LDAPS): users → identities on existing people; computers → device records
-- [ ] Entra ID (Microsoft Graph): users + devices
-- [ ] Intune (Graph managed devices) and Jamf Pro (API)
-- [ ] Join-status view: AD-joined / Entra-joined / hybrid / Workgroup (joined to nothing)
+- [x] Active Directory (LDAPS): users → identities on existing people; computers → device records
+- [ ] Entra ID (Microsoft Graph): users + devices (skipped for Fox Creek for now)
+- [ ] Intune (Graph managed devices) and Jamf Pro (API) (skipped for Fox Creek for now)
+- [x] Join-status view: AD-joined / Workgroup (Entra-joined / hybrid come with Entra)
 
 ## Phase 3 — PowerSchool roster sync
 - [ ] OneRoster 1.1 CSV + API from PowerSchool; match students by student ID, never by name

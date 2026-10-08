@@ -14,14 +14,14 @@ be turned off, which hides it everywhere at once:
 - templates use `feature('key')` for the few places a permission check
   doesn't cover (dashboard cards, device-page sections, photo inputs).
 
-An integration (Google, KACE) also needs its credentials in the
+An integration (Google, KACE, Active Directory) also needs its credentials in the
 environment; its switch lets a district hide it even when configured.
 """
 from collections import OrderedDict
 
 from flask import g, has_request_context, render_template, request, session
 
-from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db
+from foxdesk.core import AD_SYNC_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db
 from foxdesk.models import FeatureToggle
 
 FEATURES = OrderedDict([
@@ -63,6 +63,9 @@ FEATURES = OrderedDict([
                     desc='Sync Chromebooks and people from Google Admin, push asset tags and org units back.')),
     ('kace', dict(group='Integrations', label='KACE SMA', configured=lambda: KACE_SYNC_ENABLED,
                   desc='Sync Windows and Mac inventory from Quest KACE.')),
+    ('active_directory', dict(group='Integrations', label='Active Directory', configured=lambda: AD_SYNC_ENABLED,
+                              desc='Attach AD accounts to the people you already have and AD computers to your '
+                                   'devices, and see which computers are domain-joined. Read-only.')),
 ])
 FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Automation', 'Integrations']
 
@@ -97,6 +100,7 @@ MODULE_FEATURES = {
     'foxdesk.views.tickets': 'tickets',
     'foxdesk.views.attachments': 'attachments',
     'foxdesk.views.help': 'help',
+    'foxdesk.views.directory': 'active_directory',
     'foxdesk.views.rules': 'automations',
 }
 

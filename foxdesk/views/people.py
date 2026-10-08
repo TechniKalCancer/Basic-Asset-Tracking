@@ -7,7 +7,9 @@ from flask import flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.automation.engine import emit
-from foxdesk.models import AssignmentHistory, CustomField, Incident, LoanerCheckout, Person, PersonIdentity, Site, Ticket
+from foxdesk.models import (
+    IDENTITY_SOURCES, AssignmentHistory, CustomField, Incident, LoanerCheckout, Person, PersonIdentity, Site, Ticket,
+)
 from foxdesk.services.util import _parse_bool_csv
 from foxdesk.services.identities import accounts_to_review_query, add_alias, link_account, unlink_account
 from foxdesk.services.auth import (
@@ -270,9 +272,15 @@ def admin_accounts_review():
     show_ignored = request.args.get('ignored') == '1'
     query = (PersonIdentity.query.filter(PersonIdentity.person_id.is_(None), PersonIdentity.review_status == 'ignored')
              if show_ignored else accounts_to_review_query())
+    by_source = dict(query.with_entities(PersonIdentity.source, db.func.count(PersonIdentity.id))
+                     .group_by(PersonIdentity.source).all())
+    source = request.args.get('source')
+    if source in by_source:
+        query = query.filter(PersonIdentity.source == source)
     accounts = query.order_by(PersonIdentity.source, PersonIdentity.display_name, PersonIdentity.email).limit(500).all()
     return render_template('admin_accounts_review.html', accounts=accounts, show_ignored=show_ignored,
-                           pending_count=accounts_to_review_query().count(),
+                           pending_count=accounts_to_review_query().count(), by_source=by_source,
+                           source=source if source in by_source else None, source_labels=IDENTITY_SOURCES,
                            sites=_sites_for_actor(_current_site_ids()))
 
 

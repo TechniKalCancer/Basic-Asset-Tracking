@@ -15,6 +15,21 @@
   it (for example a pre-provisioned account for a student who never enrolled).
 </p>
 
+{% if by_source|length > 1 or source %}
+<div class="review-sources" role="navigation" aria-label="Filter by source">
+  <a href="?{{ 'ignored=1' if show_ignored }}" class="{{ 'active' if not source }}">All <span class="badge badge-blue">{{ by_source.values()|sum }}</span></a>
+  {% for key, n in by_source|dictsort %}
+  <a href="?source={{ key }}{{ '&ignored=1' if show_ignored }}" class="{{ 'active' if source == key }}">{{ source_labels.get(key, key) }} <span class="badge badge-blue">{{ n }}</span></a>
+  {% endfor %}
+</div>
+<style>
+  .review-sources { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .8rem; }
+  .review-sources a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                      text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+  .review-sources a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+</style>
+{% endif %}
+
 <div class="card" style="padding:0;">
   {% if accounts %}
   <div style="overflow-x:auto;">

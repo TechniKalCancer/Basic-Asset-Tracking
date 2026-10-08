@@ -618,6 +618,46 @@ problem; it's logged as an ordinary incident (no fee fields exposed — assessin
 office decision made later from the device's assign page) snapshotting the *reporter's own*
 identity, the same self-service pattern the Loaner Checkout page already uses.
 
+## Active Directory Sync
+
+Settings → Active Directory (`/admin/directory`, super admins) reads users and computers from AD over
+LDAPS and attaches them to what FoxDesk already has. **Read-only**: the account is a plain Domain Users
+member and nothing is written to AD. **It never creates people or devices.**
+
+- **People:** each AD account becomes another account on the person's profile, matched by email (the
+  AD `mail`, then the UPN, then any `smtp:` proxy address, against primary emails and linked/alias
+  emails), or by `employeeID` = student/staff ID. An exact-name match is only suggested, on Accounts to
+  Review. A disabled account that matches nobody stays off the review list. A blank graduation year is
+  filled in from a graduation-year OU (`OU=2029`); nothing else on the person is changed.
+- **Disabled in AD** (People → Disabled in AD): people active in FoxDesk whose AD account is disabled or
+  gone, with how many devices they still hold. Accounts keep updating after they move out of the synced
+  OUs (e.g. into a Disabled OU), which is how this list fills.
+- **Computers** (Devices → Tools → Computers in AD): AD computers matched to devices by serial number, or
+  by computer name when PCs are named by serial / service tag. Tabs: joined to AD, in AD but not in
+  FoxDesk (link to an asset tag or ignore), no AD login in 90 days, and **Not joined (Workgroup)**:
+  FoxDesk devices typed Laptop or Desktop that aren't in AD at all. Each device page shows its directory
+  record (OU, OS, last domain login).
+- **What to sync:** pick containers from the OU list (with people/computer counts). Only objects directly
+  in a checked container sync, so `U_Teachers` can be included while `U_Teachers/Disabled` isn't.
+- **Certificates:** the password is only sent to a DC whose certificate is trusted: either it chains to
+  `AD_CA_FILE` / a system CA, or you trust that exact certificate on the page after comparing its
+  thumbprint (shown the way Windows shows it) with the one on the DC. A renewed certificate has to be
+  trusted again.
+- Sync now from the page, or on a timer from Scheduled Syncs. A sync where AD returns no users changes
+  nothing.
+
+Setup: a service account in Domain Users only, an LDAPS certificate on each DC (self-signed is fine),
+then in `.env`:
+
+```bash
+AD_SERVERS=ad1.yourdistrict.org,ad2.yourdistrict.org
+AD_BASE_DN=DC=yourdistrict,DC=org
+AD_BIND_USER=svc-foxdesk@yourdistrict.org
+AD_BIND_PASSWORD=lettersanddigitsonly
+```
+
+Keep the password to letters and digits: Docker Compose reads `$` in `.env` as a variable.
+
 ## Automations
 
 Settings → Automations (`/admin/rules`, super admins) is a small rule builder: **when** something

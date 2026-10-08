@@ -89,7 +89,13 @@
         <td>
           <code>{{ ident.email or ident.username or ident.external_key }}</code>
           {% if ident.enabled == false %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}
-          {% if ident.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ ident.directory_path }}</div>{% endif %}
+          {% if ident.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ ident.directory_path|short_dn if ident.source == 'ad' else ident.directory_path }}</div>{% endif %}
+          {% if ident.source == 'ad' and ident.raw %}
+          {% set details = [ident.raw.get('title'), ident.raw.get('department'), ident.raw.get('office')]|select|list %}
+          {% if details %}<div style="font-size:.75rem;color:var(--muted);">{{ details|join(' · ') }}</div>{% endif %}
+          {% if ident.raw.get('last_logon') %}<div style="font-size:.72rem;color:var(--muted);">last AD login {{ ident.raw.last_logon }}</div>{% endif %}
+          {% if ident.raw.get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD</span>{% endif %}
+          {% endif %}
           {% if ident.last_synced_at %}<div style="font-size:.72rem;color:var(--muted);">synced {{ ident.last_synced_at|ago }}</div>{% endif %}
         </td>
         <td style="text-align:right;">

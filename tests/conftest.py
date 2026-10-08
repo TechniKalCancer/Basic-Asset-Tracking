@@ -33,6 +33,7 @@ os.environ.update({
     'SMTP_FROM_EMAIL': '', 'SMTP_USERNAME': '', 'SMTP_PASSWORD': '',
     'GOOGLE_SERVICE_ACCOUNT_FILE': '', 'GOOGLE_ADMIN_IMPERSONATE_EMAIL': '',
     'KACE_URL': '', 'KACE_USERNAME': '', 'KACE_PASSWORD': '',
+    'AD_SERVERS': '', 'AD_BASE_DN': '', 'AD_BIND_USER': '', 'AD_BIND_PASSWORD': '', 'AD_CA_FILE': '',
 })
 sys.path.insert(0, ROOT)
 

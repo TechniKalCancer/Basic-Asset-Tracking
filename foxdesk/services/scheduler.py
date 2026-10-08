@@ -2,12 +2,13 @@
 import threading
 import time
 from datetime import datetime
-from foxdesk.core import EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db, logger
+from foxdesk.core import AD_SYNC_ENABLED, EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db, logger
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import SyncSchedule
 from foxdesk.services.auth import _log_activity
 from foxdesk.integrations.google import _run_google_device_sync, _run_google_people_sync
 from foxdesk.integrations.kace import _run_kace_device_sync
+from foxdesk.integrations.active_directory import describe_summary, run_ad_sync
 from foxdesk.services.assignments import _send_overdue_loaner_reminders
 
 
@@ -54,13 +55,16 @@ def _run_due_scheduled_syncs():
     reminder loop, just applied via a timestamp column instead of a
     per-row resend gate."""
     google_on, kace_on = feature_enabled('google'), feature_enabled('kace')  # configured AND switched on
-    if not google_on and not kace_on:
+    ad_on = feature_enabled('active_directory')
+    if not google_on and not kace_on and not ad_on:
         return
     now = datetime.utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
         if schedule.sync_type in ('person', 'device') and not google_on:
             continue
         if schedule.sync_type == 'kace' and not kace_on:
+            continue
+        if schedule.sync_type == 'ad' and not ad_on:
             continue
         if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
             continue
@@ -76,12 +80,15 @@ def _run_due_scheduled_syncs():
                 # HTTP request, so it can take as long as a full backfill needs.
                 matched, updated, unmatched, pushed, _truncated = _run_google_device_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {pushed} pushed, {unmatched} unmatched'
+            elif schedule.sync_type == 'ad':
+                schedule.last_run_summary = describe_summary(run_ad_sync())[:255]
             else:
                 matched, updated, unmatched, created = _run_kace_device_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
             _log_activity('scheduled_sync', f'Scheduled {schedule.sync_type} sync ran: {schedule.last_run_summary}')
         except Exception as e:
-            schedule.last_run_summary = f'Failed: {e}'
+            db.session.rollback()
+            schedule.last_run_summary = f'Failed: {e}'[:255]
             logger.error('Scheduled %s sync failed: %s', schedule.sync_type, e)
         db.session.commit()
 
@@ -100,9 +107,9 @@ def _scheduled_sync_loop():
             logger.error('Scheduled sync background loop error: %s', e)
 
 
-# Either integration needs the loop — this used to start only for Google,
+# Any integration needs the loop — this used to start only for Google,
 # so a KACE-only install never ran its scheduled syncs.
-if GOOGLE_SYNC_ENABLED or KACE_SYNC_ENABLED:
+if GOOGLE_SYNC_ENABLED or KACE_SYNC_ENABLED or AD_SYNC_ENABLED:
     threading.Thread(target=_scheduled_sync_loop, daemon=True).start()
 
 

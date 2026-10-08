@@ -13,6 +13,7 @@ from foxdesk.core import (
     db,
     logger,
 )
+from foxdesk.services.identities import place_account
 from foxdesk.models import Asset, AssetRegistry, GoogleFieldMapping, GoogleOrgUnit, Person
 from foxdesk.services.util import _get_nested_value
 from foxdesk.services.auth import _log_activity
@@ -435,13 +436,18 @@ def _run_google_people_sync():
     single-person on-demand version of the same cache). An unmatched
     account is auto-created (see _auto_create_person_from_google) when it
     qualifies; otherwise it's counted as unmatched exactly as before.
-    Returns (matched, updated, unmatched_google_accounts, created)."""
+
+    Matching goes through services/identities.place_account: each Google
+    account is recorded as a 'google' PersonIdentity and placed on an
+    existing person by a previous link, then email (primary or any linked
+    account/alias), then student/staff ID from Google's externalIds. An
+    account whose only match is someone's exact name is held on Accounts to
+    Review instead of auto-created — that's what produced duplicate student
+    profiles when a student was issued a new Google account.
+    Returns (matched, updated, unmatched, created, held_for_review)."""
     mappings = GoogleFieldMapping.query.filter_by(entity_type='person').all()
-    has_site_rules = GoogleOrgUnit.query.filter(GoogleOrgUnit.site_id.isnot(None)).first() is not None
-    if not mappings and not has_site_rules:
-        return 0, 0, 0, 0
     service = _google_directory_service([GOOGLE_SCOPE_USER_READONLY])
-    matched = updated = unmatched = created = 0
+    matched = updated = unmatched = created = held = 0
     page_token = None
     while True:
         response = service.users().list(
@@ -450,14 +456,30 @@ def _run_google_people_sync():
         for u in response.get('users', []):
             email = u.get('primaryEmail')
             org_unit_path = u.get('orgUnitPath')
-            person = Person.query.filter_by(email=email).first() if email else None
-            if not person:
+            name = u.get('name') or {}
+            role = _classify_org_unit(org_unit_path)
+            ident, person, how = place_account(
+                'google', u.get('id') or email, email=email, student_id=_google_external_id(u),
+                first_name=name.get('givenName'), last_name=name.get('familyName'),
+                role=role if role in ('staff', 'student') else None,
+                username=email, display_name=name.get('fullName'), directory_path=org_unit_path,
+                enabled=not u.get('suspended'),
+                raw={'first_name': name.get('givenName'), 'last_name': name.get('familyName'),
+                     'role': role if role in ('staff', 'student') else None})
+            if how == 'review':
+                held += 1
+                continue
+            if how == 'ignored':
+                unmatched += 1
+                continue
+            if how == 'unmatched':
                 person = _auto_create_person_from_google(u, org_unit_path)
-                if person:
-                    created += 1
-                else:
+                if not person:
                     unmatched += 1
                     continue
+                db.session.flush()
+                ident.person_id = person.id
+                created += 1
             matched += 1
             row_changed = _apply_field_mappings(u, person, mappings)
             site_id = _org_unit_site_id(org_unit_path)
@@ -474,7 +496,17 @@ def _run_google_people_sync():
         if not page_token:
             break
     db.session.commit()
-    return matched, updated, unmatched, created
+    return matched, updated, unmatched, created, held
+
+
+def _google_external_id(u):
+    """The student/staff ID a district stored on the Google account, from
+    its externalIds (type organization, custom or login_id), or None. Only
+    ever used for an exact match against a person's ID number."""
+    for ext in u.get('externalIds') or []:
+        if ext.get('type') in ('organization', 'custom', 'login_id') and ext.get('value'):
+            return str(ext['value']).strip()
+    return None
 
 
 def _run_google_device_sync(deadline=None):

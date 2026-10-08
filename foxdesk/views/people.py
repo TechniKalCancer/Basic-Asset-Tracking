@@ -6,8 +6,9 @@ from decimal import Decimal
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
-from foxdesk.models import AssignmentHistory, CustomField, Incident, LoanerCheckout, Person, Site, Ticket
+from foxdesk.models import AssignmentHistory, CustomField, Incident, LoanerCheckout, Person, PersonIdentity, Site, Ticket
 from foxdesk.services.util import _parse_bool_csv
+from foxdesk.services.identities import accounts_to_review_query, add_alias, link_account, unlink_account
 from foxdesk.services.auth import (
     _current_site_ids,
     _log_activity,
@@ -230,6 +231,102 @@ def admin_person_edit(person_id):
     return render_template('admin_person_form.html', person=person, form=None,
                            sites=_sites_for_actor(site_ids), custom_field_labels=custom_field_labels,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED)
+
+
+@app.route('/admin/people/<int:person_id>/accounts', methods=['POST'])
+@require_permission('people')
+def admin_person_accounts(person_id):
+    """Add another email to a person, or detach one of their accounts.
+    Detaching a synced account keeps it detached (see unlink_account)."""
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+    action = request.form.get('action')
+    try:
+        if action == 'add':
+            ident = add_alias(person, request.form.get('email', ''))
+            _log_activity('person_account', f'Added {ident.email} as another email for {person.full_name}.',
+                           site_id=person.site_id)
+            flash(f'Added {ident.email}.', 'success')
+        elif action == 'remove':
+            ident = PersonIdentity.query.filter_by(id=request.form.get('identity_id', type=int),
+                                                   person_id=person.id).first_or_404()
+            label = f'{ident.source_label} account {ident.email or ident.username or ident.external_key}'
+            unlink_account(ident)
+            _log_activity('person_account', f'Removed {label} from {person.full_name}.', site_id=person.site_id)
+            flash(f'Removed {label}.', 'success')
+        db.session.commit()
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+    return redirect(url_for('admin_person_edit', person_id=person.id) + '#accounts')
+
+
+@app.route('/admin/accounts/review')
+@require_permission('people')
+def admin_accounts_review():
+    """Accounts a sync couldn't place on a person with certainty — usually
+    an exact-name match (suggested, never auto-linked) or a brand-new
+    account. Link it, create a person from it, or ignore it."""
+    show_ignored = request.args.get('ignored') == '1'
+    query = (PersonIdentity.query.filter(PersonIdentity.person_id.is_(None), PersonIdentity.review_status == 'ignored')
+             if show_ignored else accounts_to_review_query())
+    accounts = query.order_by(PersonIdentity.source, PersonIdentity.display_name, PersonIdentity.email).limit(500).all()
+    return render_template('admin_accounts_review.html', accounts=accounts, show_ignored=show_ignored,
+                           pending_count=accounts_to_review_query().count(),
+                           sites=_sites_for_actor(_current_site_ids()))
+
+
+@app.route('/admin/accounts/<int:identity_id>/review', methods=['POST'])
+@require_permission('people')
+def admin_account_review_action(identity_id):
+    ident = PersonIdentity.query.filter(PersonIdentity.id == identity_id,
+                                        PersonIdentity.person_id.is_(None)).first_or_404()
+    action = request.form.get('action')
+    site_ids = _current_site_ids()
+    who = ident.email or ident.username or ident.external_key
+    try:
+        if action == 'link':
+            person = _scope_people(Person.query, site_ids).filter_by(
+                id=request.form.get('person_id', type=int)).first()
+            if not person:
+                flash('Pick a person from the search list first.', 'error')
+                return redirect(url_for('admin_accounts_review'))
+            link_account(ident, person)
+            _log_activity('person_account', f'Linked {ident.source_label} account {who} to {person.full_name}.',
+                           site_id=person.site_id)
+            flash(f'Linked {who} to {person.full_name}.', 'success')
+        elif action == 'create':
+            raw = ident.raw or {}
+            first = (raw.get('first_name') or (ident.display_name or '').split(' ')[0]).strip()
+            last = (raw.get('last_name') or ' '.join((ident.display_name or '').split(' ')[1:])).strip()
+            site_id = request.form.get('site_id', type=int)
+            role = request.form.get('role') if request.form.get('role') in ('staff', 'student') else raw.get('role')
+            if not first or not last or not ident.email:
+                flash('This account has no name or email to create a person from — link it instead.', 'error')
+                return redirect(url_for('admin_accounts_review'))
+            if site_ids is not None and site_id not in site_ids:
+                flash('Choose one of your own sites.', 'error')
+                return redirect(url_for('admin_accounts_review'))
+            person = Person(first_name=first, last_name=last, email=ident.email, role=role or 'student',
+                            site_id=site_id)
+            db.session.add(person)
+            db.session.flush()
+            link_account(ident, person)
+            _log_activity('person_add', f'Added {person.full_name} from {ident.source_label} account {who}.',
+                           site_id=site_id)
+            flash(f'Created {person.full_name}.', 'success')
+        elif action == 'ignore':
+            ident.review_status = 'ignored'
+            ident.suggested_person_id = None
+            _log_activity('person_account', f'Ignored {ident.source_label} account {who} (not anyone in FoxDesk).')
+            flash(f'Ignored {who}. It won\'t come back on this list.', 'success')
+        elif action == 'restore':
+            ident.review_status = None
+            flash(f'{who} is back on the review list.', 'success')
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not save: {e}', 'error')
+    return redirect(request.referrer or url_for('admin_accounts_review'))
 
 
 @app.route('/admin/people/<int:person_id>/google_sync', methods=['POST'])

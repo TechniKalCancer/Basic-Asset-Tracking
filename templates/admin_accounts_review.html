@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}Accounts to Review{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('person') }}Accounts to Review</h1>
+  <span class="badge {{ 'badge-yellow' if pending_count else 'badge-green' }}">{{ pending_count }} waiting</span>
+  <span class="spacer" style="flex:1;"></span>
+  {% if show_ignored %}<a href="/admin/accounts/review" class="btn btn-ghost">Back to waiting</a>
+  {% else %}<a href="/admin/accounts/review?ignored=1" class="btn btn-ghost">Show ignored</a>{% endif %}
+</div>
+<p style="color:var(--muted);font-size:.9rem;margin-bottom:1.2rem;max-width:75ch;">
+  Accounts from Google, Active Directory, Entra or PowerSchool that a sync couldn't place on a person with
+  certainty. Matching by email or ID number is automatic; matching by name isn't, because two students can share
+  a name. When a name matches, that person is suggested. Link the account to them, create a new person, or ignore
+  it (for example a pre-provisioned account for a student who never enrolled).
+</p>
+
+<div class="card" style="padding:0;">
+  {% if accounts %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Account</th><th>From</th><th>Suggested match</th><th></th></tr></thead>
+    <tbody>
+      {% for a in accounts %}
+      <tr>
+        <td>
+          <strong>{{ a.display_name or ((a.raw or {}).get('first_name', '') ~ ' ' ~ (a.raw or {}).get('last_name', '')) }}</strong>
+          <div style="font-size:.8rem;"><code>{{ a.email or a.username or a.external_key }}</code></div>
+          {% if a.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ a.directory_path }}</div>{% endif %}
+          {% if a.enabled == false %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled/suspended</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap;color:var(--muted);">{{ a.source_label }}</td>
+        <td>
+          {% if a.suggested_person %}
+            <a class="tag-link" href="/admin/people/{{ a.suggested_person.id }}/edit">{{ a.suggested_person.full_name }}</a>
+            <div style="font-size:.75rem;color:var(--muted);">{{ a.suggested_person.email }}{% if a.suggested_person.grad_year %} · {{ a.suggested_person.grad_year }}{% endif %}</div>
+          {% else %}<span style="color:var(--muted);">—</span>{% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if show_ignored %}
+          <form method="POST" action="/admin/accounts/{{ a.id }}/review" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" name="action" value="restore" class="btn btn-ghost" style="padding:.25rem .6rem;font-size:.8rem;">Put back</button>
+          </form>
+          {% else %}
+          {% if a.suggested_person %}
+          <form method="POST" action="/admin/accounts/{{ a.id }}/review" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="person_id" value="{{ a.suggested_person.id }}">
+            <button type="submit" name="action" value="link" class="btn btn-primary" style="padding:.25rem .6rem;font-size:.8rem;">Link to {{ a.suggested_person.first_name }}</button>
+          </form>
+          {% endif %}
+          <div class="row-menu">
+            <button type="button">⋮</button>
+            <div class="row-menu-items" style="min-width:290px;">
+              <form method="POST" action="/admin/accounts/{{ a.id }}/review" style="padding:.4rem;position:relative;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="link">
+                <label style="display:block;font-size:.78rem;color:var(--muted);margin-bottom:.3rem;">Link to someone else</label>
+                <input type="hidden" name="person_id" id="pid{{ a.id }}">
+                <input type="text" id="ps{{ a.id }}" class="person-pick" data-id="{{ a.id }}" autocomplete="off" placeholder="Type a name or email…" style="margin-bottom:.5rem;">
+                <div id="pr{{ a.id }}" style="display:none;position:absolute;left:.4rem;right:.4rem;z-index:10;background:var(--surface2);border:1px solid var(--border);border-radius:7px;max-height:200px;overflow-y:auto;"></div>
+                <button type="submit" class="btn btn-ghost" style="width:100%;">Link</button>
+              </form>
+              <form method="POST" action="/admin/accounts/{{ a.id }}/review" style="padding:.4rem;border-top:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="create">
+                <label style="display:block;font-size:.78rem;color:var(--muted);margin-bottom:.3rem;">Create a new person</label>
+                <div style="display:flex;gap:.4rem;margin-bottom:.5rem;">
+                  <select name="role" style="flex:1;">
+                    <option value="student" {{ 'selected' if (a.raw or {}).get('role') != 'staff' }}>Student</option>
+                    <option value="staff" {{ 'selected' if (a.raw or {}).get('role') == 'staff' }}>Staff</option>
+                  </select>
+                  <select name="site_id" style="flex:1;">
+                    {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-ghost" style="width:100%;">{{ icon('add') }}Create person</button>
+              </form>
+              <form method="POST" action="/admin/accounts/{{ a.id }}/review" style="padding:.4rem;border-top:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" name="action" value="ignore" class="btn btn-ghost" style="width:100%;">Ignore, it isn't anyone</button>
+              </form>
+            </div>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);text-align:center;padding:2.5rem 1rem;">
+    {% if show_ignored %}No ignored accounts.{% else %}Nothing waiting. Every synced account is linked to a person.{% endif %}
+  </p>
+  {% endif %}
+</div>
+<script src="/static/js/person_search.js"></script>
+<script>
+  // One picker per row, wired only when its menu is first opened.
+  document.querySelectorAll('.person-pick').forEach(function (input) {
+    input.addEventListener('focus', function once() {
+      input.removeEventListener('focus', once);
+      var id = input.dataset.id;
+      initPersonSearch({ inputId: 'ps' + id, hiddenId: 'pid' + id, resultsId: 'pr' + id });
+    });
+  });
+</script>
+{% endblock %}

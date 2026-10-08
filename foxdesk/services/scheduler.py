@@ -68,8 +68,9 @@ def _run_due_scheduled_syncs():
         db.session.commit()
         try:
             if schedule.sync_type == 'person':
-                matched, updated, unmatched, created = _run_google_people_sync()
-                schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'
+                matched, updated, unmatched, created, held = _run_google_people_sync()
+                schedule.last_run_summary = (f'{matched} matched, {updated} updated, {created} auto-created, '
+                                             f'{held} held for review, {unmatched} unmatched')
             elif schedule.sync_type == 'device':
                 # No deadline — this runs in the background thread, not an
                 # HTTP request, so it can take as long as a full backfill needs.

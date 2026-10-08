@@ -474,6 +474,7 @@
         <a href="/admin/people/new">Add Person</a>
         <a href="/admin/people/import">Import People CSV</a>
         <a href="/admin/people/graduate">Graduate Students</a>
+        <a href="/admin/accounts/review">Accounts to Review {% if nav_accounts_review_count %}<span class="nav-tab-badge">{{ nav_accounts_review_count }}</span>{% endif %}</a>
       {% elif active_section == 'loaners' %}
         {% if can('loaner_checkinout') %}<a href="/loaner_checkinout">Check In / Out</a>{% endif %}
         {% if can('loaners') %}<a href="/admin/loaners">Loaner Pool</a>{% endif %}

@@ -5,6 +5,7 @@ from flask import request, session
 from markupsafe import Markup, escape
 from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
 from foxdesk.services.features import feature_enabled, feature_switch
+from foxdesk.services.identities import accounts_to_review_query
 from foxdesk.models import Asset, LANDING_PAGES, Site, Ticket
 from foxdesk.services.branding import _current_branding
 from foxdesk.services.auth import _current_site_ids, _current_user, _has_permission
@@ -35,6 +36,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/signin_mismatches', 'devices'),
     ('/admin/labels', 'devices'),
     ('/admin/people', 'people'),
+    ('/admin/accounts', 'people'),
     ('/loaner_checkinout', 'loaners'),
     ('/loaner_checkout', 'loaners'),
     ('/loaner_checkin', 'loaners'),
@@ -122,6 +124,7 @@ def inject_permission_helper():
     nav_overdue_count = 0
     nav_orphan_count = 0
     nav_open_tickets_count = 0
+    nav_accounts_review_count = 0
     all_sites = []
     active_site = None
     if session.get('admin_logged_in'):
@@ -132,6 +135,8 @@ def inject_permission_helper():
             all_sites = Site.query.order_by(Site.name).all()
             user = _current_user()
             active_site = user.default_site if user else None
+        if _has_permission('people'):
+            nav_accounts_review_count = accounts_to_review_query().count()
         if _has_permission('tickets'):
             nav_open_tickets_count = _scope_tickets(Ticket.query, _current_site_ids()) \
                 .filter(Ticket.status.in_(['open', 'in_progress'])).count()
@@ -142,6 +147,7 @@ def inject_permission_helper():
         'nav_overdue_count': nav_overdue_count,
         'nav_orphan_count': nav_orphan_count,
         'nav_open_tickets_count': nav_open_tickets_count,
+        'nav_accounts_review_count': nav_accounts_review_count,
         'all_sites': all_sites,
         'active_site': active_site,
         'branding': _current_branding(),

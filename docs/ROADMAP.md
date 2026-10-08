@@ -13,7 +13,7 @@ district only sees what it uses.
 - [x] Test suite (pytest, real migrations, fresh DB per test) + GitHub Actions
 - [x] Split `app.py` into the `foxdesk/` package (behavior and URLs unchanged)
 - [x] Module on/off switches (Settings → Features)
-- [ ] Identity model: person identities + device directory records; migrate existing data
+- [x] Identity model: person accounts + device records; Accounts to Review; Google people sync uses it (no more same-name duplicates)
 
 ## Phase 2 — Directories
 - [ ] Active Directory (LDAPS): users → identities on existing people; computers → device records

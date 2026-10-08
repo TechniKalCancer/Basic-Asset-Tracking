@@ -70,6 +70,49 @@
 </div>
 
 {% if person %}
+<div class="card" id="accounts" style="max-width:640px;">
+  <h2 style="font-size:1rem;margin-bottom:.3rem;">{{ icon('person') }}Accounts</h2>
+  <p style="color:var(--muted);font-size:.82rem;margin-bottom:.8rem;">
+    One profile, any number of accounts. Syncs from Google, Active Directory, Entra and PowerSchool attach
+    here instead of creating a second person. Add another email if this person has one FoxDesk should recognize.
+  </p>
+  <table>
+    <tbody>
+      <tr>
+        <td style="width:150px;color:var(--muted);">Primary email</td>
+        <td><code>{{ person.email }}</code></td>
+        <td></td>
+      </tr>
+      {% for ident in person.identities|sort(attribute='source') %}
+      <tr>
+        <td style="color:var(--muted);">{{ ident.source_label }}</td>
+        <td>
+          <code>{{ ident.email or ident.username or ident.external_key }}</code>
+          {% if ident.enabled == false %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}
+          {% if ident.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ ident.directory_path }}</div>{% endif %}
+          {% if ident.last_synced_at %}<div style="font-size:.72rem;color:var(--muted);">synced {{ ident.last_synced_at|ago }}</div>{% endif %}
+        </td>
+        <td style="text-align:right;">
+          <form method="POST" action="/admin/people/{{ person.id }}/accounts"
+                onsubmit="return confirm('{{ 'Remove this email?' if ident.source == 'alias' else 'Detach this account from ' ~ person.full_name ~ '? It will stay detached on future syncs.' }}');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="remove">
+            <input type="hidden" name="identity_id" value="{{ ident.id }}">
+            <button type="submit" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.78rem;">{{ 'Remove' if ident.source == 'alias' else 'Detach' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="POST" action="/admin/people/{{ person.id }}/accounts" style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.9rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="add">
+    <input type="email" name="email" placeholder="another email, e.g. old.account@school.org" required style="flex:1;min-width:220px;">
+    <button type="submit" class="btn btn-ghost">{{ icon('add') }}Add email</button>
+  </form>
+</div>
+
 <div class="card" style="max-width:480px;">
   <h2 style="display:flex;align-items:center;gap:.6rem;font-size:1rem;">
     {{ icon('integration') }}Google Workspace Info

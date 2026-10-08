@@ -337,11 +337,13 @@ def admin_google_sync_people():
         flash('Google Workspace sync isn\'t configured yet — see /admin/google_setup.', 'info')
         return redirect(url_for('admin_google_field_mapping', entity='person'))
     try:
-        matched, updated, unmatched, created = _run_google_people_sync()
+        matched, updated, unmatched, created, held = _run_google_people_sync()
         _log_activity('google_field_sync',
-                       f'Synced People from Google: {matched} matched, {updated} updated, {created} auto-created.')
+                       f'Synced People from Google: {matched} matched, {updated} updated, {created} auto-created, '
+                       f'{held} held for review.')
         db.session.commit()  # _run_google_people_sync() already committed its own changes; this just persists the log entry above, added after that commit
         flash(f'{matched} matched, {updated} updated, {created} auto-created. '
+              f'{held} account(s) only matched someone\'s name and are waiting on Accounts to Review. '
               f'{unmatched} Google account(s) had no matching Person and didn\'t qualify to auto-create '
               f'(suspended, or an unclassified org unit).',
               'success' if matched else 'info')

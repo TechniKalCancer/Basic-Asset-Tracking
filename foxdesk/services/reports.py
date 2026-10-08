@@ -6,6 +6,7 @@ from flask import request, url_for
 from foxdesk.core import db
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import (
+    PersonIdentity,
     Asset,
     AssetRegistry,
     AssignmentHistory,
@@ -342,6 +343,11 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
     tags = [r.asset_tag for r, _ in rows]
 
     people_by_email = {p.email.lower(): p for p in Person.query.all()}
+    # Every linked account/alias email counts as that person — a merged
+    # duplicate's old email or a second Google account isn't someone else.
+    for ident in PersonIdentity.query.filter(PersonIdentity.person_id.isnot(None),
+                                             PersonIdentity.email.isnot(None)):
+        people_by_email.setdefault(ident.email, ident.person)
     people_by_id = {p.id: p for p in people_by_email.values()}
 
     open_assignments = {h.asset_tag: h for h in AssignmentHistory.query.filter(

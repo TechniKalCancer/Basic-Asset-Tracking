@@ -1,7 +1,7 @@
 """Query helpers that narrow results to the current user's sites."""
 from datetime import datetime, timedelta
 from foxdesk.core import db
-from foxdesk.models import ActivityLog, Asset, AssetRegistry, DeviceModel, Person, Repair, Site, Ticket, User
+from foxdesk.models import PersonIdentity, ActivityLog, Asset, AssetRegistry, DeviceModel, Person, Repair, Site, Ticket, User
 
 
 def _scope_registry(query, site_ids):
@@ -56,6 +56,7 @@ def _person_search_filter(q):
             Person.email.ilike(like),
             Person.site.has(Site.name.ilike(like)),
             Person.external_id.ilike(like),
+            Person.identities.any(db.or_(PersonIdentity.email.ilike(like), PersonIdentity.username.ilike(like))),
         ))
     return db.and_(*conditions)
 

@@ -7305,6 +7305,14 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
         recent = asset.google_recent_users or [asset.google_recent_user.lower()]
         signin_email = recent[0]
         signer = people_by_email.get(signin_email)
+        # A duplicate profile merged into another (custom_fields.merged_into,
+        # see maintenance/2026-10-08_merge_duplicate_people.py) still shows
+        # up in older Google sign-ins — count those as the surviving record.
+        for _ in range(5):
+            merged_into = (signer.custom_fields or {}).get('merged_into') if signer else None
+            if not merged_into or merged_into not in people_by_id:
+                break
+            signer = people_by_id[merged_into]
 
         expected = []
         held_since = None

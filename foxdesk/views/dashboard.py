@@ -2,6 +2,7 @@
 import os
 from flask import render_template
 from foxdesk.core import EMAIL_ENABLED, GOOGLE_LOANER_AUTO_DISABLE_ENABLED, GOOGLE_SYNC_ENABLED, app, db
+from foxdesk.services.features import feature_enabled, feature_switch as feature_on
 from foxdesk.models import (
     ASSET_STATUSES,
     ActivityLog,
@@ -74,7 +75,7 @@ def admin_panel():
     # registry has ever been synced, and its last-known enabled/disabled
     # split. Cheap: three small count()s off the same base join.
     google_stats = None
-    if GOOGLE_SYNC_ENABLED and _has_permission('devices'):
+    if feature_enabled('google') and _has_permission('devices'):
         google_base = _scope_registry(AssetRegistry.query, site_ids) \
             .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
         google_stats = {
@@ -114,9 +115,11 @@ def admin_panel():
     device_schedule = None
     kace_schedule = None
     if site_ids is None:
-        person_schedule = _get_or_create_sync_schedule('person')
-        device_schedule = _get_or_create_sync_schedule('device')
-        kace_schedule = _get_or_create_sync_schedule('kace')
+        if feature_on('google'):
+            person_schedule = _get_or_create_sync_schedule('person')
+            device_schedule = _get_or_create_sync_schedule('device')
+        if feature_on('kace'):
+            kace_schedule = _get_or_create_sync_schedule('kace')
 
     # Orphans have no site to attribute, and a per-site breakdown only makes
     # sense district-wide — both super-admin-only, along with the onboarding
@@ -146,20 +149,21 @@ def admin_panel():
         )
 
     google_loaner_autodisable_active = (
-        GOOGLE_SYNC_ENABLED and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
+        feature_enabled('google') and feature_enabled('loaners') and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
         and Site.query.filter_by(google_loaner_autodisable_enabled=True).first() is not None
     )
     branding_settings = BrandingSettings.query.get(1)
     branding_configured = bool(branding_settings and (branding_settings.primary_color_raw or branding_settings.logo_filename))
 
     data_quality_errors = None
-    if _has_permission('devices'):
+    if _has_permission('devices') and feature_enabled('data_quality'):
         data_quality_errors = sum(c['count'] for c in _data_quality_checks(site_ids) if c['severity'] == 'error')
 
     # "Possible violators" widget — only once there's Google device data to
     # judge by, otherwise it would just be an empty card on every install.
     violators = None
-    if _has_permission('devices') and Asset.query.filter(Asset.google_last_activity.isnot(None)).first():
+    if (_has_permission('devices') and feature_enabled('signin_check')
+            and Asset.query.filter(Asset.google_last_activity.isnot(None)).first()):
         mismatches = _signin_mismatches(site_ids)
         violators = {
             'high': [m for m in mismatches if m['severity'] == 'high'],
@@ -195,6 +199,6 @@ def admin_panel():
                            google_sync_enabled=GOOGLE_SYNC_ENABLED,
                            google_loaner_autodisable_active=google_loaner_autodisable_active,
                            branding_configured=branding_configured,
-                           charts=_dashboard_charts(site_ids),
+                           charts=_dashboard_charts(site_ids) if feature_enabled('dashboard_charts') else [],
                            data_quality_errors=data_quality_errors,
                            violators=violators)

@@ -14,10 +14,19 @@ def simple_get_routes():
                    if 'GET' in r.methods and '<' not in str(r) and not str(r).startswith(SKIP)})
 
 
+def assert_loads(r, url):
+    """200/302, or the deliberate "turned off / not set up" page for a
+    module that isn't available on this install (e.g. the Google sign-in
+    check when Google isn't connected)."""
+    if r.status_code == 404:
+        assert b'Open Settings' in r.data or b'Ask your FoxDesk administrator' in r.data, f'{url} -> real 404'
+        return
+    assert r.status_code in (200, 302), f'{url} -> {r.status_code}'
+
+
 @pytest.mark.parametrize('url', simple_get_routes())
 def test_page_loads_on_empty_install(client, url):
-    r = client.get(url)
-    assert r.status_code in (200, 302), f'{url} -> {r.status_code}'
+    assert_loads(client.get(url), url)
 
 
 def test_pages_load_with_data(client, make):
@@ -28,8 +37,7 @@ def test_pages_load_with_data(client, make):
     detail_urls = [f'/admin/assets/{dev.asset_tag}/assign', f'/admin/people/{kid.id}/edit',
                    f'/admin/people/{kid.id}/history', f'/admin/registry/{dev.asset_tag}/edit']
     for url in simple_get_routes() + detail_urls:
-        r = client.get(url)
-        assert r.status_code in (200, 302), f'{url} -> {r.status_code}'
+        assert_loads(client.get(url), url)
 
 
 def test_admin_pages_require_login(anon_client):

@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.security import generate_password_hash
 from foxdesk.core import BRANDING_UPLOAD_DIR, EMAIL_ENABLED, app, db, logger
+from foxdesk.services.features import FEATURE_GROUPS, FEATURES, feature_enabled, feature_switch, set_feature
 from foxdesk.models import (
     ActivityLog,
     AssetRegistry,
@@ -36,6 +37,7 @@ from foxdesk.services.emailer import (
     send_email,
 )
 from foxdesk.services.auth import (
+    _current_actor,
     _current_site_ids,
     _current_user,
     _log_activity,
@@ -505,6 +507,43 @@ def admin_settings():
         flash('Your account doesn\'t have access to any settings.', 'error')
         return redirect(url_for('admin_panel'))
     return render_template('admin_settings.html', sections=sections)
+
+
+@app.route('/admin/features', methods=['GET', 'POST'])
+@require_super_admin
+def admin_features():
+    """Settings → Features: switch optional modules on or off. Every switch
+    posts on every save (unchecked boxes are simply absent), so the form is
+    the whole truth — no partial-update edge cases."""
+    if request.method == 'POST':
+        _, actor_label, _ = _current_actor()
+        changed = []
+        for key, spec in FEATURES.items():
+            wanted = request.form.get(f'feature_{key}') == 'on'
+            if feature_switch(key) != wanted:
+                set_feature(key, wanted, actor_label)
+                changed.append(f'{spec["label"]} {"on" if wanted else "off"}')
+        if changed:
+            _log_activity('features', 'Features changed: ' + '; '.join(changed) + '.')
+            db.session.commit()
+            flash('Saved: ' + ', '.join(changed) + '.', 'success')
+        else:
+            flash('Nothing changed.', 'info')
+        return redirect(url_for('admin_features'))
+
+    groups = []
+    for group in FEATURE_GROUPS:
+        items = []
+        for key, spec in FEATURES.items():
+            if spec['group'] != group:
+                continue
+            configured = spec['configured']() if 'configured' in spec else None
+            blocked_by = [FEATURES[d]['label'] for d in spec.get('requires', ()) if not feature_enabled(d)]
+            items.append(dict(key=key, label=spec['label'], desc=spec['desc'], on=feature_switch(key),
+                              configured=configured, blocked_by=blocked_by,
+                              requires=[FEATURES[d]['label'] for d in spec.get('requires', ())]))
+        groups.append((group, items))
+    return render_template('admin_features.html', groups=groups)
 
 
 @app.route('/admin/set_active_site', methods=['POST'])

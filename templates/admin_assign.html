@@ -9,6 +9,7 @@
   <span class="spacer" style="flex:1;"></span>
   {% if can('devices_manage') %}
   <a href="/admin/registry/{{ registry_row.asset_tag }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit Device</a>
+  {% if feature('loaners') %}
   {% if not registry_row.is_loaner and asset and asset.assigned_to %}
   <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">{{ icon('loaner') }}Mark as Loaner</button>
   {% else %}
@@ -19,6 +20,7 @@
     {% endif %}
     <button type="submit" class="btn btn-ghost">{{ 'Unmark Loaner' if registry_row.is_loaner else 'Mark as Loaner' }}</button>
   </form>
+  {% endif %}
   {% endif %}
   {% endif %}
   <a href="/admin/registry" class="btn btn-ghost">← Back</a>
@@ -206,6 +208,7 @@
   {% endif %}
 </div>
 
+{% if feature('incidents') %}
 <div class="card">
   <div style="display:flex;align-items:center;gap:.6rem;">
     <h2 style="margin:0;">{{ icon('repair') }}Incidents / Damage Reports</h2>
@@ -257,7 +260,8 @@
     </label>
     {{ macros.photo_input('Damage Photos (optional)') }}
     {% if asset and asset.assigned_to %}
-      {% if asset.assigned_to.guardian_email and email_enabled %}
+      {% if not feature('guardian_notices') %}
+      {% elif asset.assigned_to.guardian_email and email_enabled %}
       <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
         <input type="checkbox" name="notify_guardian" style="width:auto;" />
         Email a damage notice to {{ asset.assigned_to.guardian_name or 'the parent/guardian' }} ({{ asset.assigned_to.guardian_email }})
@@ -323,13 +327,13 @@
           <div class="row-menu" style="display:inline-block;">
             <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
             <div class="row-menu-items" style="min-width:240px;">
-              <form method="POST" action="/admin/attachments/incident/{{ inc.id }}" enctype="multipart/form-data" style="padding:.4rem;border-bottom:1px solid var(--border);">
+              {% if feature('attachments') %}<form method="POST" action="/admin/attachments/incident/{{ inc.id }}" enctype="multipart/form-data" style="padding:.4rem;border-bottom:1px solid var(--border);">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Add Photos</label>
                 <input type="file" name="photos" accept="image/*,application/pdf" multiple data-photo-input required style="margin-bottom:.5rem;padding:.3rem;" />
                 <button type="submit" class="btn btn-ghost" style="width:100%;">{{ icon('camera') }}Upload</button>
-              </form>
-              {% if email_enabled and inc.person_id %}
+              </form>{% endif %}
+              {% if email_enabled and inc.person_id and feature('guardian_notices') %}
               <form method="POST" action="/admin/incidents/{{ inc.id }}/notify_guardian" style="padding:.4rem;border-bottom:1px solid var(--border);">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-ghost" style="width:100%;">{{ icon('email') }}{{ 'Re-send' if inc.guardian_notified_at else 'Email' }} Guardian Notice</button>
@@ -360,6 +364,7 @@
   <p style="color:var(--muted);font-size:.88rem;">No incidents logged for this asset.</p>
   {% endif %}
 </div>
+{% endif %}
 
 {% if can('repairs') %}
 <div class="card">
@@ -472,6 +477,7 @@
 </div>
 {% endif %}
 
+{% if feature_on('google') %}
 <div class="card">
   <h2 style="display:flex;align-items:center;gap:.6rem;">
     {{ icon('integration') }}Google Workspace Info
@@ -547,7 +553,9 @@
   </p>
   {% endif %}
 </div>
+{% endif %}
 
+{% if feature('labels') %}
 <div class="card">
   <h2>{{ icon('print') }}Print Label</h2>
   <p style="color:var(--muted);font-size:.78rem;margin-bottom:1rem;">
@@ -579,4 +587,5 @@
 <script src="/static/js/dymo.connect.framework.js"></script>
 <script src="/static/js/dymo_label_core.js"></script>
 <script src="/static/js/print_label.js"></script>
+{% endif %}
 {% endblock %}

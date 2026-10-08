@@ -4,6 +4,7 @@ from flask import flash, has_request_context, jsonify, redirect, request, sessio
 from functools import wraps
 from foxdesk.core import SESSION_TIMEOUT_MINUTES, db
 from foxdesk.models import ActivityLog, KioskDevice, User
+from foxdesk.services.features import PERMISSION_FEATURES, feature_enabled
 
 
 def _admin_session_active():
@@ -30,7 +31,10 @@ def _admin_session_active():
 
 
 def _kiosk_device_valid():
-    """True if the request carries a cookie token matching an enrolled KioskDevice."""
+    """True if the request carries a cookie token matching an enrolled
+    KioskDevice — and kiosk mode is switched on (Settings → Features)."""
+    if not feature_enabled('kiosk'):
+        return False
     token = request.cookies.get('kiosk_token')
     return bool(token) and KioskDevice.query.filter_by(token=token).first() is not None
 
@@ -134,6 +138,9 @@ def _has_permission(perm):
     User with is_admin=True — either way, a superuser passes every check.
     Otherwise perm must match one of the current User's can_* columns.
     """
+    feature_key = PERMISSION_FEATURES.get(perm)
+    if feature_key and not feature_enabled(feature_key):
+        return False  # a switched-off module grants nobody access, admins included
     if session.get('is_admin'):
         return True
     user = _current_user()

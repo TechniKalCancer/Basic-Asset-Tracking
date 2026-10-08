@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import request, session
 from markupsafe import Markup, escape
 from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
+from foxdesk.services.features import feature_enabled, feature_switch
 from foxdesk.models import Asset, LANDING_PAGES, Site, Ticket
 from foxdesk.services.branding import _current_branding
 from foxdesk.services.auth import _current_site_ids, _current_user, _has_permission
@@ -160,25 +161,28 @@ def _settings_sections():
     users = _has_permission('manage_users')
     sup = bool(session.get('is_super_admin'))
     sections = [
+        ('General', [
+            (sup, 'settings', 'Features', 'Turn modules on or off so people only see what your district uses.', '/admin/features'),
+        ]),
         ('People & Access', [
             (users, 'users', 'Users & Permissions', 'Staff logins and what each one can see and do.', '/admin/users'),
             (sup, 'site', 'Sites', 'Schools and buildings; which devices and people belong where.', '/admin/sites'),
-            (admin, 'computer', 'Kiosk Devices', 'Enroll a shared device for check-in/out without a login.', '/admin/kiosk'),
+            (admin and feature_enabled('kiosk'), 'computer', 'Kiosk Devices', 'Enroll a shared device for check-in/out without a login.', '/admin/kiosk'),
         ]),
         ('Notifications', [
             (sup, 'email', 'Email', 'Wording for reminders, ticket updates, and parent damage notices.', '/admin/emails'),
-            (admin, 'schedule', 'Overdue Reminders', 'Devices past their due date, and who to remind.', '/admin/reminders'),
+            (admin and feature_enabled('reminders'), 'schedule', 'Overdue Reminders', 'Devices past their due date, and who to remind.', '/admin/reminders'),
         ]),
         ('Customize', [
             (sup, 'branding', 'Branding', 'Logo, app name, and colors.', '/admin/branding'),
             (sup, 'custom-fields', 'Custom Fields', 'Extra fields on devices and people.', '/admin/custom_fields'),
-            (admin, 'help', 'Help Content', 'The FAQ and how-to guides on the Help page.', '/admin/help'),
+            (admin and feature_enabled('help'), 'help', 'Help Content', 'The FAQ and how-to guides on the Help page.', '/admin/help'),
         ]),
         ('Integrations', [
-            (sup, 'integration', 'Google Workspace', 'Connect Google Admin for Chromebook and user sync.', '/admin/google_setup'),
-            (sup and GOOGLE_SYNC_ENABLED, 'custom-fields', 'Google Field Mapping', 'Which Google fields fill which app fields.', '/admin/google_field_mapping'),
-            (sup and GOOGLE_SYNC_ENABLED, 'org-unit', 'Google Org Units', 'Map org units to sites and roles; push loaners to an OU.', '/admin/google_org_units'),
-            (sup, 'integration', 'KACE', 'Connect the KACE SMA inventory.', '/admin/kace_setup'),
+            (sup and feature_switch('google'), 'integration', 'Google Workspace', 'Connect Google Admin for Chromebook and user sync.', '/admin/google_setup'),
+            (sup and feature_enabled('google'), 'custom-fields', 'Google Field Mapping', 'Which Google fields fill which app fields.', '/admin/google_field_mapping'),
+            (sup and feature_enabled('google'), 'org-unit', 'Google Org Units', 'Map org units to sites and roles; push loaners to an OU.', '/admin/google_org_units'),
+            (sup and feature_switch('kace'), 'integration', 'KACE', 'Connect the KACE SMA inventory.', '/admin/kace_setup'),
             (sup, 'sync', 'Scheduled Syncs', 'How often Google and KACE syncs run.', '/admin/sync_schedule'),
         ]),
         ('Records', [

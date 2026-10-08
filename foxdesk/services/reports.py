@@ -3,7 +3,8 @@ from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from flask import request, url_for
-from foxdesk.core import GOOGLE_SYNC_ENABLED, db
+from foxdesk.core import db
+from foxdesk.services.features import feature_enabled
 from foxdesk.models import (
     Asset,
     AssetRegistry,
@@ -269,7 +270,7 @@ def _data_quality_checks(site_ids):
         lambda t: {'cells': _device_cells(t[0], asset=t[1], extra=[t[0].warranty_expiration.isoformat()]),
                    'link': dev_link(t[0].asset_tag)})
 
-    if GOOGLE_SYNC_ENABLED:
+    if feature_enabled('google'):
         never_synced = registry_asset.filter(AssetRegistry.device_type == 'chromebook',
                                              Asset.google_last_sync_at.is_(None),
                                              Asset.status.notin_(['retired', 'lost'])) \

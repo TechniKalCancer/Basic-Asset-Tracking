@@ -3,6 +3,7 @@ import threading
 import time
 from datetime import datetime
 from foxdesk.core import EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db, logger
+from foxdesk.services.features import feature_enabled
 from foxdesk.models import SyncSchedule
 from foxdesk.services.auth import _log_activity
 from foxdesk.integrations.google import _run_google_device_sync, _run_google_people_sync
@@ -35,7 +36,8 @@ def _loaner_reminder_loop():
         time.sleep(3600)
         try:
             with app.app_context():
-                _send_overdue_loaner_reminders()
+                if feature_enabled('loaners') and feature_enabled('reminders'):
+                    _send_overdue_loaner_reminders()
         except Exception as e:
             logger.error('Loaner reminder background loop error: %s', e)
 
@@ -51,13 +53,14 @@ def _run_due_scheduled_syncs():
     due at once — same accepted-risk idempotency approach as the loaner
     reminder loop, just applied via a timestamp column instead of a
     per-row resend gate."""
-    if not GOOGLE_SYNC_ENABLED and not KACE_SYNC_ENABLED:
+    google_on, kace_on = feature_enabled('google'), feature_enabled('kace')  # configured AND switched on
+    if not google_on and not kace_on:
         return
     now = datetime.utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
-        if schedule.sync_type in ('person', 'device') and not GOOGLE_SYNC_ENABLED:
+        if schedule.sync_type in ('person', 'device') and not google_on:
             continue
-        if schedule.sync_type == 'kace' and not KACE_SYNC_ENABLED:
+        if schedule.sync_type == 'kace' and not kace_on:
             continue
         if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
             continue
@@ -96,5 +99,7 @@ def _scheduled_sync_loop():
             logger.error('Scheduled sync background loop error: %s', e)
 
 
-if GOOGLE_SYNC_ENABLED:
+# Either integration needs the loop — this used to start only for Google,
+# so a KACE-only install never ran its scheduled syncs.
+if GOOGLE_SYNC_ENABLED or KACE_SYNC_ENABLED:
     threading.Thread(target=_scheduled_sync_loop, daemon=True).start()

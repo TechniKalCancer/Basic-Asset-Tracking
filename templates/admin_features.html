@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Features{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('settings') }}Features</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;margin-bottom:1.4rem;max-width:70ch;">
+  Turn off anything your district doesn't use. A module that's off disappears from the menus, the
+  dashboard and device pages, and its pages and background jobs stop. Nothing is deleted. Turn it back
+  on and everything is where you left it. Devices, people, assignments and check in/out are always on.
+</p>
+
+<form method="POST">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% for group, items in groups %}
+  <h2 class="feature-group">{{ group }}</h2>
+  <div class="feature-list">
+    {% for f in items %}
+    <label class="feature-row" id="{{ f.key }}" for="feature_{{ f.key }}">
+      <span class="feature-text">
+        <span class="feature-name">{{ f.label }}</span>
+        <span class="feature-desc">{{ f.desc }}</span>
+        {% if f.requires %}<span class="feature-note">Needs: {{ f.requires|join(', ') }}{% if f.blocked_by %} (currently off){% endif %}</span>{% endif %}
+        {% if f.configured is not none %}
+          <span class="feature-note">
+            {% if f.configured %}<span class="badge badge-green">Connected</span>
+            {% else %}<span class="badge badge-yellow">Not set up</span> credentials go in the server's <code>.env</code>; see the setup page{% endif %}
+          </span>
+        {% endif %}
+      </span>
+      <span class="switch">
+        <input type="checkbox" id="feature_{{ f.key }}" name="feature_{{ f.key }}" {{ 'checked' if f.on }}>
+        <span class="switch-track" aria-hidden="true"></span>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <div class="feature-save">
+    <button type="submit" class="btn btn-primary">Save</button>
+  </div>
+</form>
+
+<style>
+  .feature-group { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 1.6rem 0 .6rem; }
+  .feature-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .feature-row { display: flex; align-items: center; gap: 1rem; padding: .9rem 1.1rem; border-top: 1px solid var(--border); cursor: pointer; }
+  .feature-row:first-child { border-top: none; }
+  .feature-row:hover { background: var(--surface2); }
+  .feature-row:target { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .feature-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .2rem; }
+  .feature-name { font-weight: 600; }
+  .feature-desc { color: var(--muted); font-size: .85rem; }
+  .feature-note { color: var(--muted); font-size: .78rem; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+  .switch { position: relative; flex: none; width: 46px; height: 26px; }
+  .switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch-track { position: absolute; inset: 0; border-radius: 99px; background: var(--border); transition: background .15s; }
+  .switch-track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked + .switch-track { background: var(--accent); }
+  .switch input:checked + .switch-track::after { transform: translateX(20px); }
+  .switch input:focus-visible + .switch-track { outline: 2px solid var(--text); outline-offset: 2px; }
+  .feature-save { position: sticky; bottom: 0; padding: 1rem 0; background: linear-gradient(transparent, var(--bg) 35%); }
+</style>
+{% endblock %}

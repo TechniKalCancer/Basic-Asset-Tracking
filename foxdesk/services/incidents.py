@@ -2,6 +2,7 @@
 from datetime import datetime
 from decimal import Decimal
 from foxdesk.core import EMAIL_ENABLED, db, logger
+from foxdesk.services.features import feature_enabled
 from foxdesk.models import AssetRegistry, Incident, Person, Ticket, TicketCharge
 from foxdesk.services.emailer import _render_email_template, send_email
 from foxdesk.services.auth import _log_activity
@@ -43,6 +44,8 @@ def _send_damage_notice(incident):
     clicking needs to know whether it actually went out. Commits the
     guardian_notified_at stamp. Returns (ok, message)."""
     person = Person.query.get(incident.person_id) if incident.person_id else None
+    if not feature_enabled('guardian_notices'):
+        return False, 'Parent/guardian damage notices are turned off (Settings → Features).'
     if not EMAIL_ENABLED:
         return False, 'Email isn\'t configured (set SMTP_FROM_EMAIL), so no notice was sent.'
     if not person or not person.guardian_email:

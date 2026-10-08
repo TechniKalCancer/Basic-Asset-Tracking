@@ -15,16 +15,20 @@
     <span class="kiosk-title">Check Out</span>
     <span class="kiosk-desc">Taking a device — scan its tag or serial</span>
   </a>
+  {% if feature('incidents') %}
   <a class="kiosk-tile" href="/report_problem">
     {{ icon('flag', 'icon-xl') }}
     <span class="kiosk-title">Report a Problem</span>
     <span class="kiosk-desc">Broken, damaged, or not working right</span>
   </a>
+  {% endif %}
+  {% if feature('tickets') %}
   <a class="kiosk-tile" href="/submit_ticket">
     {{ icon('ticket', 'icon-xl') }}
     <span class="kiosk-title">Submit a Ticket</span>
     <span class="kiosk-desc">Anything else you need help with</span>
   </a>
+  {% endif %}
 </div>
 <style>
   .kiosk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 1rem; }

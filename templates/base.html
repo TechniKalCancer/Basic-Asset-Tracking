@@ -408,15 +408,15 @@
           <input type="text" name="q" placeholder="Search people or assets…" autocomplete="off" />
           <button type="submit" title="Search">{{ icon('search') or 'Go' }}</button>
         </form>
-        <a href="/help" title="Help">{{ icon('help') }}Help</a>
+        {% if feature('help') %}<a href="/help" title="Help">{{ icon('help') }}Help</a>{% endif %}
         <a href="/admin/logout" class="logout">Logout</a>
         </div>
       {% else %}
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
-        <a href="/report_problem">Report a Problem</a>
-        <a href="/submit_ticket">Submit a Ticket</a>
-        <a href="/help">{{ icon('help') }}Help</a>
+        {% if feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
+        {% if feature('tickets') %}<a href="/submit_ticket">Submit a Ticket</a>{% endif %}
+        {% if feature('help') %}<a href="/help">{{ icon('help') }}Help</a>{% endif %}
         <span class="spacer"></span>
         <a href="/admin/login">Admin</a>
       {% endif %}
@@ -430,19 +430,19 @@
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
         {% endif %}
-        <a href="/admin/audit">Asset Audit</a>
-        <a href="/admin/data_quality">Data Quality</a>
-        <a href="/admin/signin_mismatches">Sign-in Mismatches</a>
-        <a href="/admin/fees">Billing</a>
+        {% if feature('audit') %}<a href="/admin/audit">Asset Audit</a>{% endif %}
+        {% if feature('data_quality') %}<a href="/admin/data_quality">Data Quality</a>{% endif %}
+        {% if feature('signin_check') %}<a href="/admin/signin_mismatches">Sign-in Mismatches</a>{% endif %}
+        {% if feature('incidents') %}<a href="/admin/fees">Billing</a>{% endif %}
         <div class="row-menu nav-dropdown">
           <button type="button">Tools ▾</button>
           <div class="row-menu-items">
             <a href="/admin/bulk_assign">Bulk Assign</a>
-            <a href="/admin/bulk_print">Print Labels</a>
+            {% if feature('labels') %}<a href="/admin/bulk_print">Print Labels</a>{% endif %}
             <a href="/admin/collection">Collection (Who Has What)</a>
             <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
             <a href="/asset_history">Asset History</a>
-            {% if can('checkinout') %}<a href="/report_problem">Report a Problem</a>{% endif %}
+            {% if can('checkinout') and feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
             <div class="nav-dropdown-divider"></div>
             <a href="/admin/registry/export">Export CSV</a>
             <a href="/api/assets" target="_blank">Assets API</a>
@@ -467,8 +467,8 @@
       {% elif active_section == 'devices' %}
         <a href="/checkin">Check In</a>
         <a href="/checkout">Check Out</a>
-        <a href="/report_problem">Report a Problem</a>
-        <a href="/submit_ticket">Submit a Ticket</a>
+        {% if feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
+        {% if feature('tickets') %}<a href="/submit_ticket">Submit a Ticket</a>{% endif %}
       {% elif active_section == 'people' and can('people') %}
         <a href="/admin/people">People</a>
         <a href="/admin/people/new">Add Person</a>
@@ -481,14 +481,14 @@
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>
         <a href="/admin/ticket_categories">Categories</a>
-        {% if is_super_admin() %}<a href="/admin/automations">Automations</a>{% endif %}
+        {% if is_super_admin() and feature('ticket_automations') %}<a href="/admin/automations">Automations</a>{% endif %}
       {% elif active_section == 'admin' %}
         <a href="/admin/settings">All Settings</a>
         {% if can('admin') %}
-        <a href="/admin/kiosk">Kiosk Devices</a>
-        <a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>
+        {% if feature('kiosk') %}<a href="/admin/kiosk">Kiosk Devices</a>{% endif %}
+        {% if feature('reminders') %}<a href="/admin/reminders">Reminders {% if nav_overdue_count %}<span class="nav-tab-badge">{{ nav_overdue_count }}</span>{% endif %}</a>{% endif %}
         <a href="/admin/activity">Activity Log</a>
-        <a href="/admin/help">Manage Help Content</a>
+        {% if feature('help') %}<a href="/admin/help">Manage Help Content</a>{% endif %}
         {% endif %}
         {% if can('manage_users') %}
         <span class="nav-sub-divider"></span>
@@ -500,10 +500,13 @@
         <a href="/admin/branding">Branding</a>
         <a href="/admin/emails">Email</a>
         <a href="/admin/custom_fields">Custom Fields</a>
+        <a href="/admin/features">Features</a>
+        {% if feature_on('google') or feature_on('kace') %}
         <div class="row-menu nav-dropdown">
           <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
           <div class="row-menu-items">
             <a href="/admin/sync_schedule">{{ icon('schedule') }}Scheduled Syncs</a>
+            {% if feature_on('google') %}
             <div class="nav-dropdown-label">Google Sync {% if google_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
             {% if google_sync_enabled %}
             <a href="/admin/google_setup">Setup / Status</a>
@@ -513,7 +516,9 @@
             {% else %}
             <a href="/admin/google_setup">Set Up Google Sync</a>
             {% endif %}
-            <div class="nav-dropdown-divider"></div>
+            {% endif %}
+            {% if feature_on('google') and feature_on('kace') %}<div class="nav-dropdown-divider"></div>{% endif %}
+            {% if feature_on('kace') %}
             <div class="nav-dropdown-label">KACE Sync {% if kace_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
             {% if kace_sync_enabled %}
             <a href="/admin/kace_setup">Setup / Status</a>
@@ -521,8 +526,10 @@
             {% else %}
             <a href="/admin/kace_setup">Set Up KACE Sync</a>
             {% endif %}
+            {% endif %}
           </div>
         </div>
+        {% endif %}
         {% endif %}
       {% endif %}
     </div>
@@ -551,8 +558,8 @@
     {% block content %}{% endblock %}
   </div>
 <script>window.APP_ICONS = {{ available_icons|tojson }};</script>
-<script src="/static/js/attachments.js"></script>
-<script src="/static/js/camera_scan.js"></script>
+{% if feature('attachments') %}<script src="/static/js/attachments.js"></script>{% endif %}
+{% if feature('camera_scan') %}<script src="/static/js/camera_scan.js"></script>{% endif %}
 <script>
 // The nav can be one or two rows tall depending on whether a sub-nav row is
 // showing for the active tab — position the session-expiry banner right

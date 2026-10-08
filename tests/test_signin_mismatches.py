@@ -3,9 +3,15 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from conftest import A
+from conftest import A, patch_everywhere
 
 NOW = datetime.utcnow()
+
+
+@pytest.fixture(autouse=True)
+def google_connected(monkeypatch):
+    """The sign-in check needs Google Workspace connected (Settings → Features)."""
+    patch_everywhere(monkeypatch, 'GOOGLE_SYNC_ENABLED', True)
 
 
 @pytest.fixture

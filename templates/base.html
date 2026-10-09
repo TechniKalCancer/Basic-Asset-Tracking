@@ -356,6 +356,7 @@
   </style>
 </head>
 <body>
+  {% block nav %}
   <nav>
     <div class="nav-top">
       <a class="brand" href="/" title="Home">
@@ -443,6 +444,7 @@
             <a href="/admin/collection">Collection (Who Has What)</a>
             {% if feature('active_directory') %}<a href="/admin/directory/computers">Computers in AD</a>{% endif %}
             <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
+            {% if feature_on('google') %}<a href="/admin/refresh_forecast">Refresh Forecast</a>{% endif %}
             <a href="/asset_history">Asset History</a>
             {% if can('checkinout') and feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
             <div class="nav-dropdown-divider"></div>
@@ -554,6 +556,7 @@
     </div>
     {% endif %}
   </nav>
+  {% endblock %}
 
   <!-- Session timeout warning banner (only shown on admin pages) -->
   <div id="session-warning">

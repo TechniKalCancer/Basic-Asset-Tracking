@@ -1,0 +1,19 @@
+<div class="p-list">
+  {% for i in items %}
+  <div class="p-row">
+    <div class="grow">
+      <strong>{{ i.created_at.strftime('%b %d, %Y') }}</strong> · {{ i.asset_tag }}
+      <div class="p-muted">{{ i.description }}</div>
+    </div>
+    {% if i.fee_charged and i.fee_amount %}
+      {% if i.paid_at %}<span class="badge badge-green">${{ '%.2f'|format(i.fee_amount) }} paid</span>
+      {% elif payments %}
+      <form method="POST" action="/my/pay/{{ i.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary btn-small">Pay ${{ '%.2f'|format(i.fee_amount) }}</button>
+      </form>
+      {% else %}<span class="badge badge-yellow">${{ '%.2f'|format(i.fee_amount) }} due</span><span class="p-muted">{{ payment_note }}</span>{% endif %}
+    {% else %}<span class="p-muted">No fee</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>

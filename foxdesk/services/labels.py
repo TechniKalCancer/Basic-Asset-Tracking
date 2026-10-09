@@ -64,3 +64,9 @@ def code128_svg(text, quiet_zone=10):
     return Markup(f'<svg class="barcode" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total} 1" '
                   f'preserveAspectRatio="none" shape-rendering="crispEdges" role="img" '
                   f'aria-label="Barcode {escape(text)}">{"".join(bars)}</svg>')
+
+
+def qr_svg(data):
+    """A QR code as inline SVG that scales to its container (CSS sets the size)."""
+    import segno
+    return segno.make(data, error='m').svg_inline(scale=1, border=1, omitsize=True, svgclass='qr')

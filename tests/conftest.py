@@ -115,8 +115,16 @@ def anon_client():
 def sent_emails(monkeypatch):
     """Turns email 'on' and captures every send instead of hitting SMTP.
     Background sends run inline so tests can assert on them immediately."""
-    sent = []
-    fake_send = lambda to, subject, body: sent.append((to, subject, body))  # noqa: E731
+    class Sent(list):
+        """(to, subject, body) per email; .extra holds each one's reply_to/headers."""
+        extra = None
+
+    sent = Sent()
+    sent.extra = []
+
+    def fake_send(to, subject, body, **kw):
+        sent.append((to, subject, body))
+        sent.extra.append(kw)
     patch_everywhere(monkeypatch, 'EMAIL_ENABLED', True)
     patch_everywhere(monkeypatch, 'send_email', fake_send)
     patch_everywhere(monkeypatch, '_send_email_in_background', fake_send)

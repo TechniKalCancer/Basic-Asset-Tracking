@@ -41,6 +41,8 @@ FEATURES = OrderedDict([
                      desc='Send devices out for repair or RMA and track them until they come back.')),
     ('parts', dict(group='Help desk', label='Parts inventory', requires=('repairs',),
                    desc='Parts on hand (screens, keyboards, chargers), used on repairs and tickets, with low-stock alerts.')),
+    ('email_tickets', dict(group='Help desk', label='Email to ticket', requires=('tickets',), configured=lambda: _mailbox_configured(),
+                           desc='Mail to your help desk address becomes a ticket; replies thread back onto it.')),
     ('tickets', dict(group='Help desk', label='Tickets',
                      desc='A help-desk queue with categories, comments, charges and requester emails.')),
 
@@ -48,6 +50,13 @@ FEATURES = OrderedDict([
                          desc='Attach photos or PDFs to damage reports, tickets and repairs.')),
     ('kiosk', dict(group='Self-service', label='Kiosk mode',
                    desc='Enroll a shared device so students can check in/out, report a problem or submit a ticket without logging in.')),
+    ('portal', dict(group='Self-service', label='My stuff portal', default=False,
+                    desc='Students and staff sign in to see their devices, help requests and fees, and report a problem.')),
+    ('parent_portal', dict(group='Self-service', label='Parent portal', default=False,
+                           desc='Parents sign in with the email on file to see their student\'s devices and damage fees.')),
+    ('online_payments', dict(group='Self-service', label='Pay fees online', requires=('incidents',),
+                             configured=lambda: _payments_configured(),
+                             desc='Families pay damage fees by card in the portal (Stripe); fees are marked paid automatically.')),
     ('help', dict(group='Self-service', label='Help page',
                   desc='An FAQ and how-to guides you can edit.')),
     ('reminders', dict(group='Notifications', label='Overdue reminders',
@@ -73,6 +82,16 @@ FEATURES = OrderedDict([
     ('dell_warranty', dict(group='Integrations', label='Dell warranty lookup', configured=lambda: _dell_configured(),
                            desc='Fill in warranty end dates and ship dates for Dell devices from Dell\'s TechDirect API.')),
 ])
+def _payments_configured():
+    from foxdesk.services.payments import stripe_key
+    return bool(stripe_key())
+
+
+def _mailbox_configured():
+    from foxdesk.services.inbound_mail import mailbox_configured
+    return mailbox_configured()
+
+
 def _google_signin_configured():
     from foxdesk.services.signin import google_config
     return google_config()['configured']
@@ -107,6 +126,7 @@ ENDPOINT_FEATURES = {
     'admin_data_quality': 'data_quality',
     'admin_signin_mismatches': 'signin_check', 'admin_signin_mismatch_review': 'signin_check',
     'admin_assign_from_google': 'signin_check',
+    'device_qr': None,  # a label's QR code works for staff even with the portals off
     'admin_audit': 'audit', 'admin_audit_scan': 'audit',
     'admin_bulk_print': 'labels', 'admin_avery_labels': 'labels',
     'admin_toggle_loaner': 'loaners', 'admin_update_loaner_label': 'loaners',
@@ -122,6 +142,9 @@ MODULE_FEATURES = {
     'foxdesk.views.repairs': 'repairs',
     'foxdesk.views.parts': 'parts',
     'foxdesk.views.tickets': 'tickets',
+    'foxdesk.views.ticket_tools': 'tickets',
+    'foxdesk.views.helpdesk_email': 'email_tickets',
+    'foxdesk.views.portal': 'portal',
     'foxdesk.views.attachments': 'attachments',
     'foxdesk.views.help': 'help',
     'foxdesk.views.directory': 'active_directory',

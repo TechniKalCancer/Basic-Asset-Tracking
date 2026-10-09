@@ -91,17 +91,18 @@ def _b64(data):
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
 
 
-def start(session, uri):
-    """The Google URL to send the person to; remembers state/nonce/PKCE in the session."""
+def start(session, uri, purpose='staff'):
+    """The Google URL to send the person to; remembers state/nonce/PKCE in the
+    session. purpose 'portal' signs in to the My stuff / parent portal instead."""
     cfg = google_config()
     if not cfg['configured']:
         raise SigninError('Google sign-in isn\'t set up yet.')
     state, nonce, verifier = pysecrets.token_urlsafe(24), pysecrets.token_urlsafe(24), pysecrets.token_urlsafe(64)
-    session['oauth'] = dict(state=state, nonce=nonce, verifier=verifier, redirect_uri=uri)
+    session['oauth'] = dict(state=state, nonce=nonce, verifier=verifier, redirect_uri=uri, purpose=purpose)
     params = dict(client_id=cfg['client_id'], redirect_uri=uri, response_type='code', scope='openid email profile',
                   state=state, nonce=nonce, code_challenge=_b64(hashlib.sha256(verifier.encode()).digest()),
                   code_challenge_method='S256', prompt='select_account')
-    if len(cfg['domains']) == 1:
+    if len(cfg['domains']) == 1 and purpose == 'staff':
         params['hd'] = cfg['domains'][0]  # a hint to Google's account picker; the domain is checked again below
     return f'{AUTH_URL}?{urlencode(params)}'
 
@@ -116,8 +117,12 @@ def _verify_id_token(token, client_id):
     return id_token.verify_oauth2_token(token, Request(), client_id)
 
 
-def finish(session, args):
-    """Check Google's answer and return the matching active User, or raise SigninError."""
+def pending_purpose(session):
+    return (session.get('oauth') or {}).get('purpose', 'staff')
+
+
+def verify(session, args):
+    """Check Google's answer; returns the verified, lowercased email."""
     pending = session.pop('oauth', None)
     if args.get('error'):
         raise SigninError('Google sign-in was cancelled.' if args.get('error') == 'access_denied'
@@ -142,6 +147,13 @@ def finish(session, args):
     email = (claims.get('email') or '').lower()
     if not email or not claims.get('email_verified'):
         raise SigninError('That Google account has no verified email.')
+    return email
+
+
+def finish(session, args):
+    """Check Google's answer and return the matching active staff User, or raise SigninError."""
+    email = verify(session, args)
+    cfg = google_config()
     if cfg['domains'] and email.split('@')[-1] not in cfg['domains']:
         raise SigninError(f'{email} isn\'t from an allowed domain. Use your school Google account.')
     user = User.query.filter(db.func.lower(User.email) == email).first()

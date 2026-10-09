@@ -375,6 +375,9 @@ itself needs to be verified on your machine with the printer attached.
 
 ## Avery Sheet Labels (no Dymo needed)
 
+**QR codes**: tick "Add a QR code" on Bulk Print. Scanning a label opens the device's page for signed-in
+staff, and Report a problem for that device (after signing in to the portal) for everyone else.
+
 Bulk Print Labels (`/admin/bulk_print`) also has an **Avery Sheet Labels** card that prints the
 same checked rows onto standard US Letter label sheets from any office printer:
 
@@ -467,6 +470,27 @@ import, so they can come straight from an SIS export). When logging an incident 
 student with a guardian email on file, tick **Email a damage notice** to send it immediately;
 each incident's ⋮ menu also has **Email Guardian Notice** for sending (or re-sending) later. The
 incident shows a ✉️ *Guardian notified* badge once sent. Wording is editable at Admin → Email.
+
+## Help Desk: Email, Queues, Teams and Saved Replies
+
+- **Email to ticket** (Settings → Help desk email): mail to your help desk address becomes a ticket
+  (requester matched to People by email, photos/PDFs attached), and replies to ticket emails are added
+  to the ticket they answer, reopening it if it was resolved. Outgoing ticket emails carry
+  `[Ticket #N]`, the help desk address as Reply-To and a Message-ID naming the ticket, so threading
+  works even if the subject is edited. Replies are only threaded when they come from the requester or a
+  FoxDesk user; anyone else starts a new ticket. Auto-replies, bulk mail and FoxDesk's own mail are
+  ignored, every message is handled exactly once, and a sender is capped at 10 new tickets an hour.
+  Reads Microsoft 365 through Microsoft Graph (app registration with Mail.ReadWrite) or any IMAP
+  mailbox; checked every 2 minutes.
+- **Queues**: All open, Mine, My teams, Unassigned, and No update in 3+ days, with counts, plus a team
+  filter.
+- **Teams** (Tickets → Teams): groups of techs a ticket can be assigned to; an automation can route
+  tickets to a team ("Assign the ticket to a team").
+- **Saved replies** (Tickets → Saved replies): shared or personal, inserted into the reply box with
+  `{first_name}`, `{ticket_id}`, `{asset_tag}` and more filled in; the ones for the ticket's category
+  come first. Each tech can set a **signature** added under replies they email.
+- **Someone else is on this ticket**: the ticket page shows who else has it open and whether they're
+  writing a reply (a heartbeat every 20 seconds).
 
 ## Ticket Email Notifications
 
@@ -604,6 +628,14 @@ Each registry entry can optionally hold a **purchase date**, **purchase cost**, 
 filter; the admin dashboard shows a **Warranty Expiring Soon** stat card (devices whose warranty
 runs out within 60 days) linking straight into that filter. CSV export includes all three columns.
 
+### Refresh forecast (Devices → Tools → Refresh Forecast)
+
+The Google device sync records each Chromebook's auto-update expiration date (when ChromeOS updates
+stop). The forecast groups Chromebooks by the school year (July–June) that happens, with the main models
+and the purchase cost on record, and lists devices already past their date that are still in use
+(downloadable as CSV). Device pages show the date, and automations can use "Days until ChromeOS
+updates stop".
+
 ### Dell warranty lookup (Settings → Dell warranty)
 
 With a Dell TechDirect **Warranty API** key (request it under Services → APIs at tdm.dell.com), every
@@ -644,6 +676,26 @@ Incidents can now carry a dollar amount, not just a "fee charged" checkbox:
   block** — the flash message notes the outstanding balance so it doesn't silently disappear,
   but the delete/graduate still goes through (matches how the rest of the app already handles
   similar situations rather than adding a new hard-stop).
+
+## Portals and Online Fee Payments (Settings → Portals & payments)
+
+Both portals are off until a district switches them on under Features.
+
+- **My stuff** (`/my`, students and staff): your devices and loaners (with due dates), your help
+  requests (with the help desk's replies, never internal notes, and a reply box that reopens a resolved
+  request), your device fees, and **Report a problem** (pick your device, add photos).
+- **Parent portal** (`/my`, parents/guardians): each student whose parent/guardian email matches sees
+  their devices and damage reports with fees.
+- **Sign-in**: with Google when Sign in with Google is set up, or a one-time link emailed to the
+  address on file (expires in 20 minutes, works once, at most 3 an hour; the form answers the same way
+  whether or not the address is known). Nobody can create an account, and a portal session never has
+  admin access.
+- **Paying fees online** (Stripe Checkout): the family pays on Stripe's page; FoxDesk marks the fee paid
+  only after asking Stripe and getting back paid, the same amount and the same damage report, on the
+  return from Stripe and from a background check every 15 minutes. No webhook or card data touches
+  FoxDesk. Try it with an `sk_test_` key first. When paying online is off, families see your note
+  ("Pay at the front office").
+- Families at home can only reach the portal if FoxDesk has a public `https://` address (`APP_URL`).
 
 ## Self-Service: Report a Problem
 

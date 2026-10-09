@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+{% block title %}Saved replies{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('ticket') }}Saved replies</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/tickets" class="btn btn-ghost">← Tickets</a>
+</div>
+<p class="cr-muted" style="max-width:75ch;margin:0 0 1.2rem;">
+  Answers you give often, inserted into a ticket reply with one click. These fill themselves in from the ticket:
+  <code>{first_name}</code> <code>{full_name}</code> <code>{ticket_id}</code> <code>{ticket_subject}</code>
+  <code>{asset_tag}</code> <code>{tech_name}</code> <code>{today}</code>.
+</p>
+
+<div class="cr-grid">
+  {% for r in replies %}
+  <details class="card cr-item">
+    <summary>
+      <strong>{{ r.title }}</strong>
+      {% if r.user_id %}<span class="badge badge-blue">Mine</span>{% else %}<span class="badge badge-green">Shared</span>{% endif %}
+      {% if r.category %}<span class="cr-muted">for {{ r.category.name }}</span>{% endif %}
+      <span class="cr-muted" style="margin-left:auto;">used {{ r.use_count }}×</span>
+    </summary>
+    <form method="POST" action="/admin/canned_replies/{{ r.id }}" class="cr-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Title <input name="title" value="{{ r.title }}" required maxlength="120"></label>
+      <label>Text <textarea name="body" rows="6" required>{{ r.body }}</textarea></label>
+      <label>Suggest first for
+        <select name="category_id"><option value="">Any category</option>
+          {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if r.category_id == c.id }}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if me %}<label class="cr-check"><input type="checkbox" name="personal" {{ 'checked' if r.user_id }}> Only for me</label>{% endif %}
+      <div class="cr-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" name="action" value="delete" class="btn btn-danger" onclick="return confirm('Delete this saved reply?');">Delete</button>
+      </div>
+    </form>
+  </details>
+  {% else %}
+  <p class="cr-muted">No saved replies yet. Add your first one below.</p>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>Add a saved reply</h2>
+  <form method="POST" action="/admin/canned_replies/new" class="cr-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Title <input name="title" required maxlength="120" placeholder="Chromebook won't charge: try this first"></label>
+    <label>Text <textarea name="body" rows="6" required placeholder="Hi {first_name},&#10;&#10;Thanks for reporting this. Please try…"></textarea></label>
+    <label>Suggest first for
+      <select name="category_id"><option value="">Any category</option>
+        {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+    {% if me %}<label class="cr-check"><input type="checkbox" name="personal"> Only for me (otherwise shared with every tech)</label>{% endif %}
+    <div class="cr-actions"><button type="submit" class="btn btn-primary">Add</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Your signature</h2>
+  {% if me %}
+  <form method="POST" class="cr-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="signature">
+    <label>Added under replies you email to requesters
+      <textarea name="signature" rows="3" placeholder="Jordan Smith&#10;District IT · ext. 1234">{{ me.signature or '' }}</textarea></label>
+    <div class="cr-actions"><button type="submit" class="btn btn-primary">Save signature</button></div>
+  </form>
+  {% else %}
+  <p class="cr-muted">The shared admin login has no signature. Sign in with your own account to set one.</p>
+  {% endif %}
+</div>
+
+<style>
+  .cr-muted { color: var(--muted); font-size: .85rem; }
+  .cr-grid { display: flex; flex-direction: column; gap: .6rem; margin-bottom: 1.2rem; }
+  .cr-item { margin: 0; padding: .8rem 1rem; }
+  .cr-item summary { display: flex; gap: .6rem; align-items: center; cursor: pointer; flex-wrap: wrap; }
+  .cr-form { display: flex; flex-direction: column; gap: .7rem; margin-top: .8rem; max-width: 760px; }
+  .cr-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .cr-form select { width: auto; max-width: 320px; }
+  .cr-check { flex-direction: row !important; align-items: center; gap: .5rem !important; cursor: pointer; }
+  .cr-check input { width: auto; }
+  .cr-actions { display: flex; gap: .6rem; }
+</style>
+{% endblock %}

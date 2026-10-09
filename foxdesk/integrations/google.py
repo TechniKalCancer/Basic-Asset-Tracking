@@ -89,7 +89,25 @@ def sync_chromeos_device_from_google(serial_number):
         'recent_users': recent_emails,
         'last_activity': _parse_google_timestamp(device.get('lastSync')),
         'enabled': device.get('status') == 'ACTIVE',
+        'aue_date': parse_aue(device),
     }
+
+
+def parse_aue(device):
+    """The date a Chromebook stops getting ChromeOS updates. Google reports
+    it as autoUpdateThrough (an ISO date/time) on current devices and as
+    autoUpdateExpiration (milliseconds since 1970) on older API responses."""
+    from datetime import date
+    value = device.get('autoUpdateThrough')
+    if value:
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            pass
+    millis = device.get('autoUpdateExpiration')
+    if millis and str(millis).isdigit():
+        return datetime.fromtimestamp(int(millis) / 1000, tz=timezone.utc).date()
+    return None
 
 
 def _google_recent_user_emails(device):
@@ -595,6 +613,7 @@ def _run_google_device_sync(deadline=None):
             asset.google_recent_users = recent_emails
             asset.google_last_activity = _parse_google_timestamp(d.get('lastSync'))
             asset.google_enabled     = d.get('status') == 'ACTIVE'
+            asset.google_aue_date    = parse_aue(d)
             asset.google_last_sync_at = now
 
             if d.get('annotatedAssetId') != row.asset_tag:

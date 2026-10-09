@@ -39,6 +39,16 @@ district only sees what it uses.
 - [ ] Lenovo / HP warranty lookup; warranty claims
 - [x] Scheduled report emails (e.g. weekly summary per principal), as an automation trigger + action
 
+## Phase 5b — Like Incident IQ / Manage1to1 / osTicket / Zammad
+- [x] Email to ticket (Microsoft 365 via Graph, or IMAP) with threaded replies
+- [x] Saved replies and signatures; queues; teams; who else is on a ticket
+- [x] My stuff portal (students/staff) and parent portal; sign in with Google or an emailed link
+- [x] Pay damage fees online (Stripe Checkout)
+- [x] QR codes on labels; refresh forecast from Chromebook auto-update expiration
+- [ ] SLAs, custom fields per category, merge/link/tags, satisfaction survey, time tracking
+- [ ] Knowledge base with ticket deflection; help desk reports
+- [ ] Digital device agreements; rooms/carts/locations; collection-day mode; purchasing; facilities tickets
+
 ## Phase 6 — Ship-ready
 - [ ] Privacy: policy page, data retention/purge schedule, SDPC NDPA template
 - [ ] Installer: compose with HTTPS, first-run setup wizard, backup/restore in Settings

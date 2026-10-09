@@ -1,0 +1,31 @@
+{% extends 'portal_base.html' %}
+{% block title %}Report a problem{% endblock %}
+{% block content %}
+<div class="p-wrap">
+  <h1 style="margin:0 0 1rem;font-size:1.4rem;">Report a problem</h1>
+  <form method="POST" enctype="multipart/form-data" class="card p-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Which device
+      <select name="device">
+        {% for tag, label, kind, due in devices %}<option value="{{ tag }}" {{ 'selected' if device == tag }}>{{ tag }}{% if label %} ({{ label }}){% endif %}</option>{% endfor %}
+        {% if device and device not in devices|map('first')|list %}<option value="{{ device }}" selected>{{ device }}</option>{% endif %}
+        <option value="" {{ 'selected' if not device and not devices }}>Something else / not a device</option>
+      </select>
+    </label>
+    <label>What it's about
+      <select name="category_id" required>
+        <option value="">Choose…</option>
+        {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if (form.get('category_id')|string) == (c.id|string) }}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Short title <input name="subject" required maxlength="200" value="{{ form.get('subject', '') }}" placeholder="Screen is cracked"></label>
+    <label>What's happening <textarea name="description" rows="5" required placeholder="When did it start? What were you doing?">{{ form.get('description', '') }}</textarea></label>
+    {% if feature('attachments') %}<label>Photos (optional) <input type="file" name="photos" accept="image/*,application/pdf" multiple></label>{% endif %}
+    <div style="display:flex;gap:.6rem;"><button type="submit" class="btn btn-primary">Send</button><a href="/my" class="btn btn-ghost">Cancel</a></div>
+  </form>
+</div>
+<style>
+  .p-form { display: flex; flex-direction: column; gap: .9rem; }
+  .p-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .88rem; }
+</style>
+{% endblock %}

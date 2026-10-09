@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+{% block title %}Help desk email{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('email') }}Help desk email</h1>
+  <span class="badge {{ 'badge-green' if row.enabled else 'badge-yellow' }}">{{ 'On' if row.enabled else 'Off' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p class="he-muted" style="max-width:76ch;margin:0 0 1.2rem;font-size:.9rem;">
+  Mail sent to your help desk address becomes a ticket, and replies to ticket emails land on the ticket they answer
+  (reopening it if it was resolved). A reply from anyone other than the requester or a FoxDesk user starts a new ticket
+  instead. Photos and PDFs come through as attachments.
+  {% if not email_enabled %}<strong>Outgoing email isn't set up</strong> (SMTP in .env), so requesters won't get confirmations.{% endif %}
+</p>
+
+<form method="POST" class="card he-form" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2 class="he-wide" style="margin:0;">Mailbox</h2>
+  <label class="he-wide">Help desk address
+    <input name="address" value="{{ row.address or '' }}" placeholder="helpdesk@yourdistrict.org">
+    <span class="he-help">Ticket emails go out from {{ smtp_from or 'your SMTP sender' }} with this as Reply-To, so replies come back here.</span>
+  </label>
+  <fieldset class="he-wide he-kind">
+    <legend>How to read it</legend>
+    <label><input type="radio" name="kind" value="graph" {{ 'checked' if row.kind == 'graph' }}> Microsoft 365 (Exchange Online)</label>
+    <label><input type="radio" name="kind" value="imap" {{ 'checked' if row.kind == 'imap' }}> IMAP (Google Workspace, other providers)</label>
+  </fieldset>
+
+  <div class="he-wide he-group" data-kind="graph">
+    <details {{ 'open' if row.kind == 'graph' and not configured }}>
+      <summary>How to set up Microsoft 365</summary>
+      <ol class="he-steps">
+        <li>In the <a href="https://entra.microsoft.com" target="_blank" rel="noopener">Entra admin center</a>: <strong>App registrations → New registration</strong> ("FoxDesk help desk", single tenant).</li>
+        <li><strong>API permissions → Add → Microsoft Graph → Application permissions → Mail.ReadWrite</strong>, then <strong>Grant admin consent</strong>.</li>
+        <li><strong>Certificates &amp; secrets → New client secret</strong>. Copy its value.</li>
+        <li>Recommended: limit the app to just the help desk mailbox with an Exchange
+          <em>application access policy</em> (<code>New-ApplicationAccessPolicy -AppId &lt;client id&gt; -PolicyScopeGroupId helpdesk@… -AccessRight RestrictAccess</code>).</li>
+      </ol>
+    </details>
+    <div class="he-cols">
+      <label>Tenant ID <input name="graph_tenant" value="{{ row.graph_tenant or '' }}" placeholder="00000000-0000-…"></label>
+      <label>Client ID <input name="graph_client_id" value="{{ row.graph_client_id or '' }}"></label>
+      <label>Client secret <input name="graph_client_secret" type="password" autocomplete="new-password"
+             placeholder="{{ 'Saved. Leave blank to keep it' if row.graph_client_secret else 'Secret value' }}"></label>
+    </div>
+  </div>
+
+  <div class="he-wide he-group" data-kind="imap">
+    <div class="he-cols">
+      <label>IMAP server <input name="imap_host" value="{{ row.imap_host or '' }}" placeholder="imap.gmail.com"></label>
+      <label>Port <input name="imap_port" value="{{ row.imap_port or '' }}" placeholder="993" inputmode="numeric"></label>
+      <label>Username <input name="imap_user" value="{{ row.imap_user or '' }}" placeholder="helpdesk@yourdistrict.org"></label>
+      <label>Password <input name="imap_password" type="password" autocomplete="new-password"
+             placeholder="{{ 'Saved. Leave blank to keep it' if row.imap_password else 'App password' }}"></label>
+    </div>
+    <span class="he-help">Google Workspace: turn on IMAP for the mailbox and use an app password.</span>
+  </div>
+
+  <label>New tickets go in
+    <select name="default_category_id">
+      <option value="">First category ({{ categories[0].name if categories else 'none yet' }})</option>
+      {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if row.default_category_id == c.id }}>{{ c.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="he-check"><input type="checkbox" name="enabled" {{ 'checked' if row.enabled }}> Check the mailbox every 2 minutes</label>
+  <div class="he-wide he-actions"><button type="submit" class="btn btn-primary">Save</button></div>
+</form>
+
+<div class="card">
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;">
+    <h2 style="margin:0;">Check</h2>
+    <span class="spacer" style="flex:1;"></span>
+    <form method="POST" action="/admin/helpdesk_email/test"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-ghost" {{ 'disabled' if not configured }}>Test connection</button></form>
+    <form method="POST" action="/admin/helpdesk_email/check"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary" {{ 'disabled' if not (configured and row.enabled) }}>Check now</button></form>
+  </div>
+  {% if row.last_error %}<p class="he-note">Last check failed: {{ row.last_error }}</p>{% endif %}
+  {% if row.last_check_at %}<p class="he-muted" style="margin:.6rem 0 0;">Last checked {{ row.last_check_at|ago }}{% if row.last_summary and not row.last_error %}: {{ row.last_summary }}{% endif %}.</p>{% endif %}
+
+  {% if recent %}
+  <div style="overflow-x:auto;margin-top:1rem;">
+  <table>
+    <thead><tr><th>When</th><th>From</th><th>Subject</th><th>What happened</th></tr></thead>
+    <tbody>
+      {% for e in recent %}
+      <tr>
+        <td style="white-space:nowrap;">{{ e.received_at|ago }}</td>
+        <td style="font-size:.85rem;">{{ e.from_email or '—' }}</td>
+        <td style="font-size:.85rem;">{{ e.subject or '—' }}</td>
+        <td style="font-size:.85rem;">
+          <span class="badge {{ {'new': 'badge-green', 'reply': 'badge-blue', 'ignored': 'badge-yellow', 'error': 'badge-red'}.get(e.outcome, 'badge-blue') }}">{{ e.outcome }}</span>
+          {% if e.ticket_id %}<a class="tag-link" href="/admin/tickets/{{ e.ticket_id }}">#{{ e.ticket_id }}</a>{% endif %}
+          {% if e.detail and not e.ticket_id %}<span class="he-muted">{{ e.detail }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const radios = document.querySelectorAll('input[name=kind]');
+  function show() {
+    const kind = (document.querySelector('input[name=kind]:checked') || {}).value;
+    document.querySelectorAll('.he-group').forEach(g => { g.hidden = g.dataset.kind !== kind; });
+  }
+  radios.forEach(r => r.addEventListener('change', show));
+  show();
+})();
+</script>
+<style>
+  .he-muted { color: var(--muted); font-size: .85rem; }
+  .he-help { color: var(--muted); font-size: .76rem; }
+  .he-note { font-size: .87rem; padding: .5rem .8rem; border-left: 3px solid var(--warning); background: var(--surface2); border-radius: 4px; }
+  .he-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 1rem 1.2rem; }
+  .he-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .he-wide { grid-column: 1 / -1; }
+  .he-kind { border: 0; padding: 0; margin: 0; display: flex; gap: 1.2rem; flex-wrap: wrap; }
+  .he-kind legend { color: var(--muted); font-size: .85rem; margin-bottom: .3rem; }
+  .he-kind label, .he-check { flex-direction: row !important; align-items: center; gap: .45rem !important; color: var(--text) !important; cursor: pointer; }
+  .he-kind input, .he-check input { width: auto; }
+  .he-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: .8rem 1rem; margin-top: .6rem; }
+  .he-steps { line-height: 1.7; padding-left: 1.2rem; font-size: .88rem; margin: .5rem 0; }
+  .he-group details summary { cursor: pointer; color: var(--muted); font-size: .88rem; }
+  .he-group[hidden] { display: none; }
+  .he-actions { display: flex; gap: .6rem; }
+</style>
+{% endblock %}

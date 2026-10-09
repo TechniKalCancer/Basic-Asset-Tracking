@@ -1,0 +1,22 @@
+<form method="POST" class="team-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if team %}<input type="hidden" name="team_id" value="{{ team.id }}">{% endif %}
+  <label>Name <input name="name" required maxlength="80" value="{{ team.name if team else '' }}" placeholder="FCHS techs"></label>
+  <label>School (optional)
+    <select name="site_id"><option value="">Any</option>
+      {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if team and team.site_id == s.id }}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <fieldset style="border:0;padding:0;margin:0;">
+    <legend style="color:var(--muted);font-size:.85rem;margin-bottom:.3rem;">Members</legend>
+    <div class="team-members">
+      {% set member_ids = team.members|map(attribute='id')|list if team else [] %}
+      {% for u in techs %}<label><input type="checkbox" name="member_ids" value="{{ u.id }}" {{ 'checked' if u.id in member_ids }}> {{ u.username }}</label>
+      {% else %}<span style="color:var(--muted);font-size:.85rem;">No users can take tickets yet.</span>{% endfor %}
+    </div>
+  </fieldset>
+  <div class="team-actions">
+    <button type="submit" class="btn btn-primary">Save</button>
+    {% if team %}<button type="submit" name="action" value="delete" class="btn btn-danger" onclick="return confirm('Delete this team? Its tickets keep their assigned tech.');">Delete</button>{% endif %}
+  </div>
+</form>

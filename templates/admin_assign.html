@@ -490,6 +490,7 @@
   <table style="margin-bottom:1rem;">
     <tr><td style="color:var(--muted);">Model</td><td>{{ asset.google_model or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Org Unit</td><td>{{ asset.google_org_unit or '—' }}</td></tr>
+    {% if asset.google_aue_date %}<tr><td style="color:var(--muted);">Updates Until</td><td>{{ asset.google_aue_date.strftime('%B %Y') }}{% if asset.google_aue_date < today() %} <span class="badge badge-red">no longer updated</span>{% endif %}</td></tr>{% endif %}
     <tr><td style="color:var(--muted);">Recent User</td><td>{{ asset.google_recent_user or '—' }}
       {% if signin_flag %}<a href="/admin/signin_mismatches" class="badge {{ {'high': 'badge-red', 'medium': 'badge-yellow', 'low': 'badge-blue'}[signin_flag.severity] }}" style="margin-left:.4rem;text-decoration:none;">{{ icon('flag') }}{{ signin_flag.label }}</a>{% endif %}
       {% if asset.google_recent_users and asset.google_recent_users|length > 1 %}

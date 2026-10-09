@@ -3,7 +3,9 @@ import csv
 import io
 from datetime import datetime
 from flask import abort, flash, redirect, render_template, request, url_for
-from foxdesk.core import EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, app, db
+from urllib.parse import quote
+
+from foxdesk.core import APP_URL, EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
     ASSET_STATUSES,
@@ -26,7 +28,7 @@ from foxdesk.models import (
 from foxdesk.services.auth import _current_site_ids, _log_activity, require_permission
 from foxdesk.services.scoping import _scope_people, _scope_registry
 from foxdesk.services.assignments import _assign_asset_to_person, _close_open_assignment
-from foxdesk.services.labels import AVERY_TEMPLATES, code128_svg
+from foxdesk.services.labels import AVERY_TEMPLATES, code128_svg, qr_svg
 from foxdesk.services.attachments import _attachments_for
 from foxdesk.services.reports import _signin_mismatches
 
@@ -317,6 +319,8 @@ def admin_avery_labels():
     per_sheet = template['cols'] * template['rows']
     skip = max(0, min(request.form.get('skip', 0, type=int) or 0, per_sheet - 1))
     include_chargers = request.form.get('chargers') == 'on'
+    include_qr = request.form.get('qr') == 'on'
+    base_url = APP_URL or request.url_root.rstrip('/')
     # One newline-joined field rather than one field per tag — a whole
     # site's worth of tags would blow past Werkzeug's 1000-form-part limit.
     tags = [t.strip() for t in request.form.get('asset_tags', '').split('\n') if t.strip()]
@@ -339,10 +343,11 @@ def admin_avery_labels():
             barcode = code128_svg(tag)
         except ValueError:
             barcode = None
-        labels.append({'tag': tag, 'second': second, 'barcode': barcode, 'charger': False})
+        qr = qr_svg(f'{base_url}/r/{quote(tag)}') if include_qr else None
+        labels.append({'tag': tag, 'second': second, 'barcode': barcode, 'charger': False, 'qr': qr})
         if include_chargers:
             labels.append({'tag': tag, 'second': 'CHARGER' + (f' · {second}' if second else ''),
-                           'barcode': barcode, 'charger': True})
+                           'barcode': barcode, 'charger': True, 'qr': None})
 
     if not labels:
         flash('Select at least one device to print.', 'error')

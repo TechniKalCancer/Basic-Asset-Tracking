@@ -65,6 +65,7 @@ def admin_asset_google_sync(asset_tag):
             asset = Asset(asset_tag=asset_tag, is_valid=True)
             db.session.add(asset)
         asset.google_model        = info.get('model')
+        asset.google_aue_date     = info.get('aue_date')
         asset.google_org_unit     = info.get('org_unit')
         asset.google_recent_user  = info.get('recent_user')
         asset.google_recent_users = info.get('recent_users')

@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block nav %}
+<header class="portal-head">
+  <a class="portal-brand" href="/my">
+    {% if branding.logo_url %}<img src="{{ branding.logo_url }}" alt="" style="max-height:30px;">{% endif %}
+    <span>{{ branding.app_name or 'FoxDesk' }}</span>
+  </a>
+  <span class="spacer" style="flex:1;"></span>
+  {% if v %}
+  <span class="portal-who">{{ v.person.full_name if v.person else v.email }}</span>
+  <a href="/my/logout" class="btn btn-ghost btn-small">Sign out</a>
+  {% endif %}
+</header>
+<style>
+  .portal-head { display: flex; align-items: center; gap: .8rem; padding: .7rem 1rem; background: var(--surface);
+                 border-bottom: 1px solid var(--border); }
+  .portal-brand { display: flex; align-items: center; gap: .6rem; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.05rem; }
+  .portal-who { color: var(--muted); font-size: .85rem; }
+  .btn-small { padding: .3rem .7rem; font-size: .82rem; }
+  .p-wrap { max-width: 760px; margin: 0 auto; }
+  .p-muted { color: var(--muted); font-size: .85rem; }
+  .p-list { display: flex; flex-direction: column; }
+  .p-row { display: flex; align-items: center; gap: .8rem; padding: .7rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .p-row:first-child { border-top: 0; }
+  .p-row .grow { flex: 1; min-width: 180px; }
+  .p-row form { margin: 0; }
+</style>
+{% endblock %}

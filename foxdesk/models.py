@@ -294,6 +294,7 @@ class Asset(db.Model):
     google_last_sync_at = db.Column(db.DateTime, nullable=True)
     google_recent_users = db.Column(db.JSON, nullable=True)  # Google's recentUsers emails, most recent first (≤5) — see _signin_mismatches()
     google_last_activity = db.Column(db.DateTime, nullable=True)  # device's own lastSync in Google (UTC) — when it was last powered on and online, not when we last pulled it
+    google_aue_date    = db.Column(db.Date, nullable=True)     # Google's auto-update expiration: no Chrome updates after this
     google_enabled     = db.Column(db.Boolean, nullable=True)  # last known enabled/disabled state — set by the loaner auto-disable sync, the per-device/bulk Google sync, and the manual toggle button
 
     assigned_to = db.relationship('Person', backref='assets')
@@ -453,6 +454,7 @@ class User(db.Model):
     # their own `sites` list regardless of this. Set via the switcher in the
     # nav (/admin/set_active_site), not this form — see _current_site_ids().
     default_site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
+    signature     = db.Column(db.Text, nullable=True)  # added under replies this user emails to requesters
 
     sites = db.relationship('Site', secondary='user_site', backref='users')
     default_site = db.relationship('Site', foreign_keys=[default_site_id])
@@ -632,6 +634,7 @@ class Ticket(db.Model):
     requester_name  = db.Column(db.String(160), nullable=True)
     requester_email = db.Column(db.String(160), nullable=True)
     assigned_to_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    team_id             = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True, index=True)
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     resolved_at   = db.Column(db.DateTime, nullable=True)
@@ -640,6 +643,7 @@ class Ticket(db.Model):
     site         = db.relationship('Site')
     requester    = db.relationship('Person')
     assigned_to  = db.relationship('User')
+    team         = db.relationship('Team')
     comments     = db.relationship('TicketComment', backref='ticket', order_by='TicketComment.created_at',
                                     cascade='all, delete-orphan')
     charges      = db.relationship('TicketCharge', backref='ticket', order_by='TicketCharge.created_at',
@@ -658,6 +662,7 @@ class TicketComment(db.Model):
     author_label = db.Column(db.String(160), nullable=False)
     created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     emailed_to_requester = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    from_requester = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())  # the requester's own reply (email or portal)
 
 
 class TicketCharge(db.Model):
@@ -962,6 +967,134 @@ class PartMovement(db.Model):
     @property
     def reason_label(self):
         return PART_MOVEMENT_REASONS.get(self.reason, self.reason)
+
+
+team_member = db.Table(
+    'team_member',
+    db.Column('team_id', db.Integer, db.ForeignKey('team.id'), primary_key=True),
+    db.Column('user_id', db.Integer, db.ForeignKey('user.id'), primary_key=True),
+)
+
+
+class Team(db.Model):
+    """A group of techs a ticket can be assigned to ("FCHS techs") as well
+    as, or instead of, one person. Its queue is everything assigned to it."""
+    __tablename__ = 'team'
+    id      = db.Column(db.Integer, primary_key=True)
+    name    = db.Column(db.String(80), nullable=False, unique=True)
+    site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
+
+    site    = db.relationship('Site')
+    members = db.relationship('User', secondary=team_member, backref=db.backref('teams', lazy='select'), lazy='select')
+
+
+class CannedReply(db.Model):
+    """A saved reply techs insert into a ticket with one click. user_id set =
+    that tech's own; None = shared with everyone. {first_name}, {ticket_id},
+    {asset_tag} and friends are filled in from the ticket when inserted."""
+    __tablename__ = 'canned_reply'
+    id          = db.Column(db.Integer, primary_key=True)
+    title       = db.Column(db.String(120), nullable=False)
+    body        = db.Column(db.Text, nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=True)
+    use_count   = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    user     = db.relationship('User')
+    category = db.relationship('TicketCategory')
+
+
+class TicketPresence(db.Model):
+    """Who has a ticket open right now: the page sends a heartbeat every
+    ~20 seconds, so others see "jsmith is viewing / replying". Rows older
+    than a minute are stale and ignored."""
+    __tablename__ = 'ticket_presence'
+    id          = db.Column(db.Integer, primary_key=True)
+    ticket_id   = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=False, index=True)
+    actor_key   = db.Column(db.String(80), nullable=False)
+    actor_label = db.Column(db.String(160), nullable=False)
+    typing      = db.Column(db.Boolean, nullable=False, default=False)
+    updated_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('ticket_id', 'actor_key', name='uq_ticket_presence_actor'),)
+
+
+class MailboxSettings(db.Model):
+    """The help desk mailbox (one row): mail to it becomes tickets, replies
+    thread back. kind is 'imap' or 'graph' (Microsoft 365 via Graph).
+    Passwords/secrets are encrypted (services/secrets)."""
+    __tablename__ = 'mailbox_settings'
+    id                  = db.Column(db.Integer, primary_key=True)
+    kind                = db.Column(db.String(10), nullable=True)
+    address             = db.Column(db.String(255), nullable=True)
+    imap_host           = db.Column(db.String(255), nullable=True)
+    imap_port           = db.Column(db.Integer, nullable=True)
+    imap_user           = db.Column(db.String(255), nullable=True)
+    imap_password       = db.Column(db.Text, nullable=True)
+    graph_tenant        = db.Column(db.String(255), nullable=True)
+    graph_client_id     = db.Column(db.String(255), nullable=True)
+    graph_client_secret = db.Column(db.Text, nullable=True)
+    default_category_id = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=True)
+    enabled             = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    last_check_at       = db.Column(db.DateTime, nullable=True)
+    last_summary        = db.Column(db.String(255), nullable=True)
+    last_error          = db.Column(db.Text, nullable=True)
+
+    default_category = db.relationship('TicketCategory')
+
+
+class InboundEmail(db.Model):
+    """Every message the mailbox check has handled, so none is processed
+    twice (message_id is claimed before work starts, which also keeps
+    several gunicorn workers checking at once from doubling up)."""
+    __tablename__ = 'inbound_email'
+    id          = db.Column(db.Integer, primary_key=True)
+    message_id  = db.Column(db.String(255), nullable=False, unique=True)
+    from_email  = db.Column(db.String(255), nullable=True)
+    subject     = db.Column(db.String(255), nullable=True)
+    outcome     = db.Column(db.String(20), nullable=False, default='pending')  # new | reply | ignored | error | pending
+    detail      = db.Column(db.String(255), nullable=True)
+    ticket_id   = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
+    received_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class PortalSettings(db.Model):
+    """Online fee payments for the portals (one row); the portals themselves
+    are switched on under Features. stripe_secret_key is encrypted."""
+    __tablename__ = 'portal_settings'
+    id                = db.Column(db.Integer, primary_key=True)
+    stripe_secret_key = db.Column(db.Text, nullable=True)
+    payment_note      = db.Column(db.String(255), nullable=True)  # shown when paying online is off ("Pay at the front office")
+
+
+class PortalLogin(db.Model):
+    """A one-time, short-lived sign-in link emailed to a person or parent.
+    Only a hash of the token is stored."""
+    __tablename__ = 'portal_login'
+    id         = db.Column(db.Integer, primary_key=True)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    email      = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    used_at    = db.Column(db.DateTime, nullable=True)
+
+
+class FeePayment(db.Model):
+    """An online payment attempt for a damage fee. provider_ref is the
+    Stripe Checkout Session id; status moves pending -> paid once Stripe
+    confirms the amount, and the incident is marked paid then."""
+    __tablename__ = 'fee_payment'
+    id           = db.Column(db.Integer, primary_key=True)
+    incident_id  = db.Column(db.Integer, db.ForeignKey('incident.id'), nullable=False, index=True)
+    amount       = db.Column(db.Numeric(8, 2), nullable=False)
+    provider     = db.Column(db.String(20), nullable=False, default='stripe')
+    provider_ref = db.Column(db.String(255), nullable=False, unique=True)
+    status       = db.Column(db.String(20), nullable=False, default='pending')
+    payer_email  = db.Column(db.String(255), nullable=True)
+    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    paid_at      = db.Column(db.DateTime, nullable=True)
+
+    incident = db.relationship('Incident')
 
 
 class SigninSettings(db.Model):

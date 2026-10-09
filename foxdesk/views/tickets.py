@@ -1,5 +1,5 @@
 """Pages: tickets."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import flash, redirect, render_template, request, url_for
 from foxdesk.core import EMAIL_ENABLED, app, db
 from foxdesk.automation.engine import emit
@@ -18,12 +18,14 @@ from foxdesk.models import (
     TicketCategory,
     TicketCharge,
     TicketComment,
+    Team,
     User,
 )
 from foxdesk.services.util import _parse_money, resolve_scan
 from foxdesk.services.auth import (
     _current_actor,
     _current_site_ids,
+    _current_user,
     _log_activity,
     kiosk_or_permission_required,
     require_permission,
@@ -119,9 +121,15 @@ def admin_tickets():
     status_filter = request.args.get('status', '').strip()
     category_filter = request.args.get('category_id', type=int)
     assignee_filter = request.args.get('assigned_to_user_id', type=int)
+    team_filter = request.args.get('team_id', type=int)
     search = request.args.get('q', '').strip()
+    view = request.args.get('view', '')
+    me = _current_user()
 
     query = _scope_tickets(Ticket.query, site_ids)
+    queue_counts = _queue_counts(_scope_tickets(Ticket.query, site_ids), me)
+    if view in queue_counts:
+        query = _queue_filter(query, view, me)
     if status_filter and status_filter in TICKET_STATUSES:
         query = query.filter(Ticket.status == status_filter)
     elif not status_filter:
@@ -130,6 +138,8 @@ def admin_tickets():
         query = query.filter(Ticket.category_id == category_filter)
     if assignee_filter:
         query = query.filter(Ticket.assigned_to_user_id == assignee_filter)
+    if team_filter:
+        query = query.filter(Ticket.team_id == team_filter)
     if search:
         like = f'%{search}%'
         query = query.filter(db.or_(
@@ -159,7 +169,32 @@ def admin_tickets():
     return render_template('admin_tickets.html', pagination=pagination, categories=categories, assignees=assignees,
                            statuses=TICKET_STATUSES, status_filter=status_filter, search=search,
                            category_filter=category_filter, assignee_filter=assignee_filter,
-                           sort=sort, sort_dir=sort_dir)
+                           sort=sort, sort_dir=sort_dir, view=view, queue_counts=queue_counts,
+                           queues=QUEUES, teams=Team.query.order_by(Team.name).all(), team_filter=team_filter)
+
+
+STALE_DAYS = 3
+QUEUES = [('', 'All open'), ('mine', 'Mine'), ('my_teams', 'My teams'), ('unassigned', 'Unassigned'),
+          ('stale', f'No update in {STALE_DAYS}+ days')]
+
+
+def _queue_filter(query, view, me):
+    """Saved views over open tickets. 'mine' and 'my_teams' need a named
+    user; the shared admin login has neither, so they come back empty."""
+    query = query.filter(Ticket.status.in_(['open', 'in_progress']))
+    if view == 'mine':
+        return query.filter(Ticket.assigned_to_user_id == (me.id if me else -1))
+    if view == 'my_teams':
+        return query.filter(Ticket.team_id.in_([t.id for t in me.teams] if me else [-1]))
+    if view == 'unassigned':
+        return query.filter(Ticket.assigned_to_user_id.is_(None), Ticket.team_id.is_(None))
+    if view == 'stale':
+        return query.filter(Ticket.updated_at < datetime.utcnow() - timedelta(days=STALE_DAYS))
+    return query
+
+
+def _queue_counts(base, me):
+    return {key: _queue_filter(base, key, me).count() for key, _ in QUEUES if key}
 
 
 @app.route('/admin/tickets/new', methods=['GET', 'POST'])
@@ -225,7 +260,18 @@ def admin_ticket_detail(ticket_id):
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
                            pending_action=pending_action, action_labels=AUTOMATION_ACTIONS,
                            attachments=_attachments_for('ticket', [ticket.id])[ticket.id],
-                           email_enabled=EMAIL_ENABLED)
+                           email_enabled=EMAIL_ENABLED, teams=Team.query.order_by(Team.name).all(),
+                           canned_replies=_canned_for(ticket), me=_current_user())
+
+
+def _canned_for(ticket):
+    """The tech's own saved replies and the shared ones, ones for this
+    ticket's category first, then most used."""
+    from foxdesk.models import CannedReply
+    me = _current_user()
+    replies = CannedReply.query.filter(db.or_(CannedReply.user_id.is_(None),
+                                              CannedReply.user_id == (me.id if me else -1))).all()
+    return sorted(replies, key=lambda r: (r.category_id != ticket.category_id, -r.use_count, r.title.lower()))
 
 
 @app.route('/admin/tickets/<int:ticket_id>/edit', methods=['GET', 'POST'])
@@ -319,7 +365,9 @@ def admin_ticket_comment(ticket_id):
                    site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
     if send_reply:
-        _notify_ticket_requester(ticket, 'ticket_reply', {'tech_name': actor_label, 'reply_body': body}, force=True)
+        me = _current_user()
+        emailed_body = f'{body}\n\n-- \n{me.signature}' if me and me.signature else body
+        _notify_ticket_requester(ticket, 'ticket_reply', {'tech_name': actor_label, 'reply_body': emailed_body}, force=True)
         flash(f'Reply emailed to {ticket.requester_email}.', 'success')
     else:
         flash('Comment added.', 'success')
@@ -361,11 +409,20 @@ def admin_ticket_status(ticket_id):
 @require_permission('tickets')
 def admin_ticket_assign(ticket_id):
     ticket = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
-    old_label = ticket.assigned_to.username if ticket.assigned_to_user_id and ticket.assigned_to else 'nobody'
+    def who():
+        person = ticket.assigned_to.username if ticket.assigned_to_user_id and ticket.assigned_to else None
+        team = ticket.team.name if ticket.team_id and ticket.team else None
+        return ' / '.join(x for x in (team, person) if x) or 'nobody'
+    old_label = who()
     assignee_id = request.form.get('assigned_to_user_id', type=int)
     ticket.assigned_to_user_id = assignee_id or None
+    if 'team_id' in request.form:
+        team_id = request.form.get('team_id', type=int)
+        ticket.team_id = team_id if team_id and Team.query.get(team_id) else None
     ticket.updated_at = datetime.utcnow()
-    label = ticket.assigned_to.username if ticket.assigned_to_user_id and ticket.assigned_to else 'nobody'
+    db.session.flush()
+    db.session.expire(ticket, ['assigned_to', 'team'])
+    label = who()
     _log_activity('ticket_assign', f'Ticket #{ticket.id} reassigned: {old_label} → {label}.', site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
     flash(f'Ticket #{ticket.id} assigned to {label}.', 'success')

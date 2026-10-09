@@ -3,7 +3,7 @@ import csv
 import io
 from collections import defaultdict
 from datetime import datetime
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import Response, abort, flash, redirect, render_template, request, url_for
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.models import ASSET_STATUSES, Asset, AssetRegistry, AuditScan, DEVICE_TYPES, Person, SigninReview
 from foxdesk.services.util import resolve_scan
@@ -22,6 +22,7 @@ from foxdesk.services.reports import (
     ASSIGN_SKIP_NOTE,
     ASSIGN_TIERS,
     _assignment_proposals,
+    _refresh_forecast,
     _signin_window_days,
 )
 
@@ -44,6 +45,28 @@ def admin_data_quality():
         response.headers['Content-Disposition'] = f'attachment; filename=data_quality_{export_key}.csv'
         return response
     return render_template('admin_data_quality.html', checks=checks, row_limit=DATA_QUALITY_ROW_LIMIT)
+
+
+@app.route('/admin/refresh_forecast')
+@require_permission('devices')
+def admin_refresh_forecast():
+    """When Chromebooks stop getting ChromeOS updates (Google's AUE date),
+    by school year: what to budget for, and what's already past it."""
+    forecast = _refresh_forecast(_current_site_ids())
+    if request.args.get('format') == 'csv':
+        import csv
+        import io
+        out = io.StringIO()
+        writer = csv.writer(out)
+        writer.writerow(['asset_tag', 'serial_number', 'model', 'updates_end', 'status', 'assigned_to', 'site'])
+        for row, asset, model in forecast['past_in_use']:
+            writer.writerow([row.asset_tag, row.serial_number or '', model, asset.google_aue_date.isoformat(),
+                             asset.status or '', asset.assigned_to.full_name if asset.assigned_to else '',
+                             row.site.name if row.site else ''])
+        return Response(out.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition': 'attachment; filename=past-auto-update-expiration.csv'})
+    peak = max([y['count'] for y in forecast['years']] + [1])
+    return render_template('admin_refresh_forecast.html', forecast=forecast, peak=peak)
 
 
 @app.route('/admin/signin_mismatches')

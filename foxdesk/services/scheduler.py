@@ -124,13 +124,36 @@ def _automation_loop():
     flags). Each rule fires once per subject; the unique run row it claims
     first makes this safe to run in every gunicorn worker at once."""
     from foxdesk.automation.engine import run_scheduled
+    from foxdesk.services.payments import reconcile_pending
     while True:
         time.sleep(900)
         try:
             with app.app_context():
                 run_scheduled()
+                if feature_enabled('online_payments'):
+                    reconcile_pending()  # payments finished after the payer closed the tab
         except Exception as e:
             logger.error('Automation background loop error: %s', e)
 
 
 threading.Thread(target=_automation_loop, daemon=True).start()
+
+
+def _mailbox_loop():
+    """Background daemon: every 2 minutes, turn new help desk mail into
+    tickets. Each message is claimed before it's handled, so every worker
+    can run this without doubling up."""
+    from foxdesk.services.inbound_mail import MailboxError, check_mailbox
+    while True:
+        time.sleep(120)
+        try:
+            with app.app_context():
+                if feature_enabled('email_tickets'):
+                    check_mailbox()
+        except MailboxError as e:
+            logger.warning('Help desk mailbox check failed: %s', e)
+        except Exception as e:
+            logger.error('Help desk mailbox loop error: %s', e)
+
+
+threading.Thread(target=_mailbox_loop, daemon=True).start()

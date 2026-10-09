@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Portals & payments{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('people') }}Portals &amp; payments</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p class="pp-muted" style="max-width:76ch;margin:0 0 1.2rem;font-size:.9rem;">
+  A page where students and staff see their devices, help requests and fees and report problems, and where parents see
+  their student's devices and damage fees and pay online. People sign in with Google or a one-time link emailed to the
+  address on file. Nobody can create an account.
+</p>
+
+<div class="card">
+  <h2 style="margin-top:0;">What's on</h2>
+  <ul class="pp-status">
+    <li><span class="badge {{ 'badge-green' if on.portal else 'badge-yellow' }}">{{ 'On' if on.portal else 'Off' }}</span> My stuff portal (students and staff)</li>
+    <li><span class="badge {{ 'badge-green' if on.parent else 'badge-yellow' }}">{{ 'On' if on.parent else 'Off' }}</span> Parent portal (uses each student's parent/guardian email)</li>
+    <li><span class="badge {{ 'badge-green' if on.payments else 'badge-yellow' }}">{{ 'On' if on.payments else 'Off' }}</span> Paying fees online{% if not has_key %} (needs a Stripe key below){% endif %}</li>
+    <li><span class="badge {{ 'badge-green' if on.google else 'badge-blue' }}">{{ 'On' if on.google else 'Not set up' }}</span> Sign in with Google (otherwise emailed sign-in links only)</li>
+  </ul>
+  <p class="pp-muted" style="margin:.6rem 0 0;">Switch these on or off under <a href="/admin/features#portal">Features</a>.</p>
+  {% if not public %}
+  <p class="pp-note">FoxDesk is only reachable inside your network right now, so families at home can't open the portal
+    or pay. To change that, give it a public https:// address and set <code>APP_URL</code> to it.</p>
+  {% endif %}
+</div>
+
+<div class="card pp-share">
+  <div class="pp-qr">{{ qr|safe }}</div>
+  <div>
+    <h2 style="margin-top:0;">Portal address</h2>
+    <code class="pp-url">{{ portal_url }}</code>
+    <p class="pp-muted">Put it on the school website or in a parent newsletter; the QR code opens it on a phone. Device label QR
+      codes (Devices → Print Labels) open Report a problem for that device.</p>
+  </div>
+</div>
+
+<form method="POST" class="card pp-form" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2 style="margin:0;">Online payments (Stripe)</h2>
+  <p class="pp-muted" style="margin:0;">Fees are paid on Stripe's own page, so card details never touch FoxDesk. A fee is
+    marked paid only after Stripe confirms the exact amount. Use a key starting with <code>sk_test_</code> to try it with
+    test cards first.</p>
+  <label>Stripe secret key {% if has_key %}<span class="badge {{ 'badge-yellow' if test_mode else 'badge-green' }}">{{ 'test mode' if test_mode else 'live' }}</span>{% endif %}
+    <input name="stripe_secret_key" type="password" autocomplete="new-password"
+           placeholder="{{ 'Saved. Leave blank to keep it' if has_key else 'sk_live_… or sk_test_…' }}">
+  </label>
+  <label>When paying online is off, tell families
+    <input name="payment_note" maxlength="255" value="{{ row.payment_note or '' }}" placeholder="Pay at your school's front office.">
+  </label>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+    <button type="submit" class="btn btn-primary">Save</button>
+  </div>
+</form>
+<form method="POST" action="/admin/portal/test_payments" style="margin:-.6rem 0 1.2rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-ghost" {{ 'disabled' if not has_key }}>Test the Stripe key</button>
+</form>
+
+{% if payments %}
+<h2 style="font-size:1.05rem;margin:0 0 .6rem;">Online payments</h2>
+<div class="card" style="padding:0;">
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>When</th><th>For</th><th class="num">Amount</th><th>Paid by</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for p in payments %}
+      <tr>
+        <td style="white-space:nowrap;">{{ p.created_at|ago }}</td>
+        <td>{{ p.incident.asset_tag if p.incident else '—' }} <span class="pp-muted">{{ p.incident.person_name if p.incident else '' }}</span></td>
+        <td class="num">${{ '%.2f'|format(p.amount) }}</td>
+        <td class="pp-muted">{{ p.payer_email or '—' }}</td>
+        <td><span class="badge {{ {'paid': 'badge-green', 'pending': 'badge-blue', 'expired': 'badge-yellow', 'review': 'badge-red'}.get(p.status, 'badge-blue') }}">{{ 'needs a look' if p.status == 'review' else p.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<style>
+  .pp-muted { color: var(--muted); font-size: .85rem; }
+  .pp-note { font-size: .87rem; padding: .5rem .8rem; border-left: 3px solid var(--warning); background: var(--surface2); border-radius: 4px; margin: .8rem 0 0; }
+  .pp-status { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; }
+  .pp-share { display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap; }
+  .pp-qr { width: 120px; height: 120px; background: #fff; padding: 6px; border-radius: 6px; flex: none; }
+  .pp-qr svg { width: 100%; height: 100%; shape-rendering: crispEdges; }
+  .pp-url { display: inline-block; padding: .35rem .6rem; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+  .pp-form { display: flex; flex-direction: column; gap: .8rem; max-width: 760px; }
+  .pp-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .num { text-align: right; white-space: nowrap; }
+</style>
+{% endblock %}

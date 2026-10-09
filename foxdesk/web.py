@@ -1,6 +1,6 @@
 """Template globals, filters, navigation and the Settings hub listing."""
 import os
-from datetime import datetime
+from datetime import date, datetime
 from flask import request, session
 from markupsafe import Markup, escape
 from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
@@ -36,6 +36,7 @@ NAV_SECTION_PREFIXES = [
     ('/admin/data_quality', 'devices'),
     ('/admin/signin_mismatches', 'devices'),
     ('/admin/assign_from_google', 'devices'),
+    ('/admin/refresh_forecast', 'devices'),
     ('/admin/labels', 'devices'),
     ('/admin/people', 'people'),
     ('/admin/accounts', 'people'),
@@ -44,6 +45,8 @@ NAV_SECTION_PREFIXES = [
     ('/admin/directory', 'admin'),
     ('/admin/warranty', 'admin'),
     ('/admin/signin', 'admin'),
+    ('/admin/helpdesk_email', 'admin'),
+    ('/admin/portal', 'admin'),
     ('/loaner_checkinout', 'loaners'),
     ('/loaner_checkout', 'loaners'),
     ('/loaner_checkin', 'loaners'),
@@ -51,6 +54,8 @@ NAV_SECTION_PREFIXES = [
     ('/admin/repairs', 'repairs'),
     ('/admin/parts', 'repairs'),
     ('/admin/tickets', 'tickets'),
+    ('/admin/canned_replies', 'tickets'),
+    ('/admin/teams', 'tickets'),
     ('/admin/ticket_categories', 'tickets'),
     ('/admin/automations', 'admin'),
     ('/admin/rules', 'admin'),
@@ -188,11 +193,13 @@ def _settings_sections():
         ('People & Access', [
             (users, 'users', 'Users & Permissions', 'Staff logins and what each one can see and do.', '/admin/users'),
             (sup and feature_switch('google_signin'), 'lock', 'Sign-in', 'Sign in with Google; turn off the shared admin password.', '/admin/signin'),
+            (sup, 'people', 'Portals & payments', 'The My stuff and parent portals, and paying fees online.', '/admin/portal'),
             (sup, 'site', 'Sites', 'Schools and buildings; which devices and people belong where.', '/admin/sites'),
             (admin and feature_enabled('kiosk'), 'computer', 'Kiosk Devices', 'Enroll a shared device for check-in/out without a login.', '/admin/kiosk'),
         ]),
         ('Notifications', [
             (sup, 'email', 'Email', 'Wording for reminders, ticket updates, and parent damage notices.', '/admin/emails'),
+            (sup and feature_switch('email_tickets'), 'email', 'Help desk email', 'Mail to your help desk address becomes tickets; replies thread back.', '/admin/helpdesk_email'),
             (admin and feature_enabled('reminders'), 'schedule', 'Overdue Reminders', 'Devices past their due date, and who to remind.', '/admin/reminders'),
         ]),
         ('Customize', [
@@ -225,7 +232,7 @@ def _settings_sections():
 
 app.add_template_filter(short_dn, 'short_dn')
 # Also a global (not just context) so macros imported without context can check permissions.
-app.jinja_env.globals.update(can=_has_permission)
+app.jinja_env.globals.update(can=_has_permission, today=date.today)
 
 
 @app.template_filter('ago')

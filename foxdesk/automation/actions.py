@@ -19,7 +19,7 @@ from foxdesk.models import (
     Asset, PendingDeviceAction, TicketCharge, TicketComment,
 )
 from foxdesk.automation.triggers import (
-    _org_units, _plain, _repair_categories, _sites, _staff_users, _ticket_categories, placeholders,
+    _org_units, _plain, _repair_categories, _sites, _staff_users, _teams, _ticket_categories, placeholders,
 )
 
 
@@ -103,7 +103,7 @@ def _set_ticket_field(field, choices_label):
         value = p.get('value')
         if not t:
             return 'skipped', 'No ticket.'
-        if field == 'assigned_to_user_id':
+        if field in ('assigned_to_user_id', 'team_id'):
             value = int(value) if str(value or '').isdigit() else None
         if dry_run:
             return 'ok', f'Would set {choices_label} to {value}'
@@ -285,6 +285,9 @@ ACTIONS = {
     'assign_ticket': dict(label='Assign the ticket to a tech', subjects=('ticket',),
                           run=_set_ticket_field('assigned_to_user_id', 'Assignee'),
                           params=[('value', 'Tech', 'choice', _staff_users, None)]),
+    'assign_team': dict(label='Assign the ticket to a team', subjects=('ticket',),
+                        run=_set_ticket_field('team_id', 'Team'),
+                        params=[('value', 'Team', 'choice', _teams, None)]),
     'add_comment': dict(label='Add a comment to the ticket', subjects=('ticket',), run=_add_ticket_comment, params=[
         ('body', 'Comment', 'textarea', None, ''),
         ('email_requester', 'Also email it to the requester', 'bool', None, False),

@@ -1,0 +1,67 @@
+{% extends 'portal_base.html' %}
+{% block title %}My stuff{% endblock %}
+{% block content %}
+<div class="p-wrap">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <h1 style="margin:0;font-size:1.5rem;">Hi{% if person %} {{ person.first_name }}{% endif %}</h1>
+    <span class="spacer" style="flex:1;"></span>
+    {% if person and feature('tickets') %}<a href="/my/report" class="btn btn-primary">Report a problem</a>{% endif %}
+  </div>
+
+  {% if person %}
+  <div class="card">
+    <h2 style="margin-top:0;">Your devices</h2>
+    <div class="p-list">
+      {% for tag, label, kind, due in devices %}
+      <div class="p-row">
+        <div class="grow"><strong>{{ tag }}</strong>{% if label %} <span class="p-muted">{{ label }}</span>{% endif %}
+          {% if kind == 'loaner' %}<span class="badge badge-yellow">Loaner{% if due %}, due {{ due.strftime('%b %d') }}{% endif %}</span>{% endif %}</div>
+        {% if feature('tickets') %}<a href="/my/report?device={{ tag|urlencode }}" class="btn btn-ghost btn-small">Report a problem</a>{% endif %}
+      </div>
+      {% else %}<p class="p-muted" style="margin:0;">No devices checked out to you.</p>{% endfor %}
+    </div>
+  </div>
+
+  {% if feature('tickets') %}
+  <div class="card">
+    <h2 style="margin-top:0;">Your help requests</h2>
+    <div class="p-list">
+      {% for t in tickets %}
+      <div class="p-row">
+        <div class="grow"><a class="tag-link" href="/my/tickets/{{ t.id }}">#{{ t.id }} {{ t.subject }}</a>
+          <div class="p-muted">updated {{ t.updated_at|ago }}</div></div>
+        <span class="badge {{ {'open': 'badge-blue', 'in_progress': 'badge-yellow', 'resolved': 'badge-green', 'closed': 'badge-green'}.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span>
+      </div>
+      {% else %}<p class="p-muted" style="margin:0;">None yet.</p>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if fees %}
+  <div class="card">
+    <h2 style="margin-top:0;">Device fees</h2>
+    {% with items=fees %}{% include '_portal_fees.html' %}{% endwith %}
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% for c in children %}
+  <div class="card">
+    <h2 style="margin-top:0;">{{ c.person.full_name }}</h2>
+    <h3 class="p-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;margin:.4rem 0;">Devices</h3>
+    <div class="p-list">
+      {% for tag, label, kind, due in c.devices %}
+      <div class="p-row"><div class="grow"><strong>{{ tag }}</strong>{% if label %} <span class="p-muted">{{ label }}</span>{% endif %}
+        {% if kind == 'loaner' %}<span class="badge badge-yellow">Loaner{% if due %}, due {{ due.strftime('%b %d') }}{% endif %}</span>{% endif %}</div></div>
+      {% else %}<p class="p-muted" style="margin:0;">No devices checked out.</p>{% endfor %}
+    </div>
+    {% if c.damage %}
+    <h3 class="p-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .4rem;">Damage reports and fees</h3>
+    {% with items=c.damage %}{% include '_portal_fees.html' %}{% endwith %}
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not person and not children %}<div class="card p-muted">Nothing to show for {{ v.email }}.</div>{% endif %}
+</div>
+{% endblock %}

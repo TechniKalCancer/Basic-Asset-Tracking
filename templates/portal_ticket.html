@@ -1,0 +1,27 @@
+{% extends 'portal_base.html' %}
+{% block title %}Request #{{ ticket.id }}{% endblock %}
+{% block content %}
+<div class="p-wrap">
+  <a href="/my" class="p-muted">← My stuff</a>
+  <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin:.6rem 0 1rem;">
+    <h1 style="margin:0;font-size:1.35rem;">#{{ ticket.id }} {{ ticket.subject }}</h1>
+    <span class="badge {{ {'open': 'badge-blue', 'in_progress': 'badge-yellow', 'resolved': 'badge-green', 'closed': 'badge-green'}.get(ticket.status, 'badge-blue') }}">{{ ticket.status|replace('_', ' ')|capitalize }}</span>
+  </div>
+  <div class="card">
+    <div class="p-muted">You wrote {{ ticket.created_at|ago }}{% if ticket.asset_tag %} about {{ ticket.asset_tag }}{% endif %}:</div>
+    <div style="white-space:pre-wrap;margin-top:.4rem;">{{ ticket.description }}</div>
+  </div>
+  {% for c in thread %}
+  <div class="card" style="{{ '' if c.from_requester else 'border-left:3px solid var(--accent);' }}">
+    <div class="p-muted">{{ 'You' if c.from_requester else 'Help desk' }} · {{ c.created_at|ago }}</div>
+    <div style="white-space:pre-wrap;margin-top:.4rem;">{{ c.body }}</div>
+  </div>
+  {% endfor %}
+  <form method="POST" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="pReply" class="p-muted" style="display:block;margin-bottom:.3rem;">Add a reply{% if ticket.status in ('resolved', 'closed') %} (this reopens your request){% endif %}</label>
+    <textarea id="pReply" name="body" rows="3" required style="width:100%;margin-bottom:.6rem;"></textarea>
+    <button type="submit" class="btn btn-primary">Send</button>
+  </form>
+</div>
+{% endblock %}

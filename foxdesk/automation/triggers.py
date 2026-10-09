@@ -44,6 +44,11 @@ def _staff_users():
     return [(u.id, u.username) for u in User.query.filter_by(is_active=True).order_by(User.username)]
 
 
+def _teams():
+    from foxdesk.models import Team
+    return [(t.id, t.name) for t in Team.query.order_by(Team.name)]
+
+
 def _org_units():
     return [(o.org_unit_path, o.org_unit_path) for o in GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path)]
 
@@ -77,6 +82,7 @@ FIELDS = {
     'ticket.description':   ('Ticket description', 'text', None),
     'ticket.has_device':    ('Ticket has a device attached', 'bool', None),
     'ticket.assignee':      ('Ticket assigned to', 'choice', _staff_users),
+    'ticket.team':          ('Ticket team', 'choice', _teams),
     'ticket.requester_role': ('Requester role', 'choice', ROLES),
 
     'device.type':          ('Device type', 'choice', _plain(DEVICE_TYPES)),
@@ -87,6 +93,7 @@ FIELDS = {
     'device.asset_tag':     ('Asset tag', 'text', None),
     'device.org_unit':      ('Device Google org unit', 'text', None),
     'device.warranty_days_left': ('Days of warranty left', 'number', None),
+    'device.aue_days_left': ('Days until ChromeOS updates stop', 'number', None),
 
     'holder.role':          ('Device holder role', 'choice', ROLES),
     'holder.grad_year':     ('Device holder graduation year', 'number', None),
@@ -136,12 +143,12 @@ OPERATORS = {
 }
 
 DEVICE_FIELDS = ['device.type', 'device.model', 'device.site', 'device.status', 'device.is_loaner', 'device.asset_tag',
-                 'device.org_unit', 'device.warranty_days_left', 'holder.role', 'holder.grad_year',
+                 'device.org_unit', 'device.warranty_days_left', 'device.aue_days_left', 'holder.role', 'holder.grad_year',
                  'holder.has_protection_plan']
 PERSON_FIELDS = ['person.role', 'person.site', 'person.grad_year', 'person.device_count', 'person.incident_count',
                  'person.has_protection_plan', 'person.has_guardian_email']
 TICKET_FIELDS = ['ticket.category', 'ticket.priority', 'ticket.status', 'ticket.site', 'ticket.subject',
-                 'ticket.description', 'ticket.has_device', 'ticket.assignee', 'ticket.requester_role']
+                 'ticket.description', 'ticket.has_device', 'ticket.assignee', 'ticket.team', 'ticket.requester_role']
 
 # ─── triggers ─────────────────────────────────────────────────────────────────
 # subject: what the rule acts on. scheduled: checked by the background loop
@@ -256,6 +263,7 @@ def _device_facts(row, asset):
         'device.status': asset.status if asset else 'available', 'device.is_loaner': bool(row.is_loaner),
         'device.asset_tag': row.asset_tag, 'device.org_unit': asset.google_org_unit if asset else None,
         'device.warranty_days_left': warranty_left,
+        'device.aue_days_left': (asset.google_aue_date - date.today()).days if asset and asset.google_aue_date else None,
         'holder.role': holder.role if holder else None, 'holder.grad_year': holder.grad_year if holder else None,
         'holder.has_protection_plan': bool(holder and holder.insurance_opted_in),
     })
@@ -328,7 +336,7 @@ def build_context(trigger_key, subject, **extra):
             'ticket.category': t.category_id, 'ticket.priority': t.priority, 'ticket.status': t.status,
             'ticket.old_status': extra.get('old_status'), 'ticket.site': t.site_id, 'ticket.subject': t.subject,
             'ticket.description': t.description, 'ticket.has_device': bool(t.asset_tag),
-            'ticket.assignee': t.assigned_to_user_id,
+            'ticket.assignee': t.assigned_to_user_id, 'ticket.team': t.team_id,
             'ticket.requester_role': t.requester.role if t.requester else None,
         })
     elif kind == 'incident':

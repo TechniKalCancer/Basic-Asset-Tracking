@@ -8,10 +8,11 @@ def save(client, *off):
     return client.post('/admin/features', data=data)
 
 
-def test_everything_on_by_default(client):
+def test_everything_on_by_default_except_the_portals(client):
     body = client.get('/admin/features').get_data(as_text=True)
     assert body.count('type="checkbox"') == len(A.FEATURES)
-    assert all(A.feature_switch(k) for k in A.FEATURES)
+    off = {k for k in A.FEATURES if not A.feature_switch(k)}
+    assert off == {'portal', 'parent_portal'}, 'portals face families, so a district opts in'
 
 
 def test_turning_loaners_off_hides_and_blocks_it(client):

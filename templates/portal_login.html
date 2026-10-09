@@ -1,0 +1,25 @@
+{% extends 'portal_base.html' %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div class="p-wrap" style="max-width:420px;margin-top:2rem;">
+  <div class="card">
+    <h1 style="margin:0 0 .4rem;font-size:1.4rem;">Sign in</h1>
+    <p class="p-muted" style="margin:0 0 1.2rem;">
+      {% if next_device %}Sign in to report a problem with device {{ next_device }}.{% else %}See your school devices, help requests and device fees. Parents: see your student's devices and pay fees.{% endif %}
+    </p>
+    {% if google %}
+    <a href="/my/google" class="btn btn-primary" style="display:flex;justify-content:center;width:100%;">Sign in with your school Google account</a>
+    {% if email_links %}<div class="p-muted" style="text-align:center;margin:1rem 0;">or</div>{% endif %}
+    {% endif %}
+    {% if email_links %}
+    <form method="POST" action="/my/login">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="pEmail" class="p-muted" style="display:block;margin-bottom:.3rem;">Email the school has on file for you</label>
+      <input id="pEmail" type="email" name="email" required autocomplete="email" placeholder="you@example.com" style="margin-bottom:.8rem;">
+      <button type="submit" class="btn {{ 'btn-ghost' if google else 'btn-primary' }}" style="width:100%;">Email me a sign-in link</button>
+    </form>
+    {% endif %}
+    {% if not google and not email_links %}<p class="p-muted">Sign-in isn't set up yet. Please ask the school office.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

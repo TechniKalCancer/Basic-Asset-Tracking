@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Refresh forecast{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('dashboard') }}Refresh forecast</h1>
+  <span class="spacer" style="flex:1;"></span>
+  {% if forecast.past_in_use %}<a href="?format=csv" class="btn btn-ghost">Download past-date list (CSV)</a>{% endif %}
+</div>
+<p class="rf-muted" style="max-width:76ch;margin:0 0 1.2rem;font-size:.9rem;">
+  Every Chromebook model has an auto-update expiration date, after which Google stops sending ChromeOS and security
+  updates. This groups your Chromebooks by the school year (July to June) that happens, so you can budget replacements.
+  Dates come from the Google device sync. Retired and lost devices aren't counted.
+</p>
+
+{% if not forecast.tracked %}
+<div class="card"><h2 style="margin-top:0;">No dates yet</h2>
+  <p class="rf-muted">Run the Google device sync once; it now records each Chromebook's auto-update expiration date.
+  {% if forecast.unknown %}{{ forecast.unknown }} Chromebooks are waiting for a date.{% endif %}</p></div>
+{% else %}
+<div class="rf-tiles">
+  <div class="rf-tile {{ 'rf-bad' if forecast.past_in_use }}"><span>{{ forecast.past_in_use|length }}</span>already past it, still in use</div>
+  <div class="rf-tile rf-warn"><span>{{ forecast.years[0].count }}</span>stop updating this school year ({{ forecast.years[0].label }})</div>
+  <div class="rf-tile"><span>{{ forecast.years[1].count }}</span>next school year ({{ forecast.years[1].label }})</div>
+  <div class="rf-tile"><span>{{ forecast.unknown }}</span>Chromebooks with no date yet</div>
+</div>
+
+<div class="card" style="padding:0;">
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Updates stop in</th><th class="num">Devices</th><th style="width:34%;"></th><th>Mostly</th><th class="num">Bought for</th></tr></thead>
+    <tbody>
+      {% for y in forecast.years %}
+      <tr>
+        <td style="white-space:nowrap;">{{ y.label }}{% if y.current %} <span class="badge badge-yellow">this year</span>{% endif %}</td>
+        <td class="num">{{ '{:,}'.format(y.count) }}</td>
+        <td><div class="rf-bar" style="width:{{ (100 * y.count / peak)|round(1) }}%;" aria-hidden="true"></div></td>
+        <td class="rf-muted">{% for m, n in y.top_models %}{{ m }} ({{ n }}){{ ', ' if not loop.last }}{% else %}—{% endfor %}</td>
+        <td class="num">{{ '$%s'|format('{:,.0f}'.format(y.cost)) if y.cost else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="rf-muted" style="padding:.6rem 1rem;margin:0;">"Bought for" adds up purchase costs on record, a rough guide to what replacing that year's devices costs.</p>
+</div>
+
+{% if forecast.past_in_use %}
+<h2 style="font-size:1.05rem;margin:1.6rem 0 .6rem;">Already past their date, still in use ({{ forecast.past_in_use|length }})</h2>
+<div class="card" style="padding:0;">
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Device</th><th>Model</th><th>Updates ended</th><th>Status</th><th>Holder</th></tr></thead>
+    <tbody>
+      {% for row, asset, model in forecast.past_in_use[:300] %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ row.asset_tag }}/assign">{{ row.asset_tag }}</a></td>
+        <td class="rf-muted">{{ model }}</td>
+        <td style="white-space:nowrap;">{{ asset.google_aue_date.strftime('%b %Y') }}</td>
+        <td>{{ (asset.status or 'available')|capitalize }}</td>
+        <td>{{ asset.assigned_to.full_name if asset.assigned_to else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if forecast.past_in_use|length > 300 %}<p class="rf-muted" style="padding:.6rem 1rem;margin:0;">Showing 300; the CSV has them all.</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+
+<style>
+  .rf-muted { color: var(--muted); font-size: .85rem; }
+  .rf-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .7rem; margin-bottom: 1.2rem; }
+  .rf-tile { display: flex; flex-direction: column; gap: .2rem; padding: .8rem 1rem; border: 1px solid var(--border);
+             border-radius: var(--radius); background: var(--surface); color: var(--muted); font-size: .82rem; }
+  .rf-tile span { font-size: 1.5rem; font-weight: 700; color: var(--text); }
+  .rf-warn span { color: var(--warning); }
+  .rf-bad span { color: var(--danger); }
+  .rf-bar { height: .7rem; border-radius: 4px; background: #3987e5; min-width: 2px; }
+  .num { text-align: right; white-space: nowrap; }
+</style>
+{% endblock %}

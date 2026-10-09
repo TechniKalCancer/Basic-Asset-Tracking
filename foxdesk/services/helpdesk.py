@@ -129,7 +129,14 @@ def _notify_ticket_requester(ticket, kind, extra_vars=None, force=False):
     variables = _ticket_email_vars(ticket)
     variables.update(extra_vars or {})
     subject, body = _render_email_template(kind, variables)
-    _send_email_in_background(ticket.requester_email, subject, body)
+    from foxdesk.services.inbound_mail import reply_headers
+    reply_to, headers = reply_headers(ticket.id)
+    if reply_to and f'#{ticket.id}' not in subject:
+        subject = f'{subject} [Ticket #{ticket.id}]'  # an edited template might drop it; replies need it to thread
+    if reply_to:
+        _send_email_in_background(ticket.requester_email, subject, body, reply_to=reply_to, headers=headers)
+    else:
+        _send_email_in_background(ticket.requester_email, subject, body)
     return True
 
 

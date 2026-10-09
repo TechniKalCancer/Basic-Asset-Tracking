@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Teams{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('users') }}Teams</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/tickets" class="btn btn-ghost">← Tickets</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:75ch;margin:0 0 1.2rem;">
+  Group techs so a ticket can go to a team ("FCHS techs") instead of one person. Members see the team's tickets under
+  <strong>My teams</strong>. An automation can route tickets to a team by school or category.
+</p>
+
+{% for t in teams %}
+<details class="card team">
+  <summary><strong>{{ t.name }}</strong>
+    {% if t.site %}<span class="badge badge-blue">{{ t.site.name }}</span>{% endif %}
+    <span class="team-muted">{{ t.members|length }} member{{ '' if t.members|length == 1 else 's' }} · {{ open_counts.get(t.id, 0) }} open ticket{{ '' if open_counts.get(t.id, 0) == 1 else 's' }}</span>
+  </summary>
+  {% with team=t %}{% include '_team_form.html' %}{% endwith %}
+</details>
+{% endfor %}
+
+<div class="card">
+  <h2>New team</h2>
+  {% with team=None %}{% include '_team_form.html' %}{% endwith %}
+</div>
+
+<style>
+  .team { padding: .8rem 1rem; }
+  .team summary { display: flex; gap: .6rem; align-items: center; cursor: pointer; flex-wrap: wrap; }
+  .team-muted { color: var(--muted); font-size: .85rem; }
+  .team-form { display: flex; flex-direction: column; gap: .7rem; margin-top: .8rem; max-width: 720px; }
+  .team-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .team-form select { width: auto; max-width: 320px; }
+  .team-members { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .3rem .8rem; }
+  .team-members label { flex-direction: row; align-items: center; gap: .4rem; color: var(--text); cursor: pointer; }
+  .team-members input { width: auto; }
+  .team-actions { display: flex; gap: .6rem; }
+</style>
+{% endblock %}

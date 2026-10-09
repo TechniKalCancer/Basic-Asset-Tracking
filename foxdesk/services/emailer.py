@@ -16,7 +16,7 @@ from foxdesk.core import (
 from foxdesk.models import EmailSettings
 
 
-def send_email(to_email, subject, body):
+def send_email(to_email, subject, body, reply_to=None, headers=None):
     """
     Sends a plain-text email via SMTP (Gmail by default: smtp.gmail.com:587 with
     an App Password — a regular account password will not work with 2FA enabled).
@@ -28,6 +28,8 @@ def send_email(to_email, subject, body):
         to_email: Recipient address.
         subject: Email subject line.
         body: Plain-text email body.
+        reply_to: Optional Reply-To address (the help desk mailbox, so replies become ticket comments).
+        headers: Optional extra headers, e.g. a Message-ID that names the ticket.
 
     Raises:
         RuntimeError: If SMTP_FROM_EMAIL is not configured.
@@ -40,6 +42,10 @@ def send_email(to_email, subject, body):
     msg['Subject'] = subject
     msg['From'] = SMTP_FROM_EMAIL
     msg['To'] = to_email
+    if reply_to:
+        msg['Reply-To'] = reply_to
+    for name, value in (headers or {}).items():
+        msg[name] = value
     msg.set_content(body)
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as server:
@@ -49,14 +55,14 @@ def send_email(to_email, subject, body):
         server.send_message(msg)
 
 
-def _send_email_in_background(to_email, subject, body):
+def _send_email_in_background(to_email, subject, body, reply_to=None, headers=None):
     """Fire-and-forget send_email() on a daemon thread, for emails triggered
     as a side effect of a page action (ticket submitted, status changed) —
     a slow or unreachable SMTP server must never make a student's form
     submission hang for 10s or fail. Failures are only logged."""
     def _run():
         try:
-            send_email(to_email, subject, body)
+            send_email(to_email, subject, body, reply_to=reply_to, headers=headers)
             logger.info('Sent "%s" email to %s', subject, to_email)
         except Exception as e:
             logger.error('Background email to %s failed: %s', to_email, e)

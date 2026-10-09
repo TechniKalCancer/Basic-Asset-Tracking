@@ -15,7 +15,7 @@ from foxdesk.core import (
 from foxdesk.models import User
 from foxdesk.services.auth import _admin_session_active, _current_user, _log_activity, _post_login_redirect
 from foxdesk.services.features import feature_enabled
-from foxdesk.services.signin import SigninError, finish, redirect_uri, shared_password_allowed, start
+from foxdesk.services.signin import SigninError, finish, pending_purpose, redirect_uri, shared_password_allowed, start
 
 
 def _start_user_session(user):
@@ -93,6 +93,9 @@ def auth_google():
 def auth_google_callback():
     if not feature_enabled('google_signin'):
         return redirect(url_for('admin_login'))
+    if pending_purpose(session) == 'portal':
+        from foxdesk.views.portal import finish_portal_google
+        return finish_portal_google()
     try:
         user = finish(session, request.args)
     except SigninError as e:

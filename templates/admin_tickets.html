@@ -11,7 +11,16 @@
   <a href="/admin" class="btn btn-ghost">← Back</a>
 </div>
 
+<div class="queue-tabs" role="navigation" aria-label="Queues">
+  {% for key, label in queues %}
+  <a href="?view={{ key }}" class="{{ 'active' if view == key }}" {{ 'aria-current="page"'|safe if view == key }}>{{ label }}{% if key %} <span class="badge {{ 'badge-yellow' if key in ('unassigned', 'stale') and queue_counts[key] else 'badge-blue' }}">{{ queue_counts[key] }}</span>{% endif %}</a>
+  {% endfor %}
+  {% if is_super_admin() or can('admin') %}<a href="/admin/teams" class="queue-manage">Teams</a>{% endif %}
+  <a href="/admin/canned_replies" class="queue-manage">Saved replies</a>
+</div>
+
 <form method="GET" style="display:flex;gap:.8rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+  <input type="hidden" name="view" value="{{ view }}">
   <input type="hidden" name="sort" value="{{ sort }}">
   <input type="hidden" name="dir" value="{{ sort_dir }}">
   <input type="text" name="q" value="{{ search }}" placeholder="Search subject, description, requester, asset tag…" style="flex:1;min-width:220px;max-width:360px;" />
@@ -34,6 +43,12 @@
     <option value="{{ a.id }}" {{ 'selected' if assignee_filter == a.id }}>{{ a.username }}</option>
     {% endfor %}
   </select>
+  {% if teams %}
+  <select name="team_id" onchange="this.form.submit()" aria-label="Team">
+    <option value="">Any team</option>
+    {% for t in teams %}<option value="{{ t.id }}" {{ 'selected' if team_filter == t.id }}>{{ t.name }}</option>{% endfor %}
+  </select>
+  {% endif %}
   <button type="submit" class="btn btn-ghost">Search</button>
   {% if search %}<a href="?status={{ status_filter }}{% if category_filter %}&category_id={{ category_filter }}{% endif %}{% if assignee_filter %}&assigned_to_user_id={{ assignee_filter }}{% endif %}" class="btn btn-ghost">Clear</a>{% endif %}
 </form>
@@ -64,7 +79,7 @@
         <td><span class="badge {{ status_badge.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span></td>
         <td><span class="badge {{ priority_badge.get(t.priority, 'badge-blue') }}">{{ t.priority|capitalize }}</span></td>
         <td style="color:var(--muted);">{{ t.requester_name or '—' }}</td>
-        <td style="color:var(--muted);">{{ t.assigned_to.username if t.assigned_to else '—' }}</td>
+        <td style="color:var(--muted);">{{ t.assigned_to.username if t.assigned_to else '—' }}{% if t.team %}<div style="font-size:.75rem;">{{ t.team.name }}</div>{% endif %}</td>
         <td style="white-space:nowrap;">
           {% if t.charges %}
             {% set unpaid_count = t.charges|selectattr('paid_at', 'none')|list|length %}
@@ -98,4 +113,13 @@
   {% endif %}
 </div>
 {% endif %}
+<style>
+  .queue-tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.6rem 0 1rem; align-items: center; }
+  .queue-tabs a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                  text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+  .queue-tabs a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .queue-tabs a:hover, .queue-tabs a:focus-visible { border-color: var(--accent); }
+  .queue-tabs a.queue-manage { border-style: dashed; margin-left: auto; }
+  .queue-tabs a.queue-manage + a.queue-manage { margin-left: 0; }
+</style>
 {% endblock %}

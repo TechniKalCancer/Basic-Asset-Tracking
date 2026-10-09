@@ -13,6 +13,8 @@
   <a href="/admin/tickets" class="btn btn-ghost">← Back</a>
 </div>
 
+<div id="presence" class="presence" role="status" aria-live="polite" hidden></div>
+
 <div class="card" style="margin-bottom:1.5rem;">
   <table style="width:100%;">
     <tr><td style="color:var(--muted);width:140px;">Category</td><td>{{ ticket.category.name if ticket.category else '—' }}</td></tr>
@@ -105,6 +107,17 @@
           {% endfor %}
         </select>
       </div>
+      {% if teams %}
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Team</label>
+        <select name="team_id">
+          <option value="">No team</option>
+          {% for t in teams %}
+          <option value="{{ t.id }}" {{ 'selected' if ticket.team_id == t.id }}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
       <button type="submit" class="btn btn-primary">Assign</button>
     </form>
   </div>
@@ -279,7 +292,7 @@
   {% for c in ticket.comments %}
   <div style="padding:.8rem 0;border-bottom:1px solid var(--border);">
     <div style="color:var(--muted);font-size:.8rem;margin-bottom:.3rem;">{{ c.author_label }} — {{ c.created_at.strftime('%Y-%m-%d %H:%M') }}
-      {% if c.emailed_to_requester %}<span class="badge badge-blue" style="font-size:.68rem;">{{ icon('email') }}Emailed to requester</span>{% else %}<span class="badge" style="font-size:.68rem;background:var(--surface2);color:var(--muted);">Internal</span>{% endif %}</div>
+      {% if c.from_requester %}<span class="badge badge-green" style="font-size:.68rem;">From requester</span>{% elif c.emailed_to_requester %}<span class="badge badge-blue" style="font-size:.68rem;">{{ icon('email') }}Emailed to requester</span>{% else %}<span class="badge" style="font-size:.68rem;background:var(--surface2);color:var(--muted);">Internal</span>{% endif %}</div>
     <div style="white-space:pre-wrap;">{{ c.body }}</div>
   </div>
   {% else %}
@@ -288,11 +301,21 @@
 
   <form method="POST" action="/admin/tickets/{{ ticket.id }}/comment" style="margin-top:1rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <textarea name="body" rows="3" placeholder="Add a comment…" style="width:100%;resize:vertical;margin-bottom:.8rem;" required></textarea>
+    {% if canned_replies %}
+    <div class="canned-row">
+      <label for="cannedPick" class="sr-only">Insert a saved reply</label>
+      <select id="cannedPick" data-ticket="{{ ticket.id }}">
+        <option value="">Insert a saved reply…</option>
+        {% for r in canned_replies %}<option value="{{ r.id }}">{{ r.title }}{{ ' (mine)' if r.user_id }}</option>{% endfor %}
+      </select>
+      <a href="/admin/canned_replies" class="tag-link" style="font-size:.8rem;">Manage</a>
+    </div>
+    {% endif %}
+    <textarea id="commentBody" name="body" rows="3" placeholder="Add a comment…" style="width:100%;resize:vertical;margin-bottom:.8rem;" required></textarea>
     {% if email_enabled and ticket.requester_email %}
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:.8rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="email_requester" style="width:auto;" />
-      Also email this to {{ ticket.requester_name or 'the requester' }} ({{ ticket.requester_email }}) — otherwise it stays internal
+      Also email this to {{ ticket.requester_name or 'the requester' }} ({{ ticket.requester_email }}) — otherwise it stays internal{% if me and me.signature %}. Your signature is added.{% endif %}
     </label>
     {% endif %}
     <button type="submit" class="btn btn-primary">Add Comment</button>
@@ -318,4 +341,54 @@
   <p style="color:var(--muted);font-size:.85rem;">No history recorded yet.</p>
   {% endif %}
 </div>
+<script>
+(function () {
+  // Saved replies: insert the filled-in text where the cursor is.
+  const pick = document.getElementById('cannedPick');
+  const box = document.getElementById('commentBody');
+  if (pick && box) {
+    pick.addEventListener('change', async () => {
+      if (!pick.value) return;
+      const r = await fetch(`/admin/tickets/${pick.dataset.ticket}/canned/${pick.value}`, {credentials: 'same-origin'});
+      if (r.ok) {
+        const {text} = await r.json();
+        const at = box.selectionStart ?? box.value.length;
+        box.value = box.value.slice(0, at) + text + box.value.slice(box.selectionEnd ?? at);
+        box.focus();
+        box.dispatchEvent(new Event('input'));
+      }
+      pick.value = '';
+    });
+  }
+
+  // Presence: tell others this ticket is open (and whether we're typing); show who else is.
+  const banner = document.getElementById('presence');
+  const csrf = document.querySelector('input[name=csrf_token]').value;
+  const url = '/admin/tickets/{{ ticket.id }}/presence';
+  function beat(extra) {
+    const body = new URLSearchParams({csrf_token: csrf, typing: box && box.value.trim() ? '1' : '0', ...(extra || {})});
+    return fetch(url, {method: 'POST', body, credentials: 'same-origin', keepalive: !!extra});
+  }
+  async function refresh() {
+    try {
+      const r = await beat();
+      if (!r.ok) return;
+      const {others} = await r.json();
+      banner.hidden = !others.length;
+      banner.textContent = others.map(o => `${o.name} is ${o.typing ? 'writing a reply' : 'viewing this ticket'}`).join(' · ');
+    } catch (e) { /* offline or logged out: just stop showing it */ }
+  }
+  refresh();
+  setInterval(refresh, 20000);
+  if (box) { let t; box.addEventListener('input', () => { clearTimeout(t); t = setTimeout(refresh, 1500); }); }
+  window.addEventListener('pagehide', () => beat({leaving: '1'}));
+})();
+</script>
+<style>
+  .presence { margin: -.4rem 0 1rem; padding: .55rem .9rem; border-left: 3px solid var(--warning); background: var(--surface2);
+              border-radius: 4px; font-size: .88rem; }
+  .canned-row { display: flex; gap: .6rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
+  .canned-row select { width: auto; min-width: 220px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
 {% endblock %}

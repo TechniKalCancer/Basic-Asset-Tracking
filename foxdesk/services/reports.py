@@ -619,3 +619,54 @@ def _ago(when):
 def _signin_window_days():
     days = request.args.get('days', SIGNIN_DEFAULT_WINDOW_DAYS, type=int)
     return days if days in SIGNIN_WINDOW_DAYS_CHOICES else SIGNIN_DEFAULT_WINDOW_DAYS
+
+
+# ─── refresh forecast (Chromebook auto-update expiration) ────────────────────
+
+def _school_year(d):
+    """School years run July–June: 2027-03-01 is in 2026–27."""
+    start = d.year if d.month >= 7 else d.year - 1
+    return start, f'{start}–{(start + 1) % 100:02d}'
+
+
+def _refresh_forecast(site_ids, years_ahead=5):
+    """Devices grouped by the school year their ChromeOS updates stop (Google's
+    AUE date), with models and replacement cost, plus devices already past it
+    that are still in use."""
+    from datetime import date
+    today = date.today()
+    this_year, _ = _school_year(today)
+    rows = (_scope_registry(AssetRegistry.query, site_ids)
+            .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
+            .filter(Asset.google_aue_date.isnot(None))
+            .with_entities(AssetRegistry, Asset).all())
+    retired = {'retired', 'lost'}
+    buckets = OrderedDict()
+    for offset in range(years_ahead + 1):
+        start = this_year + offset
+        buckets[start] = dict(label=f'{start}–{(start + 1) % 100:02d}', count=0, models=defaultdict(int), cost=Decimal(0),
+                              current=offset == 0)
+    later = dict(label=f'{this_year + years_ahead + 1}–{(this_year + years_ahead + 2) % 100:02d} or later', count=0,
+                 models=defaultdict(int), cost=Decimal(0), current=False)
+    past_in_use = []
+    for registry_row, asset in rows:
+        if (asset.status or '') in retired:
+            continue
+        model = asset.google_model or (registry_row.device_model.full_name if registry_row.device_model else 'Unknown model')
+        if asset.google_aue_date < today:
+            past_in_use.append((registry_row, asset, model))
+            continue
+        start, _ = _school_year(asset.google_aue_date)
+        bucket = buckets.get(start, later)
+        bucket['count'] += 1
+        bucket['models'][model] += 1
+        bucket['cost'] += Decimal(registry_row.purchase_cost or 0)
+    years = list(buckets.values()) + [later]
+    for b in years:
+        b['top_models'] = sorted(b['models'].items(), key=lambda kv: -kv[1])[:4]
+    chromebooks = _scope_registry(AssetRegistry.query, site_ids).filter(AssetRegistry.device_type == 'chromebook')
+    unknown = (chromebooks.outerjoin(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
+               .filter(Asset.google_aue_date.is_(None)).count())
+    past_in_use.sort(key=lambda x: x[1].google_aue_date)
+    return dict(years=years, past_in_use=past_in_use, unknown=unknown,
+                tracked=sum(b['count'] for b in years) + len(past_in_use))

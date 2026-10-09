@@ -9,8 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 3.9 is what the production image runs today; 3.12 is the upgrade target.
-        python-version: ['3.9', '3.12']
+        # The production image runs 3.12; the pinned dependencies need 3.10+.
+        python-version: ['3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,3 +19,4 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+      - run: pip-audit -r requirements.txt

@@ -1,5 +1,5 @@
 # Use the official Python image
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gosu \
 # Expose the port from app.py
 EXPOSE 8081
 
-# No curl/wget in python:3.9-slim, so the healthcheck hits /healthz with Python's stdlib instead.
+# No curl/wget in python:3.12-slim, so the healthcheck hits /healthz with Python's stdlib instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8081/healthz', timeout=4).status == 200 else 1)"
 

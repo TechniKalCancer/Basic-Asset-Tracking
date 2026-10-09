@@ -45,6 +45,7 @@ builds locally; `docker-compose.deploy.yml` pulls the published image).
 
 - Docker
 - Docker Compose
+- Python 3.12 (3.10 or newer) only if you run the app or the tests outside Docker
 
 ## Setup
 

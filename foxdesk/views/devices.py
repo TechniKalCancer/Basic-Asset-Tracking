@@ -262,7 +262,7 @@ def admin_registry_new():
             _push_asset_tag_to_google(new_row)
             flash(f'Added device {tag} to the registry.', 'success')
             return redirect(url_for('admin_asset_assign', asset_tag=tag))
-        except IntegrityError as e:
+        except IntegrityError:
             db.session.rollback()
             flash('Could not add device: that asset tag or serial number is already in use.', 'error')
             return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, device_models=device_models, asset_number_ranges=asset_number_ranges, form=request.form, sites=sites)

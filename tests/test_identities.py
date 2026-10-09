@@ -61,7 +61,7 @@ def test_legacy_email_keyed_account_is_rekeyed_not_duplicated(make):
 
 
 def test_ignored_account_stays_detached(make):
-    kid = make.person(email='ava@school.org')
+    make.person(email='ava@school.org')
     ident, _, _ = place(external_key='g5', email='ava@school.org')
     A.db.session.commit()
     A.unlink_account(ident)
@@ -71,7 +71,8 @@ def test_ignored_account_stays_detached(make):
 
 
 def test_alias_cannot_belong_to_two_people(make):
-    a, b = make.person(email='a@school.org'), make.person(email='b@school.org')
+    make.person(email='a@school.org')
+    b = make.person(email='b@school.org')
     with pytest.raises(ValueError):
         A.add_alias(b, 'a@school.org')
 

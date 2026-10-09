@@ -1,4 +1,5 @@
 # Test/dev-only dependencies — not installed in the production image.
 -r requirements.txt
-pytest==8.3.5
-pyflakes==3.2.0
+pytest==9.1.1
+pyflakes==4.0.3
+pip-audit==2.10.1

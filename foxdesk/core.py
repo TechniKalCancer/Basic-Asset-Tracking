@@ -184,6 +184,28 @@ AD_BIND_PASSWORD = os.environ.get('AD_BIND_PASSWORD', '')
 AD_CA_FILE       = os.environ.get('AD_CA_FILE', '').strip() or None
 
 
+# ─── Dell warranty lookup ──────────────────────────────────────────────────────
+# A Dell TechDirect API key (Warranty API). Normally entered on the Dell
+# warranty page in Settings; these are the fallback.
+DELL_CLIENT_ID     = os.environ.get('DELL_CLIENT_ID', '').strip()
+DELL_CLIENT_SECRET = os.environ.get('DELL_CLIENT_SECRET', '').strip()
+
+# ─── Google sign-in for staff (OAuth / OpenID Connect) ─────────────────────────
+# Normally entered on Settings → Sign-in; these are the fallback.
+# ALLOW_SHARED_PASSWORD=1 turns the shared ADMIN_PASSWORD login back on even if
+# it was switched off in Settings — the way back in if Google sign-in breaks.
+GOOGLE_OAUTH_CLIENT_ID     = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '').strip()
+GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET', '').strip()
+ALLOW_SHARED_PASSWORD      = os.environ.get('ALLOW_SHARED_PASSWORD', '').lower() in ('1', 'true', 'yes')
+
+# ─── Where the app lives, and its clock ────────────────────────────────────────
+# APP_URL is the address people open FoxDesk at (https://assets.yourdistrict.org);
+# used for links in emails. APP_TIMEZONE is the district's local time, which
+# scheduled automations ("every Monday at 7") and report periods follow.
+APP_URL      = os.environ.get('APP_URL', '').strip().rstrip('/')
+APP_TIMEZONE = os.environ.get('APP_TIMEZONE', '').strip() or 'America/New_York'
+
+
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──
 # SMTP_USERNAME/SMTP_PASSWORD are optional: a Google Workspace SMTP relay
 # (smtp-relay.gmail.com) is commonly set up IP-allowlisted with no login

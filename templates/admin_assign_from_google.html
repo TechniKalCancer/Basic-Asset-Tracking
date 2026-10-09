@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% block title %}Assign from Google{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('person') }}Assign from Google sign-ins</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/signin_mismatches" class="btn btn-ghost">{{ icon('flag') }}Sign-in Mismatches</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:78ch;margin:0 0 1rem;">
+  Devices nobody is assigned to, but someone has been signing in to. Each is matched to the person behind its most
+  recent Google sign-in. Assign the ones you agree with, or skip them so they don't come back for that person.
+  Loaners and lost, retired or in-repair devices aren't included.
+</p>
+
+{% if not has_google_data %}
+<div class="card">
+  <h2 style="margin-top:0;">No Google device data yet</h2>
+  <p style="color:var(--muted);font-size:.9rem;">This needs the Google device sync to have run at least once.</p>
+</div>
+{% else %}
+
+<div class="afg-bar">
+  <div class="afg-tabs" role="navigation" aria-label="How sure">
+    {% for key, label in tiers.items() %}
+    <a href="?tier={{ key }}&days={{ window_days }}" class="{{ 'active' if tier == key }}" {{ 'aria-current="page"'|safe if tier == key }}>
+      {{ label }} <span class="badge {{ {'high': 'badge-green', 'medium': 'badge-yellow', 'low': 'badge-blue'}[key] }}">{{ counts[key] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  <form method="GET">
+    <input type="hidden" name="tier" value="{{ tier }}">
+    <label for="afgDays" class="sr-only">Online within</label>
+    <select id="afgDays" name="days" onchange="this.form.submit()">
+      {% for d in window_choices %}<option value="{{ d }}" {{ 'selected' if d == window_days }}>Online in last {{ d }} days</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+<p class="afg-sub">
+  {% if tier == 'high' %}One student is clearly using each of these: no one else is competing for it, and they have no device of their own. They're ticked; untick any you're unsure of.
+  {% elif tier == 'medium' %}Probably right, but check: other students without a device use it too, or the same student is the latest user on several devices.
+  {% else %}Usually not one person's device: a staff account (often a cart or shared device), someone marked inactive, or a student who already has a device.{% endif %}
+</p>
+
+{% if proposals %}
+<form method="POST" id="afgForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="afg-actions">
+    <label class="afg-all"><input type="checkbox" id="afgAll" {{ 'checked' if tier == 'high' }}> Select all on this page</label>
+    <span class="afg-count" id="afgCount" aria-live="polite"></span>
+    <span class="spacer" style="flex:1;"></span>
+    <button type="submit" name="action" value="assign" class="btn btn-primary">Assign selected</button>
+    <button type="submit" name="action" value="skip" class="btn btn-ghost"
+            onclick="return confirm('Skip the selected devices? They won\'t be proposed for these people again.');">Skip selected</button>
+  </div>
+  <div class="card" style="padding:0;">
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th style="width:2.2rem;"></th><th>Device</th><th>Assign to</th><th>Why</th></tr></thead>
+      <tbody>
+        {% for p in proposals %}
+        {% set r = p.registry_row %}
+        <tr>
+          <td><input type="checkbox" name="pick" class="afg-pick" value="{{ r.asset_tag }}|{{ p.person.id }}|{{ p.signin_email }}"
+                     {{ 'checked' if tier == 'high' }} aria-label="Assign {{ r.asset_tag }} to {{ p.person.full_name }}"></td>
+          <td>
+            <a class="tag-link" href="/admin/assets/{{ r.asset_tag }}/assign">{{ r.asset_tag }}</a>
+            <div class="afg-meta">{{ r.device_model.full_name if r.device_model else (p.asset.google_model or r.description or '') }}{% if r.site %} · {{ r.site.name }}{% endif %}</div>
+          </td>
+          <td>
+            <a href="/admin/people/{{ p.person.id }}/edit">{{ p.person.full_name }}</a>
+            <div class="afg-meta">{{ p.signin_email }} · {{ p.person.role|capitalize }}{% if p.person.grad_year %} {{ p.person.grad_year }}{% endif %}{% if p.person.site %} · {{ p.person.site.name }}{% endif %}</div>
+          </td>
+          <td class="afg-why">
+            {% for text, kind in p.evidence %}<span class="afg-chip afg-{{ kind }}">{{ text }}</span>{% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <p class="afg-sub" style="margin-top:.6rem;">Up to {{ batch_limit }} at a time. Each assignment is logged like a normal one and runs any automations for "a device is assigned".</p>
+</form>
+<script>
+(function () {
+  const all = document.getElementById('afgAll');
+  const picks = Array.from(document.querySelectorAll('.afg-pick'));
+  const count = document.getElementById('afgCount');
+  const limit = {{ batch_limit }};
+  function update() {
+    const n = picks.filter(p => p.checked).length;
+    count.textContent = n + ' selected' + (n > limit ? ' (max ' + limit + ' at a time)' : '');
+    all.checked = n === picks.length;
+    all.indeterminate = n > 0 && n < picks.length;
+  }
+  all.addEventListener('change', () => { picks.forEach((p, i) => { p.checked = all.checked && i < limit; }); update(); });
+  picks.forEach(p => p.addEventListener('change', update));
+  if (picks.filter(p => p.checked).length > limit) picks.forEach((p, i) => { p.checked = i < limit; });
+  update();
+})();
+</script>
+{% else %}
+<div class="card" style="color:var(--muted);text-align:center;padding:2rem;">Nothing here.</div>
+{% endif %}
+{% endif %}
+
+<style>
+  .afg-bar { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; margin-bottom: .7rem; }
+  .afg-bar select { width: auto; }
+  .afg-tabs { display: flex; flex-wrap: wrap; gap: .4rem; flex: 1; }
+  .afg-tabs a { padding: .4rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+  .afg-tabs a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .afg-tabs a:hover, .afg-tabs a:focus-visible { border-color: var(--accent); }
+  .afg-sub { color: var(--muted); font-size: .85rem; max-width: 80ch; margin: 0 0 .8rem; }
+  .afg-actions { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin-bottom: .7rem; }
+  .afg-all { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; cursor: pointer; }
+  .afg-all input, td input[type=checkbox] { width: auto; }
+  .afg-count { font-size: .82rem; color: var(--muted); }
+  .afg-meta { font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; }
+  .afg-why { min-width: 220px; }
+  .afg-chip { display: inline-block; font-size: .74rem; padding: .1rem .5rem; border-radius: 99px; margin: 0 .25rem .25rem 0;
+              background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .afg-good { color: var(--success); border-color: rgba(34, 197, 94, .35); }
+  .afg-warn { color: var(--warning); border-color: rgba(245, 158, 11, .35); }
+  .afg-bad { color: var(--danger); border-color: rgba(239, 68, 68, .35); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

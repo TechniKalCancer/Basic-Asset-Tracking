@@ -23,7 +23,7 @@ from foxdesk.models import (
     Person, Repair, Ticket,
 )
 from foxdesk.automation.actions import ACTIONS, actions_for
-from foxdesk.automation.triggers import FIELDS, TRIGGERS, build_context
+from foxdesk.automation.triggers import FIELDS, TRIGGERS, build_context, current_period
 
 MAX_DEPTH = 3  # an automation's own changes can't chain more than this deep
 
@@ -74,7 +74,7 @@ def evaluate(rule, facts):
 
 
 def _subject_site(facts):
-    return facts.get('ticket.site') or facts.get('device.site') or facts.get('person.site')
+    return facts.get('ticket.site') or facts.get('device.site') or facts.get('person.site') or facts.get('part.site')
 
 
 # ─── running ──────────────────────────────────────────────────────────────────
@@ -84,7 +84,8 @@ def run_rule(rule, ctx, dry_run=False, dedupe_key=None):
     the rule doesn't apply (site, conditions, or already ran for this
     scheduled subject). Commits unless dry_run."""
     facts = ctx['facts']
-    if rule.site_id and _subject_site(facts) != rule.site_id:
+    # A time-based rule's school limits what its report covers, not whether it runs.
+    if rule.site_id and ctx['subject_type'] != 'period' and _subject_site(facts) != rule.site_id:
         return None
     matched, reasons = evaluate(rule, facts)
     if not matched:
@@ -200,6 +201,17 @@ def scheduled_subjects(trigger_key):
         return [(r, f'device:{r.id}:{r.warranty_expiration}') for r in AssetRegistry.query.filter(
             AssetRegistry.warranty_expiration.isnot(None), AssetRegistry.warranty_expiration >= today,
             AssetRegistry.warranty_expiration <= horizon)]
+    if trigger_key.startswith('schedule.'):
+        period = current_period(trigger_key.split('.', 1)[1])
+        return [(period, period['key'])]
+    if trigger_key == 'part.low_stock':
+        from foxdesk.models import Part, PartMovement
+        low = Part.query.filter(Part.is_active.is_(True), Part.reorder_level > 0,
+                                Part.quantity_on_hand <= Part.reorder_level).all()
+        # Keyed on the last restock, so a part fires again if it runs low again after being refilled.
+        restocked = dict(db.session.query(PartMovement.part_id, db.func.max(PartMovement.id))
+                         .filter(PartMovement.change > 0).group_by(PartMovement.part_id).all())
+        return [(p, f'part:{p.id}:{restocked.get(p.id, 0)}') for p in low]
     if trigger_key == 'signin.flagged':
         from foxdesk.services.reports import _signin_mismatches
         return [(m, f"signin:{m['asset_tag']}:{m['signin_email']}") for m in _signin_mismatches(None, 7)]

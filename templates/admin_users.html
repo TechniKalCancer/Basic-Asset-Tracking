@@ -40,7 +40,7 @@
         'can_repairs': 'Repairs', 'can_tickets': 'Tickets', 'can_manage_users': 'Manage Users',
       } %}
       <tr>
-        <td>{{ user.username }}</td>
+        <td>{{ user.username }}{% if user.email %}<div style="font-size:.78rem;color:var(--muted);">{{ user.email }}</div>{% endif %}</td>
         <td style="color:var(--muted);">
           {% if user.is_super_admin %}All sites{% elif user.sites %}{{ user.sites|map(attribute='name')|join(', ') }}{% else %}—{% endif %}
         </td>

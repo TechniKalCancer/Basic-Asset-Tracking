@@ -215,6 +215,19 @@ def admin_users():
     return render_template('admin_users.html', users=users, search=search, sort_dir=sort_dir)
 
 
+def _user_email_from_form(user_id=None):
+    """The Google sign-in email from the form, lowercased, or None. Raises
+    ValueError if it's malformed or another user already has it."""
+    email = request.form.get('email', '').strip().lower() or None
+    if email and ('@' not in email or ' ' in email):
+        raise ValueError('Enter a valid email address.')
+    if email:
+        taken = User.query.filter(db.func.lower(User.email) == email, User.id != (user_id or 0)).first()
+        if taken:
+            raise ValueError(f'{email} is already used by "{taken.username}".')
+    return email
+
+
 @app.route('/admin/users/new', methods=['GET', 'POST'])
 @require_permission('manage_users')
 def admin_user_new():
@@ -229,6 +242,11 @@ def admin_user_new():
         if User.query.filter(db.func.lower(User.username) == username.lower()).first():
             flash(f'Username "{username}" is already taken.', 'error')
             return render_template('admin_user_form.html', user=None, sites=sites)
+        try:
+            email = _user_email_from_form()
+        except ValueError as e:
+            flash(str(e), 'error')
+            return render_template('admin_user_form.html', user=None, sites=sites)
 
         # A site-scoped admin can only grant their own sites, and only a super
         # admin can create another super admin — never trust the posted flag alone.
@@ -241,7 +259,7 @@ def admin_user_new():
         if default_landing not in LANDING_PAGES:
             default_landing = 'dashboard'
 
-        user = User(username=username, password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
+        user = User(username=username, email=email, password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
                      is_super_admin=wants_super_admin, default_landing=default_landing,
                      **_user_form_permissions(bool(session.get('is_admin'))))
         if not wants_super_admin:
@@ -263,6 +281,11 @@ def admin_user_edit(user_id):
     user = _scope_users(User.query, site_ids).filter_by(id=user_id).first_or_404()
     if request.method == 'POST':
         new_password = request.form.get('password', '')
+        try:
+            user.email = _user_email_from_form(user.id)
+        except ValueError as e:
+            flash(str(e), 'error')
+            return render_template('admin_user_form.html', user=user, sites=sites)
         for field, value in _user_form_permissions(bool(session.get('is_admin'))).items():
             setattr(user, field, value)
         user.is_active = bool(request.form.get('is_active'))

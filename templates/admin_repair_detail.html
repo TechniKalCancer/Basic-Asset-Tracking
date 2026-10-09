@@ -135,6 +135,8 @@
 </div>
 {% endif %}
 
+{{ macros.parts_panel(repair=repair, asset_tag=repair.asset_tag) }}
+
 <div class="card" style="margin-bottom:1.5rem;">
   <h2 style="margin-top:0;">{{ icon('camera') }}Photos &amp; Files</h2>
   <p style="color:var(--muted);font-size:.82rem;margin-bottom:.6rem;">Damage photos, the vendor's RMA slip, or a shipping label.</p>

@@ -10,6 +10,7 @@ Text settings are templates: {placeholder} names from
 triggers.PLACEHOLDER_NAMES are filled in (unknown names are left as-is).
 """
 import json
+import re
 from decimal import Decimal, InvalidOperation
 
 from foxdesk.core import EMAIL_ENABLED, db
@@ -18,8 +19,13 @@ from foxdesk.models import (
     Asset, PendingDeviceAction, TicketCharge, TicketComment,
 )
 from foxdesk.automation.triggers import (
-    _org_units, _plain, _repair_categories, _staff_users, _ticket_categories, placeholders,
+    _org_units, _plain, _repair_categories, _sites, _staff_users, _ticket_categories, placeholders,
 )
+
+
+def _report_choices():
+    from foxdesk.services.report_emails import REPORTS
+    return list(REPORTS.items())
 
 
 class _Safe(dict):
@@ -213,6 +219,27 @@ def _notify_guardian(ctx, p, dry_run):
     return ('ok' if ok else 'skipped'), message
 
 
+def _send_report(ctx, p, dry_run):
+    from foxdesk.services.report_emails import REPORTS, build_report
+    period = ctx.get('period')
+    if not period:
+        return 'skipped', 'Reports run on a schedule (every day, week or month).'
+    kind = p.get('report') if p.get('report') in REPORTS else 'summary'
+    site_id = int(p['site']) if str(p.get('site') or '').isdigit() else (ctx['rule'].site_id if ctx.get('rule') else None)
+    to = [a for a in re.split(r'[\s,;]+', p.get('to') or '') if '@' in a]
+    if not to:
+        return 'error', 'Enter at least one email address to send the report to.'
+    subject, body = build_report(kind, period['start'], period['end'], site_id, period['label'])
+    if dry_run:
+        return 'ok', f'Would email "{subject}" ({len(body.splitlines())} lines) to {", ".join(to)}'
+    if not EMAIL_ENABLED:
+        return 'skipped', 'Email isn\'t configured on this server.'
+    from foxdesk.services.emailer import _send_email_in_background
+    for address in to:
+        _send_email_in_background(address, subject, body)
+    return 'ok', f'Emailed "{subject}" to {", ".join(to)}'
+
+
 def _set_incident_fee(ctx, p, dry_run):
     inc = ctx.get('incident')
     if not inc:
@@ -234,6 +261,11 @@ def _set_incident_fee(ctx, p, dry_run):
 _TEMPLATE_HINT = 'You can use placeholders like {asset_tag}, {person_name}, {ticket_id}.'
 
 ACTIONS = {
+    'send_report': dict(label='Email a report', subjects=('period',), run=_send_report, params=[
+        ('report', 'Report', 'choice', _report_choices, 'summary'),
+        ('to', 'Send to (email addresses, separated by commas)', 'text', None, ''),
+        ('site', 'For school (blank = the rule\'s school, or all)', 'choice', _sites, None),
+    ]),
     'send_email': dict(label='Send an email', subjects='*', run=_send_email, params=[
         ('to', 'To', 'choice', RECIPIENTS, 'holder'),
         ('address', 'Address (when "A specific email address")', 'text', None, ''),

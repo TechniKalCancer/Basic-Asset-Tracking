@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}{{ part.name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('repair') }}{{ part.name }}</h1>
+  <span class="badge {{ 'badge-red' if part.is_low else 'badge-green' }}">{{ part.quantity_on_hand }} on hand</span>
+  {% if part.is_low %}<span class="badge badge-red">Running low</span>{% endif %}
+  {% if not part.is_active %}<span class="badge badge-yellow">Retired</span>{% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/parts/{{ part.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
+  <a href="/admin/parts" class="btn btn-ghost">← Parts</a>
+</div>
+<p style="color:var(--muted);font-size:.88rem;margin:0 0 1rem;">
+  {{ part.category|capitalize }}{% if part.part_number %} · {{ part.part_number }}{% endif %}
+  · fits {{ fits|join(', ') if fits else 'any model' }}{% if part.site %} · kept at {{ part.site.name }}{% endif %}
+  {% if part.unit_cost is not none %} · ${{ '%.2f'|format(part.unit_cost) }} each{% endif %}
+  {% if part.reorder_level %} · reorder at {{ part.reorder_level }}{% endif %}{% if part.vendor %} · {{ part.vendor }}{% endif %}
+</p>
+
+<div class="pd-forms">
+  <form method="POST" action="/admin/parts/{{ part.id }}/stock" class="card pd-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h2>Received</h2>
+    <label>How many <input type="number" name="quantity" min="1" value="1" required></label>
+    <label>Note <input name="note" maxlength="255" placeholder="PO number, vendor…"></label>
+    <button type="submit" name="action" value="received" class="btn btn-primary">Add to stock</button>
+  </form>
+  <form method="POST" action="/admin/parts/{{ part.id }}/stock" class="card pd-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h2>Count it</h2>
+    <label>On the shelf now <input type="number" name="counted" min="0" value="{{ part.quantity_on_hand }}" required></label>
+    <label>Note <input name="note" maxlength="255" placeholder="Why it was off"></label>
+    <button type="submit" name="action" value="count" class="btn btn-ghost">Correct the count</button>
+  </form>
+</div>
+<p style="color:var(--muted);font-size:.82rem;margin:-.4rem 0 1.2rem;">To use a part, open the repair or ticket it's for: there's a Parts used box on both.</p>
+
+<h2 style="font-size:1.05rem;margin:0 0 .6rem;">History</h2>
+<div class="card" style="padding:0;">
+  {% if movements %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>When</th><th>What</th><th class="num">Change</th><th class="num">After</th><th>For</th><th>By</th></tr></thead>
+    <tbody>
+      {% for m in movements %}
+      <tr>
+        <td style="white-space:nowrap;" title="{{ m.created_at.strftime('%Y-%m-%d %H:%M') }} UTC">{{ m.created_at|ago }}</td>
+        <td>{{ m.reason_label }}{% if m.note %}<div style="font-size:.78rem;color:var(--muted);">{{ m.note }}</div>{% endif %}</td>
+        <td class="num" style="color:{{ 'var(--success)' if m.change > 0 else 'var(--text)' }};">{{ '%+d'|format(m.change) }}</td>
+        <td class="num">{{ m.quantity_after }}</td>
+        <td style="font-size:.85rem;">
+          {% if m.repair_id %}<a href="/admin/repairs/{{ m.repair_id }}">Repair of {{ m.asset_tag }}</a>
+          {% elif m.ticket_id %}<a href="/admin/tickets/{{ m.ticket_id }}">Ticket #{{ m.ticket_id }}</a>
+          {% elif m.asset_tag %}{{ m.asset_tag }}{% else %}<span style="color:var(--muted);">—</span>{% endif %}
+        </td>
+        <td style="font-size:.82rem;color:var(--muted);">{{ m.actor_label or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p style="color:var(--muted);text-align:center;padding:1.5rem;margin:0;">No stock changes yet.</p>{% endif %}
+</div>
+
+<style>
+  .pd-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .pd-form { margin: 0; display: flex; flex-direction: column; gap: .6rem; }
+  .pd-form h2 { font-size: 1rem; margin: 0; }
+  .pd-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .82rem; color: var(--muted); }
+  .pd-form button { align-self: flex-start; }
+  .num { text-align: right; white-space: nowrap; }
+</style>
+{% endblock %}

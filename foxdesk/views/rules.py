@@ -46,7 +46,7 @@ def _builder_schema():
     choices = _Choices()
     triggers = {}
     for key, t in _available_triggers().items():
-        triggers[key] = dict(label=t['label'], group=t['group'], scheduled=bool(t.get('scheduled')),
+        triggers[key] = dict(label=t['label'], group=t['group'], scheduled=bool(t.get('scheduled')), hint=t.get('hint'),
                              fields=[f for f in t['fields'] if f in FIELDS],
                              actions=list(actions_for(t['subject'])))
     fields = {k: dict(label=v[0], type=v[1], choices=choices(v[2])) for k, v in FIELDS.items()}
@@ -131,6 +131,8 @@ def _rule_from_form(rule):
         url = (step['params'].get('url') or '').strip()
         if step['type'] == 'post_webhook' and not url.startswith('https://'):
             raise ValueError('The webhook URL must start with https://')
+        if step['type'] == 'send_report' and '@' not in (step['params'].get('to') or ''):
+            raise ValueError('Enter the email address(es) the report goes to.')
         if step['type'] == 'send_email' and step['params'].get('to') == 'address' \
                 and '@' not in (step['params'].get('address') or ''):
             raise ValueError('Enter the email address the rule should send to.')

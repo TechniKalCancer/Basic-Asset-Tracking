@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Dell warranty{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('integration') }}Dell warranty lookup</h1>
+  <span class="badge {{ 'badge-green' if configured else 'badge-yellow' }}">{{ 'Configured' if configured else 'Not configured' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:75ch;margin:0 0 1.2rem;">
+  Looks up every device with a Dell service tag (7 letters and digits) in Dell's warranty system and fills in its
+  warranty end date and ship date. A date you entered that's later than Dell's is kept. Devices are checked again
+  every 30 days, so extensions show up.
+</p>
+
+<div class="card">
+  <h2>Dell TechDirect API key</h2>
+  {% if not configured %}
+  <ol class="w-steps">
+    <li>Sign in at <a href="https://tdm.dell.com" target="_blank" rel="noopener">TechDirect</a> (tdm.dell.com) with your district's account.</li>
+    <li>Go to <strong>Services → APIs</strong> and request access to the <strong>Warranty API</strong>. Dell approves it, usually within a few days.</li>
+    <li>Once approved, create a key there. Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields below.</li>
+  </ol>
+  {% endif %}
+  {% if sources.secret_unreadable %}<p class="w-note">The saved secret can't be read any more (the server's SECRET_KEY changed). Enter it again.</p>{% endif %}
+  <form method="POST" action="/admin/warranty/credentials" class="w-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Client ID {% if sources.client_id == 'env' %}<span class="badge badge-blue w-src">from .env</span>{% endif %}
+      <input name="client_id" value="{{ client_id or '' }}" placeholder="l7xx…">
+    </label>
+    <label>Client secret {% if sources.secret == 'env' %}<span class="badge badge-blue w-src">from .env</span>{% endif %}
+      <input name="client_secret" type="password" autocomplete="new-password"
+             placeholder="{{ 'Saved. Leave blank to keep it' if sources.secret == 'saved' else ('Set in .env. Leave blank to keep it' if sources.secret == 'env' else 'Client secret') }}">
+    </label>
+    <div class="w-actions">
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+  <form method="POST" action="/admin/warranty/test" style="margin-top:.8rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost" {{ 'disabled' if not configured }}>Test</button>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+    <h2 style="margin:0;">Look up</h2>
+    {% if schedule.enabled %}<span class="badge badge-green">{{ intervals.get(schedule.interval_hours, '') }}</span>{% else %}<span class="badge badge-yellow">Manual only</span>{% endif %}
+    <span class="spacer" style="flex:1;"></span>
+    <a href="/admin/sync_schedule" class="btn btn-ghost">{{ icon('schedule') }}Schedule</a>
+    <form method="POST" action="/admin/warranty/run">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary" {{ 'disabled' if not configured }}>Look up now</button>
+    </form>
+  </div>
+  <p class="w-muted" style="margin:.6rem 0 0;">
+    {% if stats.due is not none %}{{ stats.due }} device{{ '' if stats.due == 1 else 's' }} due a lookup. {% endif %}
+    Each click checks up to {{ limit }}; a scheduled run does them all.
+  </p>
+  {% if settings.last_error %}<p class="w-note">Last attempt failed: {{ settings.last_error }}</p>{% endif %}
+  {% if settings.last_run_at %}<p class="w-muted" style="margin:.4rem 0 0;">Last run {{ settings.last_run_at|ago }}: {{ describe(settings.last_summary or {}) }}</p>{% endif %}
+
+  <div class="w-stats">
+    <a href="/admin/registry" class="w-stat"><span>{{ stats.with_date }}</span>devices with a warranty date</a>
+    <a href="/admin/registry?warranty=expiring" class="w-stat {{ 'w-warn' if stats.expiring }}"><span>{{ stats.expiring }}</span>ending in 60 days</a>
+    <a href="/admin/registry?warranty=expired" class="w-stat"><span>{{ stats.expired }}</span>out of warranty</a>
+    <div class="w-stat"><span>{{ stats.looked_up }}</span>looked up with Dell</div>
+  </div>
+  <p class="w-muted" style="margin:.8rem 0 0;">Want a heads-up before warranties end? Use the <a href="/admin/rules/new?template=warranty_expiring">warranty automation</a>.</p>
+</div>
+
+<style>
+  .w-steps { line-height: 1.7; padding-left: 1.2rem; margin: 0 0 1rem; font-size: .9rem; }
+  .w-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: .9rem 1.2rem; max-width: 760px; }
+  .w-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .w-src { font-size: .66rem; align-self: flex-start; }
+  .w-actions { grid-column: 1 / -1; }
+  .w-muted { color: var(--muted); font-size: .85rem; }
+  .w-note { font-size: .87rem; padding: .5rem .8rem; border-left: 3px solid var(--warning); background: var(--surface2); border-radius: 4px; }
+  .w-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .7rem; margin-top: 1rem; }
+  .w-stat { display: flex; flex-direction: column; gap: .2rem; padding: .7rem .9rem; border: 1px solid var(--border);
+            border-radius: var(--radius); color: var(--muted); text-decoration: none; font-size: .82rem; }
+  a.w-stat:hover, a.w-stat:focus-visible { border-color: var(--accent); }
+  .w-stat span { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+  .w-warn span { color: var(--warning); }
+</style>
+{% endblock %}

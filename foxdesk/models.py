@@ -431,6 +431,7 @@ class User(db.Model):
     __tablename__ = 'user'
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email         = db.Column(db.String(255), unique=True, nullable=True, index=True)  # lowercase; matched by Google sign-in
     password_hash = db.Column(db.String(255), nullable=False)
     is_admin      = db.Column(db.Boolean, nullable=False, default=False)  # full permission *within whatever sites this user has*, incl. managing users
     is_super_admin = db.Column(db.Boolean, nullable=False, default=False)  # sees/manages every site, independent of is_admin
@@ -856,6 +857,7 @@ DEVICE_RECORD_SOURCES = {
     'entra': 'Microsoft Entra ID',
     'intune': 'Microsoft Intune',
     'jamf': 'Jamf Pro',
+    'dell': 'Dell warranty',
 }
 JOIN_TYPES = {'ad': 'AD-joined', 'entra': 'Entra-joined', 'hybrid': 'Hybrid-joined', 'workgroup': 'Workgroup'}
 
@@ -901,6 +903,98 @@ class DeviceRecord(db.Model):
     @property
     def join_label(self):
         return JOIN_TYPES.get(self.join_type, self.join_type)
+
+
+PART_CATEGORIES = ['screen', 'keyboard', 'battery', 'charger', 'trackpad', 'camera', 'hinge', 'motherboard', 'other']
+PART_MOVEMENT_REASONS = {'received': 'Received', 'used': 'Used', 'adjusted': 'Count corrected', 'returned': 'Returned to stock'}
+
+
+class Part(db.Model):
+    """
+    A replacement part kept on hand. quantity_on_hand only changes through
+    services/parts.record_movement, which writes a PartMovement for every
+    change, so the history always adds up to the count. fits_models is a
+    list of DeviceModel ids (empty = fits anything / not model-specific).
+    A part is low when reorder_level > 0 and quantity_on_hand <= reorder_level.
+    """
+    __tablename__ = 'part'
+    id               = db.Column(db.Integer, primary_key=True)
+    name             = db.Column(db.String(160), nullable=False)
+    part_number      = db.Column(db.String(120), nullable=True)
+    category         = db.Column(db.String(30), nullable=False, default='other')
+    fits_models      = db.Column(db.JSON, nullable=True)
+    site_id          = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
+    quantity_on_hand = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    reorder_level    = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    unit_cost        = db.Column(db.Numeric(8, 2), nullable=True)
+    vendor           = db.Column(db.String(160), nullable=True)
+    notes            = db.Column(db.Text, nullable=True)
+    is_active        = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    created_at       = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    site = db.relationship('Site')
+
+    @property
+    def is_low(self):
+        return self.reorder_level > 0 and self.quantity_on_hand <= self.reorder_level
+
+
+class PartMovement(db.Model):
+    """One change to a part's stock: +received, -used (on a repair, ticket or
+    device), or a count correction. quantity_after is the count right after."""
+    __tablename__ = 'part_movement'
+    id             = db.Column(db.Integer, primary_key=True)
+    part_id        = db.Column(db.Integer, db.ForeignKey('part.id'), nullable=False, index=True)
+    change         = db.Column(db.Integer, nullable=False)
+    reason         = db.Column(db.String(20), nullable=False)
+    quantity_after = db.Column(db.Integer, nullable=False)
+    repair_id      = db.Column(db.Integer, db.ForeignKey('repair.id'), nullable=True, index=True)
+    ticket_id      = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True, index=True)
+    asset_tag      = db.Column(db.String(120), nullable=True)
+    note           = db.Column(db.String(255), nullable=True)
+    actor_label    = db.Column(db.String(160), nullable=True)
+    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    part = db.relationship('Part', backref=db.backref('movements', lazy='dynamic', order_by='PartMovement.id.desc()'))
+    repair = db.relationship('Repair')
+    ticket = db.relationship('Ticket')
+
+    @property
+    def reason_label(self):
+        return PART_MOVEMENT_REASONS.get(self.reason, self.reason)
+
+
+class SigninSettings(db.Model):
+    """
+    How staff sign in (one row). Google sign-in matches the Google account's
+    email to User.email. google_client_secret is encrypted (services/secrets);
+    blank values fall back to GOOGLE_OAUTH_CLIENT_ID / _SECRET. allowed_domains
+    is a comma list (e.g. "fchs.net, fcmiddle.net"); blank allows any domain,
+    though the email still has to belong to a FoxDesk user.
+    shared_password_disabled turns off the shared ADMIN_PASSWORD login; the
+    ALLOW_SHARED_PASSWORD environment variable turns it back on if locked out.
+    """
+    __tablename__ = 'signin_settings'
+    id                       = db.Column(db.Integer, primary_key=True)
+    google_client_id         = db.Column(db.String(255), nullable=True)
+    google_client_secret     = db.Column(db.Text, nullable=True)
+    allowed_domains          = db.Column(db.String(500), nullable=True)
+    shared_password_disabled = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+
+
+class WarrantySettings(db.Model):
+    """
+    Warranty lookups (one row). The Dell TechDirect key is entered on the
+    Dell warranty page; dell_client_secret is encrypted (services/secrets),
+    and blank values fall back to DELL_CLIENT_ID / DELL_CLIENT_SECRET.
+    """
+    __tablename__ = 'warranty_settings'
+    id                 = db.Column(db.Integer, primary_key=True)
+    dell_client_id     = db.Column(db.String(255), nullable=True)
+    dell_client_secret = db.Column(db.Text, nullable=True)
+    last_run_at        = db.Column(db.DateTime, nullable=True)
+    last_summary       = db.Column(db.JSON, nullable=True)
+    last_error         = db.Column(db.Text, nullable=True)
 
 
 class DirectorySettings(db.Model):

@@ -22,7 +22,6 @@ objects), but only objects directly inside a container the admin picked are
 placed. An account that's already linked keeps updating after it moves out
 of scope — typically into a Disabled OU — so FoxDesk learns it was disabled.
 """
-import base64
 import hashlib
 import re
 import socket
@@ -33,9 +32,10 @@ from datetime import datetime, timedelta
 
 from flask import has_request_context, request
 
-from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, app, db, logger
+from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, db, logger
 from foxdesk.models import DeviceRecord, DirectorySettings, PersonIdentity
 from foxdesk.services.auth import _log_activity
+from foxdesk.services.secrets import decrypt_secret as _decrypt, encrypt_secret as _encrypt
 from foxdesk.services.identities import find_person, find_registry_row, place_account, place_device_record
 
 SOURCE = 'ad'
@@ -64,23 +64,16 @@ def ad_settings():
 
 # ─── connection settings ──────────────────────────────────────────────────────
 
-def _fernet():
-    from cryptography.fernet import Fernet
-    key = hashlib.sha256(('foxdesk-directory-password:' + app.secret_key).encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(key))
+PASSWORD_PURPOSE = 'directory-password'
 
 
 def encrypt_secret(value):
-    return _fernet().encrypt(value.encode()).decode()
+    return _encrypt(value, PASSWORD_PURPOSE)
 
 
 def decrypt_secret(token):
     """None if it can't be read — usually SECRET_KEY changed since it was saved."""
-    from cryptography.fernet import InvalidToken
-    try:
-        return _fernet().decrypt(token.encode()).decode()
-    except (InvalidToken, ValueError):
-        return None
+    return _decrypt(token, PASSWORD_PURPOSE)
 
 
 def split_servers(text):

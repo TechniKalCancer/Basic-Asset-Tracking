@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}Parts{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('repair') }}Parts</h1>
+  {% if low_count %}<a href="?show=low" class="badge badge-red" style="text-decoration:none;">{{ low_count }} running low</a>{% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/parts/new" class="btn btn-primary">{{ icon('add') }}New part</a>
+</div>
+<p style="color:var(--muted);font-size:.9rem;max-width:75ch;margin:0 0 1rem;">
+  Screens, keyboards, chargers and other parts on hand. Use a part from a repair or ticket and it comes off the count
+  (optionally charged to the ticket). A part is running low when it reaches its reorder level.
+</p>
+
+<div class="parts-filters">
+  <div class="parts-tabs" role="navigation" aria-label="Which parts">
+    <a href="?" class="{{ 'active' if not show }}">In use</a>
+    <a href="?show=low" class="{{ 'active' if show == 'low' }}">Running low <span class="badge {{ 'badge-red' if low_count else 'badge-blue' }}">{{ low_count }}</span></a>
+    <a href="?show=inactive" class="{{ 'active' if show == 'inactive' }}">Retired</a>
+  </div>
+  <form method="GET">
+    <input type="hidden" name="show" value="{{ show }}">
+    <label for="partCat" class="sr-only">Category</label>
+    <select id="partCat" name="category" onchange="this.form.submit()">
+      <option value="">All categories</option>
+      {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == category }}>{{ c|capitalize }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+<div class="card" style="padding:0;">
+  {% if parts %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Part</th><th>Fits</th><th>Kept at</th><th class="num">On hand</th><th class="num">Reorder at</th><th class="num">Unit cost</th></tr></thead>
+    <tbody>
+      {% for p in parts %}
+      <tr>
+        <td><a class="tag-link" href="/admin/parts/{{ p.id }}">{{ p.name }}</a>
+          <div class="parts-meta">{{ p.category|capitalize }}{% if p.part_number %} · {{ p.part_number }}{% endif %}{% if p.vendor %} · {{ p.vendor }}{% endif %}</div></td>
+        <td class="parts-meta">{% if p.fits_models %}{% for mid in p.fits_models %}{{ models.get(mid, '') }}{{ ', ' if not loop.last }}{% endfor %}{% else %}Any{% endif %}</td>
+        <td class="parts-meta">{{ p.site.name if p.site else '—' }}</td>
+        <td class="num"><span class="badge {{ 'badge-red' if p.is_low else ('badge-yellow' if p.quantity_on_hand == 0 else 'badge-green') }}">{{ p.quantity_on_hand }}</span></td>
+        <td class="num">{{ p.reorder_level or '—' }}</td>
+        <td class="num">{{ '$%.2f'|format(p.unit_cost) if p.unit_cost is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="parts-meta" style="padding:.6rem 1rem;margin:0;">Stock value on this list: ${{ '%.2f'|format(stock_value) }}</p>
+  {% else %}
+  <p style="color:var(--muted);text-align:center;padding:2rem;margin:0;">{% if show == 'low' %}Nothing is running low.{% else %}No parts yet. <a href="/admin/parts/new">Add the first one</a>.{% endif %}</p>
+  {% endif %}
+</div>
+
+<style>
+  .parts-filters { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
+  .parts-filters select { width: auto; }
+  .parts-tabs { display: flex; gap: .4rem; flex-wrap: wrap; flex: 1; }
+  .parts-tabs a { padding: .4rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                  text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }
+  .parts-tabs a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .parts-meta { font-size: .78rem; color: var(--muted); }
+  .num { text-align: right; white-space: nowrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

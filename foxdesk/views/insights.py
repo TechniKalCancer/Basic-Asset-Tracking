@@ -5,10 +5,12 @@ from collections import defaultdict
 from datetime import datetime
 from flask import abort, flash, redirect, render_template, request, url_for
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
-from foxdesk.models import ASSET_STATUSES, Asset, AssetRegistry, AuditScan, DEVICE_TYPES, SigninReview
+from foxdesk.models import ASSET_STATUSES, Asset, AssetRegistry, AuditScan, DEVICE_TYPES, Person, SigninReview
 from foxdesk.services.util import resolve_scan
 from foxdesk.services.auth import _current_actor, _current_site_ids, _log_activity, require_permission
-from foxdesk.services.scoping import _filter_registry_by_status, _scope_registry
+from foxdesk.services.scoping import _filter_registry_by_status, _scope_people, _scope_registry
+from foxdesk.services.assignments import _assign_asset_to_person
+from foxdesk.automation.engine import emit
 from foxdesk.services.reports import (
     DATA_QUALITY_ROW_LIMIT,
     SIGNIN_CATEGORIES,
@@ -17,6 +19,9 @@ from foxdesk.services.reports import (
     SIGNIN_WINDOW_DAYS_CHOICES,
     _data_quality_checks,
     _signin_mismatches,
+    ASSIGN_SKIP_NOTE,
+    ASSIGN_TIERS,
+    _assignment_proposals,
     _signin_window_days,
 )
 
@@ -59,6 +64,75 @@ def admin_signin_mismatches():
                            show_reviewed=show_reviewed, severity=severity, categories=SIGNIN_CATEGORIES,
                            has_google_data=has_google_data, google_sync_enabled=GOOGLE_SYNC_ENABLED,
                            grace_days=SIGNIN_HANDOFF_GRACE_DAYS)
+
+
+ASSIGN_BATCH_LIMIT = 200  # per click, to stay well inside the request timeout
+
+
+@app.route('/admin/assign_from_google', methods=['GET', 'POST'])
+@require_permission('devices')
+def admin_assign_from_google():
+    """Unassigned devices someone is clearly using, with the person to give
+    each one to (the latest Google sign-in). Assign the ones you agree with,
+    or skip them so they don't come back."""
+    site_ids = _current_site_ids()
+    window_days = _signin_window_days()
+    if request.method == 'POST':
+        picks = request.form.getlist('pick')
+        if not picks:
+            flash('Tick the devices first.', 'error')
+            return redirect(request.full_path)
+        if len(picks) > ASSIGN_BATCH_LIMIT:
+            flash(f'Pick at most {ASSIGN_BATCH_LIMIT} at a time.', 'error')
+            return redirect(request.full_path)
+        skipping = request.form.get('action') == 'skip'
+        _, actor_label, _ = _current_actor()
+        done, problems = 0, []
+        for pick in picks:
+            try:
+                tag, person_id, email = pick.split('|', 2)
+                person_id = int(person_id)
+            except ValueError:
+                continue
+            registry_row = _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=tag).first()
+            if not registry_row:
+                continue
+            if skipping:
+                if not SigninReview.query.filter_by(asset_tag=tag, signin_email=email.lower()).first():
+                    db.session.add(SigninReview(asset_tag=tag, signin_email=email.lower(), note=ASSIGN_SKIP_NOTE,
+                                                reviewed_by=actor_label))
+                    _log_activity('signin_review', f'Skipped assigning {tag} to {email} (from Google sign-ins).',
+                                  site_id=registry_row.site_id)
+                done += 1
+                continue
+            person = _scope_people(Person.query, site_ids).filter_by(id=person_id, is_active=True).first()
+            asset = Asset.query.filter_by(asset_tag=tag).first()
+            if not person or (asset and asset.assigned_to_id):
+                problems.append(tag)
+                continue
+            status, message = _assign_asset_to_person(tag, person)  # commits each one
+            if status == 'assigned':
+                emit('device.assigned', registry_row, person=person)
+                done += 1
+            else:
+                problems.append(tag)
+        db.session.commit()
+        verb = 'Skipped' if skipping else 'Assigned'
+        flash(f'{verb} {done} device{"" if done == 1 else "s"}.'
+              + (f' Left alone (already assigned, or the person is no longer active): {", ".join(problems[:10])}'
+                 + ('…' if len(problems) > 10 else '') if problems else ''), 'success' if done else 'error')
+        return redirect(request.full_path)
+
+    proposals = _assignment_proposals(site_ids, window_days)
+    counts = {t: 0 for t in ASSIGN_TIERS}
+    for p in proposals:
+        counts[p['tier']] += 1
+    tier = request.args.get('tier', 'high')
+    tier = tier if tier in ASSIGN_TIERS else 'high'
+    return render_template('admin_assign_from_google.html', proposals=[p for p in proposals if p['tier'] == tier],
+                           tier=tier, tiers=ASSIGN_TIERS, counts=counts, window_days=window_days,
+                           window_choices=SIGNIN_WINDOW_DAYS_CHOICES, batch_limit=ASSIGN_BATCH_LIMIT,
+                           has_google_data=Asset.query.filter(Asset.google_last_activity.isnot(None)).first() is not None)
 
 
 @app.route('/admin/signin_mismatches/review', methods=['POST'])

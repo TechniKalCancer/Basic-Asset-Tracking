@@ -28,16 +28,20 @@ district only sees what it uses.
 - [ ] OneRoster 1.1 CSV + API from PowerSchool; match students by student ID, never by name
 
 ## Phase 4 — Sign-in
-- [ ] Single sign-on with Google and Microsoft (OIDC)
+- [x] Sign in with Google (OIDC + PKCE); turn off the shared admin password
+- [ ] Sign in with Microsoft
 - [ ] Two-factor (TOTP) for local accounts; retire the shared admin password
 
 ## Phase 5 — Features
-- [ ] Assign-from-Google-sign-in review page (propose holder per unassigned device, approve in batches)
-- [ ] Parts inventory + Dell/Lenovo warranty lookup and claims
-- [ ] Scheduled report emails (e.g. weekly summary per principal), as an automation trigger + action
+- [x] Assign-from-Google-sign-in review page (propose holder per unassigned device, approve in batches)
+- [x] Parts inventory
+- [x] Dell warranty lookup (TechDirect API)
+- [ ] Lenovo / HP warranty lookup; warranty claims
+- [x] Scheduled report emails (e.g. weekly summary per principal), as an automation trigger + action
 
 ## Phase 6 — Ship-ready
 - [ ] Privacy: policy page, data retention/purge schedule, SDPC NDPA template
 - [ ] Installer: compose with HTTPS, first-run setup wizard, backup/restore in Settings
-- [ ] Pinned dependencies, Python 3.12 image, versioned releases + changelog
+- [x] Pinned dependencies, Python 3.12 image, pip-audit in CI
+- [ ] Versioned releases + changelog
 - [ ] Accessibility audit (WCAG 2.1 AA) + VPAT

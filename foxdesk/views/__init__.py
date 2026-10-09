@@ -11,9 +11,12 @@ from foxdesk.views import incidents  # noqa: F401
 from foxdesk.views import insights  # noqa: F401
 from foxdesk.views import integrations  # noqa: F401
 from foxdesk.views import loaners  # noqa: F401
+from foxdesk.views import parts  # noqa: F401
 from foxdesk.views import people  # noqa: F401
 from foxdesk.views import public  # noqa: F401
 from foxdesk.views import repairs  # noqa: F401
 from foxdesk.views import rules  # noqa: F401
 from foxdesk.views import settings  # noqa: F401
+from foxdesk.views import signin_settings  # noqa: F401
 from foxdesk.views import tickets  # noqa: F401
+from foxdesk.views import warranty  # noqa: F401

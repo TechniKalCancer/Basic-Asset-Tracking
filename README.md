@@ -477,6 +477,22 @@ requester**, which sends it as a reply; the comment list marks each one *Interna
 requester*. All of these emails are sent in the background, so a slow SMTP server never holds up
 a student's form submission. Wording is editable at Admin → Email.
 
+## Assign from Google Sign-ins
+
+Devices → Assign from Google (`/admin/assign_from_google`) lists devices nobody is assigned to but
+someone has been signing in to lately, each with the person behind its latest Google sign-in:
+
+- **Ready to assign**: an active student who is the only current user and has no device of their own
+  (earlier users who have since left or got their own device don't count against it). Pre-ticked.
+- **Check first**: other students without a device use it too (a shared device), or the student is the
+  latest user on several unassigned devices.
+- **Probably not theirs**: a staff account (often a cart), someone inactive, or a student who already
+  has a device.
+
+Assign the ticked ones (up to 200 a click; logged and run through automations like any assignment) or
+skip them, which keeps that device/person pair from coming back. Loaners and lost/retired/in-repair
+devices are left out.
+
 ## Data Quality Checks
 
 `/admin/data_quality` (Devices → Data Quality) runs the checks people otherwise do by exporting to
@@ -568,6 +584,16 @@ number, via the Admin SDK Directory API.
   synced data. `/admin/assets/<asset_tag>/google_sync` (POST, from the assign page's Google
   Workspace Info card) triggers a sync for one device.
 
+### Sign in with Google (Settings → Sign-in)
+
+Staff can sign in with their school Google account. The Google account's verified email is matched to
+the **School email** on their FoxDesk user (Users & Permissions); nobody is created automatically, and
+only the allowed email domains are accepted. Setup: an OAuth client (type Web application, consent
+screen Internal) in Google Cloud Console, with the redirect URI the Sign-in page shows. Google only
+accepts `https://` on a public domain name, so set `APP_URL` to that address (it can resolve to the
+server only inside your network). Once staff sign in with their own accounts, turn off the **shared
+admin password** on the same page; `ALLOW_SHARED_PASSWORD=1` in `.env` turns it back on if needed.
+
 ## Purchase & Warranty Tracking
 
 Each registry entry can optionally hold a **purchase date**, **purchase cost**, and
@@ -577,6 +603,15 @@ Each registry entry can optionally hold a **purchase date**, **purchase cost**, 
 **Warranty Expired** badge on affected devices and a `?warranty=expiring`/`?warranty=expired`
 filter; the admin dashboard shows a **Warranty Expiring Soon** stat card (devices whose warranty
 runs out within 60 days) linking straight into that filter. CSV export includes all three columns.
+
+### Dell warranty lookup (Settings → Dell warranty)
+
+With a Dell TechDirect **Warranty API** key (request it under Services → APIs at tdm.dell.com), every
+device with a Dell service tag (7 letters/digits) is looked up 100 at a time. FoxDesk sets the warranty
+end date (the latest of all its entitlements, unless a later date is already recorded) and the ship
+date as the purchase date when that's blank, and shows the product and service level on the device
+page. Devices are rechecked every 30 days (non-Dell tags every 180). Run it from the page (500 per
+click) or on a timer from Scheduled Syncs. The key is stored encrypted.
 
 ## Repairs (RMA Tracking)
 
@@ -664,6 +699,16 @@ AD_BIND_PASSWORD=lettersanddigitsonly
 
 In `.env`, keep the password to letters and digits: Docker Compose reads `$` as a variable.
 
+## Parts Inventory
+
+Repairs → Parts (`/admin/parts`): screens, keyboards, chargers and other parts on hand, with what models
+they fit, where they're kept, a reorder level and a unit cost. Every change is a history entry
+(received, used, count corrected), so the count always adds up and never goes below zero. Repair and
+ticket pages have a **Parts used** box: pick a part (the ones that fit that device's model come first),
+optionally charging it to the ticket at its unit cost. Parts at or below their reorder level show on
+the Parts page and in the nav; the "A part runs low" automation can email whoever orders them, once per
+restock.
+
 ## Automations
 
 Settings → Automations (`/admin/rules`, super admins) is a small rule builder: **when** something
@@ -684,7 +729,12 @@ units), so nobody types an ID.
   Google, move OU). Device actions can wait for a tech to confirm; waiting ones are listed on the
   rule's page and on the ticket/device page. Text fields take placeholders like `{asset_tag}`,
   `{person_name}`, `{ticket_id}`.
-- **Templates:** 13 ready-made rules (second damage report → $45 fee + parent email, repair out 14
+- **Schedules and reports:** "Every day / week / month" triggers run once per period, at the first
+  check (every 15 minutes) where the conditions match, e.g. day is Monday and hour ≥ 7, in
+  `APP_TIMEZONE`. The **Email a report** action sends a plain-text summary (tickets, damage and fees,
+  repairs, loaners, devices, low parts), an overdue list, open tickets, or damage and unpaid fees for
+  the period just ended (yesterday, last week, last month), for one school or all of them.
+- **Templates:** ready-made rules (second damage report → $45 fee + parent email, repair out 14
   days → chase the vendor, overdue loaner → ticket + staged disable, lost device turns up → urgent
   ticket, …). They open in the builder with best-guess values so you can adjust before saving.
 - **Test** runs a rule against recent items without changing anything and shows what each action

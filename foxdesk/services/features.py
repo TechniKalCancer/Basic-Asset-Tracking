@@ -39,6 +39,8 @@ FEATURES = OrderedDict([
                          desc='A Scan button on every scan field that uses a phone or tablet camera (needs HTTPS).')),
     ('repairs', dict(group='Help desk', label='Repairs',
                      desc='Send devices out for repair or RMA and track them until they come back.')),
+    ('parts', dict(group='Help desk', label='Parts inventory', requires=('repairs',),
+                   desc='Parts on hand (screens, keyboards, chargers), used on repairs and tickets, with low-stock alerts.')),
     ('tickets', dict(group='Help desk', label='Tickets',
                      desc='A help-desk queue with categories, comments, charges and requester emails.')),
 
@@ -66,14 +68,28 @@ FEATURES = OrderedDict([
     ('active_directory', dict(group='Integrations', label='Active Directory', configured=lambda: _ad_configured(),
                               desc='Attach AD accounts to the people you already have and AD computers to your '
                                    'devices, and see which computers are domain-joined. Read-only.')),
+    ('google_signin', dict(group='Sign-in', label='Sign in with Google', configured=lambda: _google_signin_configured(),
+                           desc='Staff sign in with their school Google account, matched to their FoxDesk user by email.')),
+    ('dell_warranty', dict(group='Integrations', label='Dell warranty lookup', configured=lambda: _dell_configured(),
+                           desc='Fill in warranty end dates and ship dates for Dell devices from Dell\'s TechDirect API.')),
 ])
+def _google_signin_configured():
+    from foxdesk.services.signin import google_config
+    return google_config()['configured']
+
+
+def _dell_configured():
+    from foxdesk.integrations.dell import dell_configured
+    return dell_configured()
+
+
 def _ad_configured():
     # Entered on the Active Directory page (or .env), so it's looked up, not a constant.
     from foxdesk.integrations.active_directory import ad_config
     return ad_config()['configured']
 
 
-FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Automation', 'Integrations']
+FEATURE_GROUPS = ['Devices', 'Help desk', 'Self-service', 'Notifications', 'Reports', 'Automation', 'Sign-in', 'Integrations']
 
 # Area permissions that belong to a module — off module, no permission.
 PERMISSION_FEATURES = {'loaners': 'loaners', 'loaner_checkinout': 'loaners', 'repairs': 'repairs', 'tickets': 'tickets'}
@@ -90,6 +106,7 @@ ENDPOINT_FEATURES = {
     'submit_ticket_page': 'tickets',
     'admin_data_quality': 'data_quality',
     'admin_signin_mismatches': 'signin_check', 'admin_signin_mismatch_review': 'signin_check',
+    'admin_assign_from_google': 'signin_check',
     'admin_audit': 'audit', 'admin_audit_scan': 'audit',
     'admin_bulk_print': 'labels', 'admin_avery_labels': 'labels',
     'admin_toggle_loaner': 'loaners', 'admin_update_loaner_label': 'loaners',
@@ -103,10 +120,13 @@ MODULE_FEATURES = {
     'foxdesk.views.loaners': 'loaners',
     'foxdesk.views.incidents': 'incidents',
     'foxdesk.views.repairs': 'repairs',
+    'foxdesk.views.parts': 'parts',
     'foxdesk.views.tickets': 'tickets',
     'foxdesk.views.attachments': 'attachments',
     'foxdesk.views.help': 'help',
     'foxdesk.views.directory': 'active_directory',
+    'foxdesk.views.warranty': 'dell_warranty',
+    'foxdesk.views.signin_settings': 'google_signin',
     'foxdesk.views.rules': 'automations',
 }
 

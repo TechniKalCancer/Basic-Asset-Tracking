@@ -98,3 +98,57 @@ which base.html loads on every page.
 </form>
 {% endif %}
 {%- endmacro %}
+
+{#
+Parts used on a repair or ticket, plus a form to use one (see foxdesk/views/parts.py).
+asset_tag puts parts that fit that device's model first. Needs the repairs permission.
+#}
+{% macro parts_panel(repair=None, ticket=None, asset_tag=None) %}
+{% if feature('parts') and can('repairs') %}
+{% set used = parts_used_on(repair=repair, ticket=ticket) %}
+{% set choices = parts_for(asset_tag) %}
+<div class="card" id="parts" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;display:flex;align-items:center;gap:.6rem;">{{ icon('repair') }}Parts used
+    <a class="tag-link" href="/admin/parts" style="font-size:.8rem;font-weight:400;margin-left:auto;">Parts inventory</a></h2>
+  {% if used %}
+  <table style="margin-bottom:1rem;">
+    <thead><tr><th>Part</th><th style="text-align:right;">Qty</th><th>When</th><th>By</th></tr></thead>
+    <tbody>
+      {% for m in used %}
+      <tr><td><a class="tag-link" href="/admin/parts/{{ m.part_id }}">{{ m.part.name }}</a></td><td style="text-align:right;">{{ -m.change }}</td>
+          <td style="white-space:nowrap;">{{ m.created_at|ago }}</td><td style="color:var(--muted);font-size:.85rem;">{{ m.actor_label or '' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p style="color:var(--muted);font-size:.88rem;margin:0 0 .8rem;">None yet.</p>{% endif %}
+  {% if choices %}
+  <form method="POST" action="/admin/parts/use" class="parts-use">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if repair %}<input type="hidden" name="repair_id" value="{{ repair.id }}">{% else %}<input type="hidden" name="ticket_id" value="{{ ticket.id }}">{% endif %}
+    <label>Part
+      <select name="part_id" required>
+        {% for part, fits in choices %}
+        <option value="{{ part.id }}" {{ 'disabled' if part.quantity_on_hand < 1 }}>{{ part.name }} ({{ part.quantity_on_hand }} on hand){{ ', fits this model' if fits }}{{ ', $%.2f'|format(part.unit_cost) if part.unit_cost is not none }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>How many <input type="number" name="quantity" value="1" min="1" max="99"></label>
+    {% if (repair and repair.ticket_id) or ticket %}
+    <label class="parts-charge"><input type="checkbox" name="charge"> Charge it to the ticket</label>
+    {% endif %}
+    <button type="submit" class="btn btn-ghost">Use part</button>
+  </form>
+  {% else %}
+  <p style="color:var(--muted);font-size:.88rem;margin:0;">No parts set up yet. <a href="/admin/parts/new">Add one</a>.</p>
+  {% endif %}
+</div>
+<style>
+  .parts-use { display: flex; gap: .7rem; flex-wrap: wrap; align-items: flex-end; }
+  .parts-use label { display: flex; flex-direction: column; gap: .25rem; font-size: .82rem; color: var(--muted); }
+  .parts-use select { min-width: 240px; }
+  .parts-use input[type=number] { width: 5rem; }
+  .parts-use .parts-charge { flex-direction: row; align-items: center; gap: .4rem; padding-bottom: .55rem; }
+  .parts-use .parts-charge input { width: auto; }
+</style>
+{% endif %}
+{%- endmacro %}

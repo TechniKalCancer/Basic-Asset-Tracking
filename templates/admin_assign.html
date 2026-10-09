@@ -558,7 +558,7 @@
 {% if feature('labels') %}
 {% if registry_row.records %}
 <div class="card" id="directory">
-  <h2 style="display:flex;align-items:center;gap:.6rem;">{{ icon('computer') }}Directory
+  <h2 style="display:flex;align-items:center;gap:.6rem;">{{ icon('computer') }}Linked records
     {% for r in registry_row.records if r.source == 'ad' %}<span class="badge {{ 'badge-green' if r.enabled != false else 'badge-yellow' }}" style="font-size:.7rem;">{{ r.join_label or r.source_label }}{{ '' if r.enabled != false else ', disabled' }}</span>{% endfor %}
   </h2>
   <table>
@@ -570,9 +570,13 @@
         {% if r.enabled == false %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}
         {% if (r.raw or {}).get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD</span>{% endif %}
         {% if r.os_name %}<div style="font-size:.8rem;">{{ r.os_name }} {{ r.os_version or '' }}</div>{% endif %}
+        {% if r.source == 'dell' %}
+        {% set w = r.raw or {} %}
+        <div style="font-size:.8rem;">{% if w.not_dell %}Not a Dell service tag{% else %}{{ w.product or 'Dell' }}{% if w.end_date %} · warranty to {{ w.end_date }}{% endif %}{% if w.service_level %} ({{ w.service_level }}){% endif %}{% if w.ship_date %} · shipped {{ w.ship_date }}{% endif %}{% endif %}</div>
+        {% endif %}
         {% if r.directory_path %}<div style="font-size:.75rem;color:var(--muted);">{{ r.directory_path|short_dn }}</div>{% endif %}
         <div style="font-size:.75rem;color:var(--muted);">
-          {% if r.last_seen_at %}Last login {{ r.last_seen_at|ago }}{% else %}No login recorded{% endif %}{% if r.last_synced_at %} · synced {{ r.last_synced_at|ago }}{% endif %}
+          {% if r.source != 'dell' %}{% if r.last_seen_at %}Last login {{ r.last_seen_at|ago }}{% else %}No login recorded{% endif %} · {% endif %}{% if r.last_synced_at %}checked {{ r.last_synced_at|ago }}{% endif %}
         </div>
       </td>
     </tr>

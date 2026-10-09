@@ -151,5 +151,34 @@ TEMPLATES = [
                                         subject='Warranty ending: {asset_tag} in {warranty_days_left} days',
                                         body='{asset_tag} ({device_model}, {device_site}) warranty ends in '
                                              '{warranty_days_left} days.')])),
+    dict(key='weekly_summary', group='Reports',
+         name='Weekly summary every Monday morning',
+         description='Tickets, damage and fees, repairs, loaners and devices for last week, emailed Monday at 7 AM. '
+                     'Make one per principal with "Only at" set to their school.',
+         build=lambda: dict(trigger='schedule.weekly',
+                            conditions=[_c('schedule.weekday', 'eq', 'monday'), _c('schedule.hour', 'gte', '7')],
+                            actions=[_a('send_report', report='summary', to='', site=None)])),
+    dict(key='daily_overdue', group='Reports',
+         name='Overdue list every school-day morning',
+         description='Overdue loaners, repairs out 14+ days and devices past their return date, to the tech team '
+                     'at 7 AM Monday to Friday.',
+         build=lambda: dict(trigger='schedule.daily',
+                            conditions=[_c('schedule.weekday', 'in', ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']),
+                                        _c('schedule.hour', 'gte', '7')],
+                            actions=[_a('send_report', report='overdue', to='', site=None)])),
+    dict(key='monthly_damage', group='Reports',
+         name='Monthly damage and fees report',
+         description='Last month\'s damage reports and everything still unpaid, on the 1st of each month.',
+         build=lambda: dict(trigger='schedule.monthly',
+                            conditions=[_c('schedule.hour', 'gte', '7')],
+                            actions=[_a('send_report', report='damage', to='', site=None)])),
+    dict(key='part_low_email', group='Repairs',
+         name='A part runs low → email to reorder',
+         description='When a part reaches its reorder level, email whoever orders parts. Once per restock.',
+         build=lambda: dict(trigger='part.low_stock', conditions=[],
+                            actions=[_a('send_email', to='address', address='',
+                                        subject='Reorder: {part_name} ({part_on_hand} left)',
+                                        body='{part_name} is down to {part_on_hand} (reorder level '
+                                             '{part_reorder_level}).')])),
 ]
 TEMPLATES_BY_KEY = {t['key']: t for t in TEMPLATES}

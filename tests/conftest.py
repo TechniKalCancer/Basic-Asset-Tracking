@@ -34,6 +34,8 @@ os.environ.update({
     'GOOGLE_SERVICE_ACCOUNT_FILE': '', 'GOOGLE_ADMIN_IMPERSONATE_EMAIL': '',
     'KACE_URL': '', 'KACE_USERNAME': '', 'KACE_PASSWORD': '',
     'AD_SERVERS': '', 'AD_BASE_DN': '', 'AD_BIND_USER': '', 'AD_BIND_PASSWORD': '', 'AD_CA_FILE': '',
+    'DELL_CLIENT_ID': '', 'DELL_CLIENT_SECRET': '', 'APP_URL': '', 'APP_TIMEZONE': 'America/New_York',
+    'GOOGLE_OAUTH_CLIENT_ID': '', 'GOOGLE_OAUTH_CLIENT_SECRET': '', 'ALLOW_SHARED_PASSWORD': '',
 })
 sys.path.insert(0, ROOT)
 

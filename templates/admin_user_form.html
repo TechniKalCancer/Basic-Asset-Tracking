@@ -18,6 +18,12 @@
     </div>
     {% endif %}
 
+    <div style="margin-bottom:1rem;">
+      <label for="userEmail" style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">School email (optional)</label>
+      <input id="userEmail" name="email" type="email" value="{{ user.email or '' if user else '' }}" placeholder="jsmith@yourdistrict.org" />
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">Lets them use Sign in with Google with this account.</span>
+    </div>
+
     <div style="margin-bottom:1.5rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">
         {{ 'New Password (leave blank to keep current)' if user else 'Password' }}

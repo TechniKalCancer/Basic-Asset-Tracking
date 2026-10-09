@@ -11,9 +11,12 @@ Facts are flat {field_key: value} dicts built from the subject when a
 trigger fires; conditions compare against them and email/webhook templates
 read the friendlier `placeholders()` built alongside.
 """
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
+
+from foxdesk.core import APP_TIMEZONE
 
 from foxdesk.models import (
+    PART_CATEGORIES,
     ASSET_STATUSES, DEVICE_TYPES, REPAIR_OUTCOMES, TICKET_PRIORITIES, TICKET_STATUSES,
     Asset, AssetRegistry, DeviceModel, GoogleOrgUnit, Incident, Person, RepairCategory, Site, TicketCategory, User,
 )
@@ -57,6 +60,9 @@ SIGNIN_CATEGORY_CHOICES = _plain(['wrong_student', 'swapped', 'inactive_person',
                                   'unassigned_in_use': 'Unassigned device in use', 'same_name': 'Same name, different account',
                                   'unknown_account': 'Account not in People', 'previous_holder': 'Previous holder',
                                   'staff_signin': 'Staff sign-in'})
+
+WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+WEEKDAY_CHOICES = _plain(WEEKDAYS)
 
 # ─── fields ───────────────────────────────────────────────────────────────────
 # key: (label, type, choices)   types: text | choice | number | bool
@@ -109,6 +115,16 @@ FIELDS = {
     'signin.category':      ('Sign-in flag', 'choice', SIGNIN_CATEGORY_CHOICES),
     'signin.severity':      ('Flag severity', 'choice', _plain(['high', 'medium', 'low'])),
     'signin.foreign_count': ('Devices that aren\'t theirs the account is on', 'number', None),
+
+    'schedule.weekday':     ('Day of the week', 'choice', WEEKDAY_CHOICES),
+    'schedule.hour':        ('Hour of the day (0-23, district time)', 'number', None),
+    'schedule.day':         ('Day of the month', 'number', None),
+
+    'part.name':            ('Part name', 'text', None),
+    'part.category':        ('Part category', 'choice', _plain(PART_CATEGORIES)),
+    'part.on_hand':         ('Parts on hand', 'number', None),
+    'part.reorder_level':   ('Reorder level', 'number', None),
+    'part.site':            ('Part kept at', 'choice', _sites),
 }
 
 OPERATORS = {
@@ -168,8 +184,63 @@ TRIGGERS = {
                                   subject='signin', feature='signin_check', scheduled=True,
                                   fields=['signin.category', 'signin.severity', 'signin.foreign_count']
                                   + DEVICE_FIELDS + PERSON_FIELDS),
+    'part.low_stock':        dict(label='A part runs low (checked every 15 min)', group='Repairs', subject='part',
+                                  feature='parts', scheduled=True,
+                                  fields=['part.name', 'part.category', 'part.on_hand', 'part.reorder_level', 'part.site']),
+    # time-based: once per day/week/month, at the first check after the conditions match
+    'schedule.daily':        dict(label='Every day', group='Schedule', subject='period', scheduled=True,
+                                  fields=['schedule.weekday', 'schedule.hour'],
+                                  hint='Runs once a day, at the first check (every 15 minutes) where the conditions '
+                                       'match, e.g. hour ≥ 7 for 7 AM. Reports cover yesterday.'),
+    'schedule.weekly':       dict(label='Every week', group='Schedule', subject='period', scheduled=True,
+                                  fields=['schedule.weekday', 'schedule.hour'],
+                                  hint='Runs once a week, at the first check where the conditions match, e.g. day is '
+                                       'Monday and hour ≥ 7. Reports cover last Monday to Sunday.'),
+    'schedule.monthly':      dict(label='Every month', group='Schedule', subject='period', scheduled=True,
+                                  fields=['schedule.day', 'schedule.hour'],
+                                  hint='Runs once a month, at the first check where the conditions match, e.g. hour ≥ 7 '
+                                       'on the 1st. Reports cover last month.'),
 }
-TRIGGER_GROUPS = ['Tickets', 'Devices', 'Repairs', 'Loaners', 'People']
+TRIGGER_GROUPS = ['Tickets', 'Devices', 'Repairs', 'Loaners', 'People', 'Schedule']
+
+
+# ─── periods (time-based triggers) ────────────────────────────────────────────
+
+def _tz():
+    from zoneinfo import ZoneInfo
+    try:
+        return ZoneInfo(APP_TIMEZONE)
+    except Exception:
+        return ZoneInfo('UTC')
+
+
+def local_now():
+    return datetime.now(_tz())
+
+
+def current_period(kind, now=None):
+    """What a daily/weekly/monthly run right now is about. The report sent
+    this morning covers what already happened: yesterday, last Monday to
+    Sunday, or last month. key is the dedupe key — one run per day / week /
+    month — and start/end are naive UTC for querying."""
+    now = now or local_now()
+    tz = now.tzinfo or _tz()
+    today = now.date()
+    if kind == 'daily':
+        start, end, key = today - timedelta(days=1), today, f'day:{today}'
+        label = f'{start:%A, %B} {start.day}'
+    elif kind == 'weekly':
+        monday = today - timedelta(days=today.weekday())
+        start, end, key = monday - timedelta(days=7), monday, f'week:{monday}'
+        label = f'the week of {start:%B} {start.day}'
+    else:
+        first = today.replace(day=1)
+        start, end, key = (first - timedelta(days=1)).replace(day=1), first, f'month:{first:%Y-%m}'
+        label = f'{start:%B %Y}'
+
+    def utc(d):
+        return datetime.combine(d, time(0), tzinfo=tz).astimezone(timezone.utc).replace(tzinfo=None)
+    return dict(kind=kind, key=key, start=utc(start), end=utc(end), label=label, now=now)
 
 
 # ─── facts ────────────────────────────────────────────────────────────────────
@@ -235,6 +306,10 @@ def build_context(trigger_key, subject, **extra):
         ctx['signin'] = subject
         row = subject['registry_row']
         person = subject.get('signer')
+    elif kind == 'period':
+        ctx['period'] = subject
+    elif kind == 'part':
+        ctx['part'] = subject
     if row is not None:
         asset = Asset.query.filter_by(asset_tag=row.asset_tag).first()
     if person is None and asset is not None and kind in ('device', 'repair'):
@@ -272,6 +347,12 @@ def build_context(trigger_key, subject, **extra):
     elif kind == 'signin':
         facts.update({'signin.category': subject['category'], 'signin.severity': subject['severity'],
                       'signin.foreign_count': subject.get('foreign_count', 0)})
+    elif kind == 'period':
+        when = subject['now']
+        facts.update({'schedule.weekday': WEEKDAYS[when.weekday()], 'schedule.hour': when.hour, 'schedule.day': when.day})
+    elif kind == 'part':
+        facts.update({'part.name': subject.name, 'part.category': subject.category, 'part.on_hand': subject.quantity_on_hand,
+                      'part.reorder_level': subject.reorder_level, 'part.site': subject.site_id})
     ctx['facts'] = facts
     ctx['label'] = subject_label(ctx)
     return ctx
@@ -293,6 +374,10 @@ def subject_label(ctx):
         return ctx['person'].full_name
     if kind == 'signin':
         return f"{ctx['signin']['signin_email']} on {ctx['signin']['asset_tag']}"
+    if kind == 'period':
+        return f"Report for {ctx['period']['label']}"
+    if kind == 'part':
+        return f"{ctx['part'].name} ({ctx['part'].quantity_on_hand} on hand)"
     return kind
 
 
@@ -323,6 +408,10 @@ def placeholders(ctx):
         'signin_flag': ctx['signin']['label'] if ctx.get('signin') else '',
         'warranty_days_left': str(f.get('device.warranty_days_left') or ''),
         'today': date.today().isoformat(),
+        'period': ctx['period']['label'] if ctx.get('period') else '',
+        'part_name': ctx['part'].name if ctx.get('part') else '',
+        'part_on_hand': str(ctx['part'].quantity_on_hand) if ctx.get('part') else '',
+        'part_reorder_level': str(ctx['part'].reorder_level) if ctx.get('part') else '',
     }
 
 
@@ -330,4 +419,5 @@ PLACEHOLDER_NAMES = ['ticket_id', 'ticket_subject', 'ticket_priority', 'ticket_s
                      'requester_name', 'asset_tag', 'serial_number', 'device_model', 'device_site', 'holder_name',
                      'holder_email', 'person_name', 'person_email', 'person_first_name', 'guardian_name',
                      'incident_description', 'fee_amount', 'incident_count', 'repair_days_out', 'loaner_days_overdue',
-                     'signin_account', 'signin_flag', 'warranty_days_left', 'today']
+                     'signin_account', 'signin_flag', 'warranty_days_left', 'part_name', 'part_on_hand',
+                     'part_reorder_level', 'period', 'today']

@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit part' if part.id else 'New part' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('repair') }}{{ 'Edit ' ~ part.name if part.id else 'New part' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="{{ '/admin/parts/%d' % part.id if part.id else '/admin/parts' }}" class="btn btn-ghost">Cancel</a>
+</div>
+
+<form method="POST" class="card part-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="pf-field pf-wide">
+    <label for="pfName">Name</label>
+    <input id="pfName" name="name" required maxlength="160" value="{{ part.name or '' }}" placeholder="11.6&quot; LCD screen">
+  </div>
+  <div class="pf-field">
+    <label for="pfCat">Category</label>
+    <select id="pfCat" name="category">
+      {% for c in categories %}<option value="{{ c }}" {{ 'selected' if part.category == c }}>{{ c|capitalize }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="pf-field">
+    <label for="pfNum">Part number (optional)</label>
+    <input id="pfNum" name="part_number" maxlength="120" value="{{ part.part_number or '' }}">
+  </div>
+  <div class="pf-field pf-wide">
+    <label for="pfFits">Fits these models <span class="pf-help">(none selected = fits anything)</span></label>
+    <select id="pfFits" name="fits_models" multiple size="{{ [device_models|length, 6]|min or 2 }}">
+      {% for m in device_models %}<option value="{{ m.id }}" {{ 'selected' if m.id in (part.fits_models or []) }}>{{ m.full_name }}</option>{% endfor %}
+    </select>
+    <span class="pf-help">Hold Ctrl (Cmd on a Mac) to pick more than one. Parts that fit a device's model are listed first on its repairs.</span>
+  </div>
+  {% if not part.id %}
+  <div class="pf-field">
+    <label for="pfQty">How many on hand now</label>
+    <input id="pfQty" name="quantity" type="number" min="0" value="0">
+  </div>
+  {% endif %}
+  <div class="pf-field">
+    <label for="pfReorder">Reorder when down to</label>
+    <input id="pfReorder" name="reorder_level" type="number" min="0" value="{{ part.reorder_level or 0 }}">
+    <span class="pf-help">0 = never flag it as low.</span>
+  </div>
+  <div class="pf-field">
+    <label for="pfCost">Unit cost ($)</label>
+    <input id="pfCost" name="unit_cost" inputmode="decimal" value="{{ '%.2f'|format(part.unit_cost) if part.unit_cost is not none else '' }}">
+    <span class="pf-help">Used when you charge a part to a ticket.</span>
+  </div>
+  <div class="pf-field">
+    <label for="pfSite">Kept at</label>
+    <select id="pfSite" name="site_id">
+      <option value="">Anywhere / district</option>
+      {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if part.site_id == s.id }}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="pf-field">
+    <label for="pfVendor">Vendor (optional)</label>
+    <input id="pfVendor" name="vendor" maxlength="160" value="{{ part.vendor or '' }}">
+  </div>
+  <div class="pf-field pf-wide">
+    <label for="pfNotes">Notes (optional)</label>
+    <textarea id="pfNotes" name="notes" rows="2">{{ part.notes or '' }}</textarea>
+  </div>
+  {% if part.id %}
+  <label class="pf-check pf-wide"><input type="checkbox" name="is_active" {{ 'checked' if part.is_active }}> In use (untick to retire a part you no longer stock)</label>
+  {% endif %}
+  <div class="pf-wide"><button type="submit" class="btn btn-primary">Save</button></div>
+</form>
+
+<style>
+  .part-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 1rem 1.2rem; max-width: 860px; }
+  .pf-field { display: flex; flex-direction: column; gap: .3rem; }
+  .pf-field label { color: var(--muted); font-size: .85rem; }
+  .pf-wide { grid-column: 1 / -1; }
+  .pf-help { color: var(--muted); font-size: .76rem; }
+  .pf-check { display: flex; align-items: center; gap: .5rem; font-size: .88rem; cursor: pointer; }
+  .pf-check input { width: auto; }
+</style>
+{% endblock %}

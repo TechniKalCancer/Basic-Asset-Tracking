@@ -13,7 +13,24 @@ from foxdesk.core import (
     db,
 )
 from foxdesk.models import User
-from foxdesk.services.auth import _admin_session_active, _current_user, _post_login_redirect
+from foxdesk.services.auth import _admin_session_active, _current_user, _log_activity, _post_login_redirect
+from foxdesk.services.features import feature_enabled
+from foxdesk.services.signin import SigninError, finish, redirect_uri, shared_password_allowed, start
+
+
+def _start_user_session(user):
+    session.clear()
+    session['admin_logged_in'] = True
+    session['user_id'] = user.id
+    session['is_admin'] = user.is_admin
+    session['is_super_admin'] = user.is_super_admin
+    session['last_active'] = datetime.now(timezone.utc).timestamp()
+    session.permanent = True
+
+
+def _login_page():
+    return render_template('admin_login.html', google_signin=feature_enabled('google_signin'),
+                           shared_password=shared_password_allowed())
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
@@ -28,7 +45,7 @@ def admin_login():
 
         if not allowed:
             flash(f'Too many failed attempts. Try again in {wait} seconds.', 'error')
-            return render_template('admin_login.html')
+            return _login_page()
 
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
@@ -36,6 +53,9 @@ def admin_login():
         # Blank username = the legacy shared ADMIN_PASSWORD login, always a
         # full superuser. A username looks up a named User account instead.
         if not username:
+            if not shared_password_allowed():
+                flash('The shared admin password is turned off. Sign in with your own account.', 'error')
+                return _login_page()
             if check_password_hash(ADMIN_PASSWORD_HASH, password):
                 session.clear()
                 session['admin_logged_in'] = True
@@ -47,20 +67,41 @@ def admin_login():
         else:
             user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
             if user and user.is_active and check_password_hash(user.password_hash, password):
-                session.clear()
-                session['admin_logged_in'] = True
-                session['user_id'] = user.id
-                session['is_admin'] = user.is_admin
-                session['is_super_admin'] = user.is_super_admin
-                session['last_active'] = datetime.now(timezone.utc).timestamp()
-                session.permanent = True
+                _start_user_session(user)
                 return redirect(_post_login_redirect(user))
 
         _record_attempt(ip)
         attempts_left = MAX_ATTEMPTS - len(_login_attempts[ip])
         flash(f'Invalid username or password. {attempts_left} attempt{"s" if attempts_left != 1 else ""} remaining.', 'error')
 
-    return render_template('admin_login.html')
+    return _login_page()
+
+
+@app.route('/auth/google')
+def auth_google():
+    if not feature_enabled('google_signin'):
+        flash('Google sign-in isn\'t turned on.', 'error')
+        return redirect(url_for('admin_login'))
+    try:
+        return redirect(start(session, redirect_uri(request.url_root)))
+    except SigninError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('admin_login'))
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    if not feature_enabled('google_signin'):
+        return redirect(url_for('admin_login'))
+    try:
+        user = finish(session, request.args)
+    except SigninError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('admin_login'))
+    _start_user_session(user)
+    _log_activity('user_login', f'{user.username} signed in with Google ({user.email}).')
+    db.session.commit()
+    return redirect(_post_login_redirect(user))
 
 
 @app.route('/admin/logout')

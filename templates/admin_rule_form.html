@@ -43,7 +43,7 @@
         {% if items %}
         <optgroup label="{{ group }}">
           {% for key, t in items %}
-          <option value="{{ key }}">{{ t.label }}{{ ' (checked every 15 min)' if t.scheduled }}</option>
+          <option value="{{ key }}">{{ t.label }}{{ ' (checked every 15 min)' if t.scheduled and not t.hint }}</option>
           {% endfor %}
         </optgroup>
         {% endif %}
@@ -300,6 +300,7 @@
   function renderTrigger() {
     const t = trigger();
     document.getElementById('triggerHint').textContent = !t ? 'Choose what starts the rule.'
+      : t.hint ? t.hint
       : t.scheduled ? 'Checked every 15 minutes. The rule runs once for each item that matches; it won\'t repeat for the same item.'
       : 'The rule runs right after this happens.';
     fillSelect(newAction, t ? t.actions.map(k => [k, schema.actions[k].label]) : [], null, '— Choose an action —');

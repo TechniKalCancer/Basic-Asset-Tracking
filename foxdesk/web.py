@@ -35,17 +35,21 @@ NAV_SECTION_PREFIXES = [
     ('/admin/upload_csv', 'devices'),
     ('/admin/data_quality', 'devices'),
     ('/admin/signin_mismatches', 'devices'),
+    ('/admin/assign_from_google', 'devices'),
     ('/admin/labels', 'devices'),
     ('/admin/people', 'people'),
     ('/admin/accounts', 'people'),
     ('/admin/directory/people', 'people'),
     ('/admin/directory/computers', 'devices'),
     ('/admin/directory', 'admin'),
+    ('/admin/warranty', 'admin'),
+    ('/admin/signin', 'admin'),
     ('/loaner_checkinout', 'loaners'),
     ('/loaner_checkout', 'loaners'),
     ('/loaner_checkin', 'loaners'),
     ('/admin/loaners', 'loaners'),
     ('/admin/repairs', 'repairs'),
+    ('/admin/parts', 'repairs'),
     ('/admin/tickets', 'tickets'),
     ('/admin/ticket_categories', 'tickets'),
     ('/admin/automations', 'admin'),
@@ -130,6 +134,7 @@ def inject_permission_helper():
     nav_orphan_count = 0
     nav_open_tickets_count = 0
     nav_accounts_review_count = 0
+    nav_parts_low_count = 0
     all_sites = []
     active_site = None
     if session.get('admin_logged_in'):
@@ -142,6 +147,9 @@ def inject_permission_helper():
             active_site = user.default_site if user else None
         if _has_permission('people'):
             nav_accounts_review_count = accounts_to_review_query().count()
+        if _has_permission('repairs') and feature_enabled('parts'):
+            from foxdesk.services.parts import low_stock_query
+            nav_parts_low_count = low_stock_query().count()
         if _has_permission('tickets'):
             nav_open_tickets_count = _scope_tickets(Ticket.query, _current_site_ids()) \
                 .filter(Ticket.status.in_(['open', 'in_progress'])).count()
@@ -153,6 +161,7 @@ def inject_permission_helper():
         'nav_orphan_count': nav_orphan_count,
         'nav_open_tickets_count': nav_open_tickets_count,
         'nav_accounts_review_count': nav_accounts_review_count,
+        'nav_parts_low_count': nav_parts_low_count,
         'all_sites': all_sites,
         'active_site': active_site,
         'branding': _current_branding(),
@@ -178,6 +187,7 @@ def _settings_sections():
         ]),
         ('People & Access', [
             (users, 'users', 'Users & Permissions', 'Staff logins and what each one can see and do.', '/admin/users'),
+            (sup and feature_switch('google_signin'), 'lock', 'Sign-in', 'Sign in with Google; turn off the shared admin password.', '/admin/signin'),
             (sup, 'site', 'Sites', 'Schools and buildings; which devices and people belong where.', '/admin/sites'),
             (admin and feature_enabled('kiosk'), 'computer', 'Kiosk Devices', 'Enroll a shared device for check-in/out without a login.', '/admin/kiosk'),
         ]),
@@ -197,7 +207,9 @@ def _settings_sections():
             (sup and feature_switch('kace'), 'integration', 'KACE', 'Connect the KACE SMA inventory.', '/admin/kace_setup'),
             (sup and feature_switch('active_directory'), 'integration', 'Active Directory',
              'Connect your domain controllers, pick OUs, and sync people and computers.', '/admin/directory'),
-            (sup, 'sync', 'Scheduled Syncs', 'How often Google, KACE and Active Directory syncs run.', '/admin/sync_schedule'),
+            (sup and feature_switch('dell_warranty'), 'integration', 'Dell warranty',
+             'Warranty end dates and ship dates for Dell devices.', '/admin/warranty'),
+            (sup, 'sync', 'Scheduled Syncs', 'How often Google, KACE, Active Directory and warranty syncs run.', '/admin/sync_schedule'),
         ]),
         ('Automation', [
             (sup and feature_enabled('automations'), 'automation', 'Automations',
@@ -212,6 +224,8 @@ def _settings_sections():
 
 
 app.add_template_filter(short_dn, 'short_dn')
+# Also a global (not just context) so macros imported without context can check permissions.
+app.jinja_env.globals.update(can=_has_permission)
 
 
 @app.template_filter('ago')

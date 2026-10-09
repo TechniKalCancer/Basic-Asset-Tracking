@@ -55,8 +55,8 @@ def _run_due_scheduled_syncs():
     reminder loop, just applied via a timestamp column instead of a
     per-row resend gate."""
     google_on, kace_on = feature_enabled('google'), feature_enabled('kace')  # configured AND switched on
-    ad_on = feature_enabled('active_directory')
-    if not google_on and not kace_on and not ad_on:
+    ad_on, dell_on = feature_enabled('active_directory'), feature_enabled('dell_warranty')
+    if not (google_on or kace_on or ad_on or dell_on):
         return
     now = datetime.utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
@@ -65,6 +65,8 @@ def _run_due_scheduled_syncs():
         if schedule.sync_type == 'kace' and not kace_on:
             continue
         if schedule.sync_type == 'ad' and not ad_on:
+            continue
+        if schedule.sync_type == 'dell' and not dell_on:
             continue
         if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
             continue
@@ -82,6 +84,9 @@ def _run_due_scheduled_syncs():
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {pushed} pushed, {unmatched} unmatched'
             elif schedule.sync_type == 'ad':
                 schedule.last_run_summary = describe_summary(run_ad_sync())[:255]
+            elif schedule.sync_type == 'dell':
+                from foxdesk.integrations.dell import describe_summary as describe_dell, run_dell_lookup
+                schedule.last_run_summary = describe_dell(run_dell_lookup())[:255]
             else:
                 matched, updated, unmatched, created = _run_kace_device_sync()
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {created} auto-created, {unmatched} unmatched'

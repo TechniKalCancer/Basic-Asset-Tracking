@@ -422,7 +422,7 @@
       {% endif %}
     </div>
 
-    {% if session.get('admin_logged_in') and active_section in ['devices', 'people', 'loaners', 'tickets', 'admin'] %}
+    {% if session.get('admin_logged_in') and active_section in ['devices', 'people', 'loaners', 'tickets', 'repairs', 'admin'] %}
     <div class="nav-sub">
       {% if active_section == 'devices' and can('devices') %}
         <a href="/admin/registry">Registry</a>
@@ -432,7 +432,8 @@
         {% endif %}
         {% if feature('audit') %}<a href="/admin/audit">Asset Audit</a>{% endif %}
         {% if feature('data_quality') %}<a href="/admin/data_quality">Data Quality</a>{% endif %}
-        {% if feature('signin_check') %}<a href="/admin/signin_mismatches">Sign-in Mismatches</a>{% endif %}
+        {% if feature('signin_check') %}<a href="/admin/signin_mismatches">Sign-in Mismatches</a>
+        <a href="/admin/assign_from_google">Assign from Google</a>{% endif %}
         {% if feature('incidents') %}<a href="/admin/fees">Billing</a>{% endif %}
         <div class="row-menu nav-dropdown">
           <button type="button">Tools ▾</button>
@@ -480,6 +481,10 @@
       {% elif active_section == 'loaners' %}
         {% if can('loaner_checkinout') %}<a href="/loaner_checkinout">Check In / Out</a>{% endif %}
         {% if can('loaners') %}<a href="/admin/loaners">Loaner Pool</a>{% endif %}
+      {% elif active_section == 'repairs' and can('repairs') %}
+        <a href="/admin/repairs">Repairs</a>
+        {% if feature('parts') %}<a href="/admin/parts">Parts {% if nav_parts_low_count %}<span class="nav-tab-badge">{{ nav_parts_low_count }}</span>{% endif %}</a>{% endif %}
+        <a href="/admin/repair_categories">Repair Categories</a>
       {% elif active_section == 'tickets' and can('tickets') %}
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>
@@ -505,7 +510,7 @@
         <a href="/admin/emails">Email</a>
         <a href="/admin/custom_fields">Custom Fields</a>
         <a href="/admin/features">Features</a>
-        {% if feature_on('google') or feature_on('kace') or feature_on('active_directory') %}
+        {% if feature_on('google') or feature_on('kace') or feature_on('active_directory') or feature_on('dell_warranty') %}
         <div class="row-menu nav-dropdown">
           <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled or ad_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
           <div class="row-menu-items">
@@ -536,6 +541,10 @@
             <div class="nav-dropdown-label">Active Directory {% if ad_sync_enabled %}<span class="badge badge-green" style="font-size:.62rem;">On</span>{% else %}<span class="badge badge-yellow" style="font-size:.62rem;">Off</span>{% endif %}</div>
             <a href="/admin/directory">{{ 'Setup / Status' if ad_sync_enabled else 'Set Up Active Directory' }}</a>
             {% if ad_sync_enabled %}<a href="/admin/directory/computers">Computers in AD</a>{% endif %}
+            {% endif %}
+            {% if feature_on('dell_warranty') %}
+            <div class="nav-dropdown-divider"></div>
+            <a href="/admin/warranty">Dell warranty lookup</a>
             {% endif %}
           </div>
         </div>

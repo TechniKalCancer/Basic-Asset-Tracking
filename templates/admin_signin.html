@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Sign-in{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('lock') }}Sign-in</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p class="s-muted" style="max-width:75ch;margin:0 0 1.2rem;font-size:.9rem;">
+  Let staff sign in with their school Google account instead of a FoxDesk password, then turn off the shared admin
+  password so every change is tied to a person.
+</p>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
+    <h2 style="margin:0;">Sign in with Google</h2>
+    <span class="badge {{ 'badge-green' if cfg.configured else 'badge-yellow' }}">{{ 'On' if cfg.configured else 'Not set up' }}</span>
+  </div>
+
+  <div class="s-uri">
+    <div class="s-label">Authorized redirect URI (register this with Google)</div>
+    <code>{{ redirect_uri }}</code>
+    {% if uri_problem %}<p class="s-note">{{ uri_problem }} Set <code>APP_URL</code> in .env to the address people will use.</p>{% endif %}
+  </div>
+
+  {% if not cfg.configured %}
+  <ol class="s-steps">
+    <li>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console → APIs &amp; Services → Credentials</a>
+      in the project you use for FoxDesk (the Google sync's project is fine).</li>
+    <li>If asked, set up the <strong>OAuth consent screen</strong>: User type <strong>Internal</strong>, app name, support email.</li>
+    <li><strong>Create credentials → OAuth client ID</strong>, type <strong>Web application</strong>. Under Authorized redirect URIs add the address above.</li>
+    <li>Copy the <strong>Client ID</strong> and <strong>Client secret</strong> below and save.</li>
+    <li>Add each staff member's school email to their user under <a href="/admin/users">Users &amp; Permissions</a>. That's how FoxDesk knows who they are.</li>
+  </ol>
+  {% endif %}
+  {% if cfg.secret_unreadable %}<p class="s-note">The saved client secret can't be read any more (the server's SECRET_KEY changed). Enter it again.</p>{% endif %}
+
+  <form method="POST" action="/admin/signin/google" class="s-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Client ID {% if cfg.sources.client_id == 'env' %}<span class="badge badge-blue s-src">from .env</span>{% endif %}
+      <input name="client_id" value="{{ cfg.client_id or '' }}" placeholder="1234-abc.apps.googleusercontent.com">
+    </label>
+    <label>Client secret {% if cfg.sources.secret == 'env' %}<span class="badge badge-blue s-src">from .env</span>{% endif %}
+      <input name="client_secret" type="password" autocomplete="new-password"
+             placeholder="{{ 'Saved. Leave blank to keep it' if cfg.sources.secret == 'saved' else ('Set in .env. Leave blank to keep it' if cfg.sources.secret == 'env' else 'GOCSPX-…') }}">
+    </label>
+    <label class="s-wide">Allowed email domains
+      <input name="domains" value="{{ settings.allowed_domains or '' }}" placeholder="yourdistrict.org, students.yourdistrict.org">
+      <span class="s-help">Only these Google accounts can sign in, and the email still has to belong to a FoxDesk user. Blank allows any domain.</span>
+    </label>
+    <div class="s-wide"><button type="submit" class="btn btn-primary">Save</button></div>
+  </form>
+  <p class="s-muted" style="margin:.8rem 0 0;">{{ users_with_email }} of {{ users_total }} active users have an email, so they can sign in with Google.
+    <a href="/admin/users">Users &amp; Permissions</a></p>
+</div>
+
+<div class="card">
+  <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
+    <h2 style="margin:0;">Shared admin password</h2>
+    <span class="badge {{ 'badge-yellow' if shared_allowed else 'badge-green' }}">{{ 'On' if shared_allowed else 'Off' }}</span>
+  </div>
+  <p class="s-muted" style="margin:.6rem 0 .9rem;max-width:72ch;">
+    The blank-username login with the server's ADMIN_PASSWORD. Everything done with it is logged as "Admin (shared login)",
+    not a person. Once staff sign in with their own accounts, turn it off.
+  </p>
+  {% if env_override %}
+  <p class="s-note">ALLOW_SHARED_PASSWORD is set in .env, so the shared password works regardless of this switch. Remove it once you're back in.</p>
+  {% endif %}
+  <form method="POST" action="/admin/signin/shared_password">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if settings.shared_password_disabled %}
+    <button type="submit" name="action" value="on" class="btn btn-ghost">Turn it back on</button>
+    {% else %}
+    <button type="submit" name="action" value="off" class="btn btn-danger" {{ 'disabled' if not super_admins }}
+            onclick="return confirm('Turn off the shared admin password? Make sure you can sign in with your own super-admin account first.');">Turn it off</button>
+    {% if not super_admins %}<span class="s-muted">Make one of your own users a super admin first.</span>{% endif %}
+    {% endif %}
+  </form>
+  <p class="s-help" style="margin:.8rem 0 0;">Locked out? Add <code>ALLOW_SHARED_PASSWORD=1</code> to the server's .env and restart; the shared password works again until you remove it.</p>
+</div>
+
+<style>
+  .s-muted { color: var(--muted); font-size: .85rem; }
+  .s-help { color: var(--muted); font-size: .76rem; }
+  .s-note { font-size: .87rem; padding: .5rem .8rem; border-left: 3px solid var(--warning); background: var(--surface2); border-radius: 4px; }
+  .s-uri { margin: 1rem 0; }
+  .s-uri code { display: inline-block; padding: .35rem .6rem; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+                font-size: .85rem; overflow-wrap: anywhere; }
+  .s-label { color: var(--muted); font-size: .8rem; margin-bottom: .3rem; }
+  .s-steps { line-height: 1.7; padding-left: 1.2rem; margin: 0 0 1rem; font-size: .9rem; }
+  .s-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: .9rem 1.2rem; max-width: 820px; }
+  .s-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .s-src { font-size: .66rem; align-self: flex-start; }
+  .s-wide { grid-column: 1 / -1; }
+</style>
+{% endblock %}

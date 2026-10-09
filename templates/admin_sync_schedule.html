@@ -39,6 +39,7 @@
 <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(min(420px, 100%), 1fr));gap:1.5rem;">
   {% set syncs = [('People Sync', 'person', person_schedule), ('Device Sync', 'device', device_schedule), ('KACE Sync', 'kace', kace_schedule)] %}
   {% if feature_on('active_directory') %}{% set syncs = syncs + [('Active Directory Sync', 'ad', ad_schedule)] %}{% endif %}
+  {% if feature_on('dell_warranty') %}{% set syncs = syncs + [('Dell Warranty Lookup', 'dell', dell_schedule)] %}{% endif %}
   {% for label, entity, schedule in syncs %}
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:.6rem;">

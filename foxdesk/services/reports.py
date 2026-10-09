@@ -320,6 +320,30 @@ SIGNIN_CATEGORIES = OrderedDict([
 SIGNIN_SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 
 
+def _signin_people():
+    """(people_by_email, people_by_id, resolve) for reading Google sign-ins:
+    every primary and linked/alias email maps to its person, and resolve()
+    follows a merged duplicate (custom_fields.merged_into, see
+    maintenance/2026-10-08_merge_duplicate_people.py) to the surviving record."""
+    people_by_email = {p.email.lower(): p for p in Person.query.all() if p.email}
+    # Every linked account/alias email counts as that person — a merged
+    # duplicate's old email or a second Google account isn't someone else.
+    for ident in PersonIdentity.query.filter(PersonIdentity.person_id.isnot(None),
+                                             PersonIdentity.email.isnot(None)):
+        people_by_email.setdefault(ident.email, ident.person)
+    people_by_id = {p.id: p for p in people_by_email.values()}
+
+    def resolve(email):
+        person = people_by_email.get((email or '').lower())
+        for _ in range(5):
+            merged_into = (person.custom_fields or {}).get('merged_into') if person else None
+            if not merged_into or merged_into not in people_by_id:
+                break
+            person = people_by_id[merged_into]
+        return person
+    return people_by_email, people_by_id, resolve
+
+
 def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include_reviewed=False, only_tags=None):
     """Returns a list of mismatch dicts (asset_tag, signin_email, signer,
     expected, category, severity, last_activity, note, reviewed), most
@@ -342,13 +366,7 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
         return []
     tags = [r.asset_tag for r, _ in rows]
 
-    people_by_email = {p.email.lower(): p for p in Person.query.all()}
-    # Every linked account/alias email counts as that person — a merged
-    # duplicate's old email or a second Google account isn't someone else.
-    for ident in PersonIdentity.query.filter(PersonIdentity.person_id.isnot(None),
-                                             PersonIdentity.email.isnot(None)):
-        people_by_email.setdefault(ident.email, ident.person)
-    people_by_id = {p.id: p for p in people_by_email.values()}
+    people_by_email, people_by_id, resolve = _signin_people()
 
     open_assignments = {h.asset_tag: h for h in AssignmentHistory.query.filter(
         AssignmentHistory.asset_tag.in_(tags), AssignmentHistory.unassigned_at.is_(None))}
@@ -383,15 +401,7 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
     for registry_row, asset in rows:
         recent = asset.google_recent_users or [asset.google_recent_user.lower()]
         signin_email = recent[0]
-        signer = people_by_email.get(signin_email)
-        # A duplicate profile merged into another (custom_fields.merged_into,
-        # see maintenance/2026-10-08_merge_duplicate_people.py) still shows
-        # up in older Google sign-ins — count those as the surviving record.
-        for _ in range(5):
-            merged_into = (signer.custom_fields or {}).get('merged_into') if signer else None
-            if not merged_into or merged_into not in people_by_id:
-                break
-            signer = people_by_id[merged_into]
+        signer = resolve(signin_email)
 
         expected = []
         held_since = None
@@ -495,6 +505,115 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
     results.sort(key=lambda m: (SIGNIN_SEVERITY_ORDER[m['severity']], -m['foreign_count'],
                                 -(m['last_activity'] or datetime.min).timestamp()))
     return results
+
+
+ASSIGN_TIERS = OrderedDict([
+    ('high', 'Ready to assign'),
+    ('medium', 'Check first'),
+    ('low', 'Probably not theirs'),
+])
+ASSIGN_SKIP_NOTE = 'Not assigned from Google sign-in'
+
+
+def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
+    """Unassigned devices someone has been using, each with the person to
+    assign it to (the latest Google sign-in) and how sure that is:
+
+    high   - an active student, the only account on the device lately, with
+             no device of their own and not the latest user anywhere else;
+    medium - an active student with no device, but others also signed in,
+             or they're the latest user on more than one unassigned device;
+    low    - staff (often a cart or shared device), someone inactive, or a
+             student who already has a device.
+
+    Accounts not in People aren't proposed. Loaners, and lost/retired/repair
+    devices, are left out (those go through checkouts and the sign-in
+    check). A device skipped here, or marked OK on Sign-in Mismatches, for
+    the same account doesn't come back."""
+    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    rows = (_scope_registry(AssetRegistry.query, site_ids)
+            .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
+            .filter(Asset.assigned_to_id.is_(None), Asset.google_recent_user.isnot(None),
+                    Asset.google_last_activity >= cutoff, AssetRegistry.is_loaner.isnot(True),
+                    db.or_(Asset.status.is_(None), Asset.status.notin_(('lost', 'retired', 'repair'))))
+            .with_entities(AssetRegistry, Asset).all())
+    if not rows:
+        return []
+    tags = [r.asset_tag for r, _ in rows]
+    on_loan = {l.asset_tag for l in LoanerCheckout.query.filter(LoanerCheckout.asset_tag.in_(tags),
+                                                                LoanerCheckout.checked_in_at.is_(None))}
+    _, _, resolve = _signin_people()
+    own_devices = defaultdict(list)
+    for a in Asset.query.filter(Asset.assigned_to_id.isnot(None)).with_entities(Asset.asset_tag, Asset.assigned_to_id):
+        own_devices[a.assigned_to_id].append(a.asset_tag)
+    for l in LoanerCheckout.query.filter(LoanerCheckout.checked_in_at.is_(None), LoanerCheckout.person_id.isnot(None)):
+        own_devices[l.person_id].append(l.asset_tag)
+    held_before = defaultdict(set)
+    for h in AssignmentHistory.query.filter(AssignmentHistory.asset_tag.in_(tags), AssignmentHistory.person_id.isnot(None)):
+        held_before[h.asset_tag].add(h.person_id)
+    reviewed = {(r.asset_tag, r.signin_email) for r in SigninReview.query.filter(SigninReview.asset_tag.in_(tags))}
+
+    candidates = []
+    for registry_row, asset in rows:
+        if registry_row.asset_tag in on_loan:
+            continue
+        recent = [e.lower() for e in (asset.google_recent_users or [asset.google_recent_user])]
+        signer = resolve(recent[0])
+        if not signer or (registry_row.asset_tag, recent[0]) in reviewed:
+            continue
+        # recentUsers reaches back months. Earlier users who have since left or
+        # got their own device are history; only an active student with no
+        # device of their own is a competing claim.
+        rivals, earlier = [], 0
+        for email in recent[1:]:
+            p = resolve(email)
+            if not p or p.id == signer.id:
+                continue
+            earlier += 1
+            if p.is_active and p.role == 'student' and not own_devices.get(p.id) and p.full_name not in rivals:
+                rivals.append(p.full_name)
+        candidates.append((registry_row, asset, signer, recent[0], rivals, earlier))
+    latest_on = defaultdict(int)
+    for _, _, signer, _, _, _ in candidates:
+        latest_on[signer.id] += 1
+
+    proposals = []
+    for registry_row, asset, signer, email, rivals, earlier in candidates:
+        evidence = [(f'online {_ago(asset.google_last_activity)}', 'plain')]
+        own = own_devices.get(signer.id, [])
+        if not signer.is_active:
+            tier, why = 'low', 'marked inactive in People'
+        elif signer.role == 'staff':
+            tier, why = 'low', 'staff account, often a cart or shared device'
+        elif own:
+            tier, why = 'low', f'already has {", ".join(own)}'
+        elif latest_on[signer.id] > 1:
+            tier, why = 'medium', f'latest user on {latest_on[signer.id]} unassigned devices'
+        elif len(rivals) > 1:
+            tier, why = 'medium', f'shared: {len(rivals)} other students without a device use it too'
+        elif rivals:
+            tier, why = 'medium', f'also used by {rivals[0]}, who has no device'
+        else:
+            tier, why = 'high', 'the only current user' if earlier else 'the only account on it'
+        evidence.insert(0, (why, {'high': 'good', 'medium': 'warn', 'low': 'bad'}[tier]))
+        if tier == 'high' and earlier:
+            evidence.append((f'{earlier} earlier user{"s" if earlier > 1 else ""} since moved on', 'plain'))
+        if tier != 'low' and not own:
+            evidence.append(('has no device', 'good'))
+        if signer.id in held_before[registry_row.asset_tag]:
+            evidence.append(('had this device before', 'good'))
+        if registry_row.site_id and signer.site_id and registry_row.site_id != signer.site_id:
+            evidence.append(('device and person are at different schools', 'warn'))
+        proposals.append(dict(registry_row=registry_row, asset=asset, person=signer, signin_email=email,
+                              tier=tier, evidence=evidence, last_activity=asset.google_last_activity))
+    order = {t: i for i, t in enumerate(ASSIGN_TIERS)}
+    proposals.sort(key=lambda p: (order[p['tier']], p['person'].last_name.lower(), p['person'].first_name.lower()))
+    return proposals
+
+
+def _ago(when):
+    days = (datetime.utcnow() - when).days if when else None
+    return 'today' if days == 0 else ('yesterday' if days == 1 else f'{days} days ago')
 
 
 def _signin_window_days():

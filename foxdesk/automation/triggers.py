@@ -13,7 +13,8 @@ read the friendlier `placeholders()` built alongside.
 """
 from datetime import date, datetime, time, timedelta, timezone
 
-from foxdesk.core import APP_TIMEZONE
+from foxdesk.clock import utcnow
+from foxdesk.core import APP_TIMEZONE, db
 
 from foxdesk.models import (
     PART_CATEGORIES,
@@ -297,14 +298,14 @@ def build_context(trigger_key, subject, **extra):
     elif kind == 'incident':
         ctx['incident'] = subject
         row = AssetRegistry.query.filter_by(asset_tag=subject.asset_tag).first()
-        person = Person.query.get(subject.person_id) if subject.person_id else None
+        person = db.session.get(Person, subject.person_id) if subject.person_id else None
     elif kind == 'repair':
         ctx['repair'] = subject
         row = AssetRegistry.query.filter_by(asset_tag=subject.asset_tag).first()
     elif kind == 'loaner':
         ctx['loaner'] = subject
         row = AssetRegistry.query.filter_by(asset_tag=subject.asset_tag).first()
-        person = Person.query.get(subject.person_id) if subject.person_id else None
+        person = db.session.get(Person, subject.person_id) if subject.person_id else None
     elif kind == 'device':
         row = subject
         person = extra.get('person')
@@ -329,7 +330,7 @@ def build_context(trigger_key, subject, **extra):
     facts.update(_person_facts(person))
     if 'device_count' in extra:  # e.g. graduation: devices already unassigned but still in hand
         facts['person.device_count'] = extra['device_count']
-    now = datetime.utcnow()
+    now = utcnow()
     if kind == 'ticket':
         t = subject
         facts.update({

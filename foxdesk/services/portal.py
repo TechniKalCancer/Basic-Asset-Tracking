@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import session
 
+from foxdesk.clock import utcnow
 from foxdesk.core import db
 from foxdesk.models import Asset, Incident, LoanerCheckout, Person, PortalLogin, Ticket
 from foxdesk.services.features import feature_enabled
@@ -100,7 +101,7 @@ def make_link_token(email):
     if not known_email(email):
         return None
     recent = PortalLogin.query.filter(PortalLogin.email == email,
-                                      PortalLogin.created_at >= datetime.utcnow() - timedelta(hours=1)).count()
+                                      PortalLogin.created_at >= utcnow() - timedelta(hours=1)).count()
     if recent >= LINKS_PER_EMAIL_PER_HOUR:
         return None
     token = secrets.token_urlsafe(32)
@@ -112,9 +113,9 @@ def make_link_token(email):
 def redeem_link_token(token):
     """The email a fresh, unused link was for (and marks it used), or None. Commits."""
     row = PortalLogin.query.filter_by(token_hash=_hash(token or '')).first()
-    if not row or row.used_at or datetime.utcnow() - row.created_at > timedelta(minutes=LINK_MINUTES):
+    if not row or row.used_at or utcnow() - row.created_at > timedelta(minutes=LINK_MINUTES):
         return None
-    row.used_at = datetime.utcnow()
+    row.used_at = utcnow()
     db.session.commit()
     return row.email if known_email(row.email) else None
 

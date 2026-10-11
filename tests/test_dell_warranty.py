@@ -1,7 +1,8 @@
 """Dell warranty lookup, with Dell's API faked."""
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from conftest import A, patch_everywhere
+from foxdesk.clock import utcnow
 
 
 class FakeResponse:
@@ -42,8 +43,8 @@ def test_lookup_fills_warranty_and_ship_dates(client, make, monkeypatch):
     keyed(client)
     fresh = make.device(serial='ABC1234')
     extended = make.device(serial='DEF5678')
-    A.AssetRegistry.query.get(extended.id).warranty_expiration = date(2030, 1, 1)   # bought an extension elsewhere
-    A.AssetRegistry.query.get(extended.id).purchase_date = date(2023, 1, 1)
+    A.db.session.get(A.AssetRegistry, extended.id).warranty_expiration = date(2030, 1, 1)   # bought an extension elsewhere
+    A.db.session.get(A.AssetRegistry, extended.id).purchase_date = date(2023, 1, 1)
     make.device(serial='PF3XY7Z')                                                   # 7 chars, not Dell
     make.device(serial='C02XL0ABCD12')                                              # not a service tag at all
     A.db.session.commit()
@@ -53,9 +54,9 @@ def test_lookup_fills_warranty_and_ship_dates(client, make, monkeypatch):
     r = client.post('/admin/warranty/run', follow_redirects=True)
     assert b'3 checked: 1 warranty dates updated, 1 already current, 1 not Dell' in r.data
     assert calls == [['ABC1234', 'DEF5678', 'PF3XY7Z']] and 'C02XL0ABCD12' not in calls[0]
-    row = A.AssetRegistry.query.get(fresh.id)
+    row = A.db.session.get(A.AssetRegistry, fresh.id)
     assert row.warranty_expiration == date(2027, 3, 12) and row.purchase_date == date(2023, 3, 12)
-    ext = A.AssetRegistry.query.get(extended.id)
+    ext = A.db.session.get(A.AssetRegistry, extended.id)
     assert ext.warranty_expiration == date(2030, 1, 1) and ext.purchase_date == date(2023, 1, 1), 'later/manual dates kept'
     assert A.DeviceRecord.query.filter_by(source='dell', external_key='PF3XY7Z').one().raw == {'not_dell': True}
     page = client.get(f'/admin/assets/{fresh.asset_tag}/assign').get_data(as_text=True)
@@ -63,7 +64,7 @@ def test_lookup_fills_warranty_and_ship_dates(client, make, monkeypatch):
 
     assert client.post('/admin/warranty/run', follow_redirects=True) and calls[1:] == [], 'not asked again for 30 days'
     for rec in A.DeviceRecord.query.filter_by(source='dell'):
-        rec.last_synced_at = datetime.utcnow() - timedelta(days=45)
+        rec.last_synced_at = utcnow() - timedelta(days=45)
     A.db.session.commit()
     assert {r.serial_number for r in A.candidates()} == {'ABC1234', 'DEF5678'}, 'not-Dell tags wait 180 days'
 
@@ -81,7 +82,7 @@ def test_credentials_and_errors(client, make, monkeypatch):
     assert not A.feature_enabled('dell_warranty')
     assert b'Not configured' in client.get('/admin/warranty').data
     keyed(client)
-    row = A.WarrantySettings.query.get(1)
+    row = A.db.session.get(A.WarrantySettings, 1)
     assert row.dell_client_id == 'l7xx-test' and 'shh-not-real' not in row.dell_client_secret
     assert A.dell_credentials()[1] == 'shh-not-real' and A.feature_enabled('dell_warranty')
     body = client.get('/admin/warranty').get_data(as_text=True)
@@ -92,7 +93,7 @@ def test_credentials_and_errors(client, make, monkeypatch):
     r = client.post('/admin/warranty/test', follow_redirects=True)
     assert b'Dell rejected the API key' in r.data
     r = client.post('/admin/warranty/run', follow_redirects=True)
-    assert b'Dell rejected the API key' in r.data and 'rejected' in A.WarrantySettings.query.get(1).last_error
+    assert b'Dell rejected the API key' in r.data and 'rejected' in A.db.session.get(A.WarrantySettings, 1).last_error
 
 
 def test_scheduled_lookup(client, make, monkeypatch):

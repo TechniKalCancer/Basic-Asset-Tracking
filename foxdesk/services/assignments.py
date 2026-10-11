@@ -1,5 +1,6 @@
 """Assigning devices to people, loaner checkout/checkin, and overdue lookups."""
-from datetime import datetime, timedelta
+from datetime import timedelta
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, db, logger
 from foxdesk.automation.engine import emit
 from foxdesk.models import Asset, AssetRegistry, AssignmentHistory, LoanerCheckout, Person
@@ -23,7 +24,7 @@ def _close_open_assignment(asset_tag, condition_in=None):
     """Closes the current open AssignmentHistory row for an asset_tag, if any."""
     open_row = AssignmentHistory.query.filter_by(asset_tag=asset_tag, unassigned_at=None).first()
     if open_row:
-        open_row.unassigned_at = datetime.utcnow()
+        open_row.unassigned_at = utcnow()
         open_row.condition_in = condition_in
 
 
@@ -74,7 +75,7 @@ def _assign_asset_to_person(asset_tag, person, condition_out=None, due_date=None
 def _overdue_assignments(site_ids=None):
     """Open assignments (not yet returned) whose due_date has passed.
     site_ids=None means unrestricted (e.g. the background job)."""
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     query = AssignmentHistory.query.filter(
         AssignmentHistory.unassigned_at.is_(None),
         AssignmentHistory.due_date.isnot(None),
@@ -95,7 +96,7 @@ LOANER_DEFAULT_LOAN_DAYS = 7
 def _overdue_loaners(site_ids=None):
     """Open loaner checkouts (not yet returned) whose due_date has passed.
     site_ids=None means unrestricted (e.g. the background job)."""
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     query = LoanerCheckout.query.filter(
         LoanerCheckout.checked_in_at.is_(None),
         LoanerCheckout.due_date.isnot(None),
@@ -143,11 +144,11 @@ def _send_overdue_loaner_reminders(site_ids=None):
         return 0, 0, 0
 
     sent = failed = skipped = 0
-    now = datetime.utcnow()
+    now = utcnow()
     for row in _overdue_loaners(site_ids):
         if row.reminder_sent_at and (now - row.reminder_sent_at).total_seconds() < LOANER_REMINDER_RESEND_HOURS * 3600:
             continue
-        person = Person.query.get(row.person_id) if row.person_id else None
+        person = db.session.get(Person, row.person_id) if row.person_id else None
         if not person:
             skipped += 1
             continue
@@ -188,7 +189,7 @@ def _checkout_loaner(asset_tag, person, due_date=None, site_ids=None, acknowledg
         return 'error', f'{asset_tag} is already checked out to {already_out.person_name}.'
     resolved_due_date = due_date
     if resolved_due_date is None and not repair_id:
-        resolved_due_date = datetime.utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)
+        resolved_due_date = utcnow().date() + timedelta(days=LOANER_DEFAULT_LOAN_DAYS)
     checkout = LoanerCheckout(
         asset_tag=asset_tag, person_id=person.id, person_name=person.full_name,
         due_date=resolved_due_date, acknowledged_by=acknowledged_by, repair_id=repair_id,
@@ -215,7 +216,7 @@ def _checkin_loaner(asset_tag, condition_notes=None, site_ids=None):
         row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
         if not row or row.site_id not in site_ids:
             return 'error', f'{asset_tag} is not one of your site\'s loaners.'
-    open_row.checked_in_at = datetime.utcnow()
+    open_row.checked_in_at = utcnow()
     if condition_notes:
         open_row.condition_notes = condition_notes
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()

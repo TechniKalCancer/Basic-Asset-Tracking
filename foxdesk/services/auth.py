@@ -56,7 +56,7 @@ def _current_user():
     """The logged-in User row, or None if this session used the legacy shared
     ADMIN_PASSWORD login (which has no associated User record)."""
     user_id = session.get('user_id')
-    return User.query.get(user_id) if user_id else None
+    return db.session.get(User, user_id) if user_id else None
 
 
 def _current_site_ids():

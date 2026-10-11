@@ -1,6 +1,7 @@
 """Pages: tickets."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 from flask import flash, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
@@ -189,7 +190,7 @@ def _queue_filter(query, view, me):
     if view == 'unassigned':
         return query.filter(Ticket.assigned_to_user_id.is_(None), Ticket.team_id.is_(None))
     if view == 'stale':
-        return query.filter(Ticket.updated_at < datetime.utcnow() - timedelta(days=STALE_DAYS))
+        return query.filter(Ticket.updated_at < utcnow() - timedelta(days=STALE_DAYS))
     return query
 
 
@@ -294,7 +295,7 @@ def admin_ticket_edit(ticket_id):
         site_id = request.form.get('site_id', type=int)
         person_id = request.form.get('person_id', '').strip()
 
-        if not category_id or not TicketCategory.query.get(category_id):
+        if not category_id or not db.session.get(TicketCategory, category_id):
             flash('Choose a category.', 'error')
             return render_template('admin_ticket_edit.html', ticket=ticket, categories=categories, sites=sites)
         if not subject:
@@ -310,7 +311,7 @@ def admin_ticket_edit(ticket_id):
         changes = []
         if ticket.category_id != category_id:
             old_name = ticket.category.name if ticket.category else 'none'
-            new_name = TicketCategory.query.get(category_id).name
+            new_name = db.session.get(TicketCategory, category_id).name
             changes.append(f'category: "{old_name}" → "{new_name}"')
             ticket.category_id = category_id
         if ticket.subject != subject:
@@ -333,7 +334,7 @@ def admin_ticket_edit(ticket_id):
                 ticket.requester_name = person.full_name
                 ticket.requester_email = person.email
 
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = utcnow()
         if changes:
             _log_activity('ticket_edit', f'Edited ticket #{ticket.id} — {"; ".join(changes)}.',
                            site_id=ticket.site_id, ticket_id=ticket.id)
@@ -360,7 +361,7 @@ def admin_ticket_comment(ticket_id):
         return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
     db.session.add(TicketComment(ticket_id=ticket.id, body=body, author_label=actor_label,
                                  emailed_to_requester=send_reply))
-    ticket.updated_at = datetime.utcnow()
+    ticket.updated_at = utcnow()
     _log_activity('ticket_comment', f'{"Replied to requester on" if send_reply else "Commented on"} ticket #{ticket.id}.',
                    site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
@@ -383,10 +384,10 @@ def admin_ticket_status(ticket_id):
     old_status, old_priority = ticket.status, ticket.priority
     if status and status in TICKET_STATUSES:
         ticket.status = status
-        ticket.resolved_at = datetime.utcnow() if status in ('resolved', 'closed') else None
+        ticket.resolved_at = utcnow() if status in ('resolved', 'closed') else None
     if priority and priority in TICKET_PRIORITIES:
         ticket.priority = priority
-    ticket.updated_at = datetime.utcnow()
+    ticket.updated_at = utcnow()
     changes = []
     if old_status != ticket.status:
         changes.append(f'status: {old_status} → {ticket.status}')
@@ -418,8 +419,8 @@ def admin_ticket_assign(ticket_id):
     ticket.assigned_to_user_id = assignee_id or None
     if 'team_id' in request.form:
         team_id = request.form.get('team_id', type=int)
-        ticket.team_id = team_id if team_id and Team.query.get(team_id) else None
-    ticket.updated_at = datetime.utcnow()
+        ticket.team_id = team_id if team_id and db.session.get(Team, team_id) else None
+    ticket.updated_at = utcnow()
     db.session.flush()
     db.session.expire(ticket, ['assigned_to', 'team'])
     label = who()
@@ -444,7 +445,7 @@ def admin_ticket_charge_add(ticket_id):
         flash('Enter a charge amount.', 'error')
         return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=ticket_id))
     db.session.add(TicketCharge(ticket_id=ticket.id, description=description, amount=amount))
-    ticket.updated_at = datetime.utcnow()
+    ticket.updated_at = utcnow()
     _log_activity('ticket_charge_add', f'Added ${amount:.2f} charge to ticket #{ticket.id}: {description}',
                    site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
@@ -458,7 +459,7 @@ def admin_ticket_charge_edit(charge_id):
     """Corrects a charge's description/amount after the fact — same
     reasoning as admin_incident_fee (the estimate didn't match what the
     office actually decided to charge)."""
-    charge = TicketCharge.query.get_or_404(charge_id)
+    charge = db.get_or_404(TicketCharge, charge_id)
     description = request.form.get('description', '').strip()
     amount = _parse_money(request.form.get('amount'))
     if not description:
@@ -469,7 +470,7 @@ def admin_ticket_charge_edit(charge_id):
         return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
     charge.description = description
     charge.amount = amount
-    charge.ticket.updated_at = datetime.utcnow()
+    charge.ticket.updated_at = utcnow()
     _log_activity('fee_edit', f'Updated charge on ticket #{charge.ticket_id} to ${amount:.2f}: {description}',
                    site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
     db.session.commit()
@@ -480,7 +481,7 @@ def admin_ticket_charge_edit(charge_id):
 @app.route('/admin/ticket_charges/<int:charge_id>/delete', methods=['POST'])
 @require_permission('tickets')
 def admin_ticket_charge_delete(charge_id):
-    charge = TicketCharge.query.get_or_404(charge_id)
+    charge = db.get_or_404(TicketCharge, charge_id)
     ticket_id, description, amount, site_id = charge.ticket_id, charge.description, charge.amount, charge.ticket.site_id
     db.session.delete(charge)
     _log_activity('ticket_charge_delete', f'Deleted ${amount:.2f} charge from ticket #{ticket_id}: {description}',
@@ -493,9 +494,9 @@ def admin_ticket_charge_delete(charge_id):
 @app.route('/admin/ticket_charges/<int:charge_id>/mark_paid', methods=['POST'])
 @require_permission('tickets')
 def admin_ticket_charge_mark_paid(charge_id):
-    charge = TicketCharge.query.get_or_404(charge_id)
-    charge.paid_at = datetime.utcnow()
-    charge.ticket.updated_at = datetime.utcnow()
+    charge = db.get_or_404(TicketCharge, charge_id)
+    charge.paid_at = utcnow()
+    charge.ticket.updated_at = utcnow()
     _log_activity('fee_paid', f'Marked ${charge.amount:.2f} charge paid on ticket #{charge.ticket_id}.',
                    site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
     db.session.commit()
@@ -542,7 +543,7 @@ def admin_ticket_category_new():
 @app.route('/admin/ticket_categories/<int:category_id>/edit', methods=['GET', 'POST'])
 @require_permission('tickets')
 def admin_ticket_category_edit(category_id):
-    category = TicketCategory.query.get_or_404(category_id)
+    category = db.get_or_404(TicketCategory, category_id)
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         default_price = _parse_money(request.form.get('default_price'))
@@ -569,7 +570,7 @@ def admin_ticket_category_edit(category_id):
 @app.route('/admin/ticket_categories/<int:category_id>/delete', methods=['POST'])
 @require_permission('tickets')
 def admin_ticket_category_delete(category_id):
-    category = TicketCategory.query.get_or_404(category_id)
+    category = db.get_or_404(TicketCategory, category_id)
     in_use = Ticket.query.filter_by(category_id=category_id).count()
     if in_use:
         flash(f'Cannot delete "{category.name}" — {in_use} ticket(s) still reference it. Deactivate it instead.', 'error')
@@ -599,7 +600,7 @@ def admin_pending_action_confirm(action_id):
     """Runs a staged PendingDeviceAction now — the one-click confirm for an
     automation that was configured to require it. Reachable from both the
     triggering ticket's page and the device's own page."""
-    action = PendingDeviceAction.query.get_or_404(action_id)
+    action = db.get_or_404(PendingDeviceAction, action_id)
     fallback_url = url_for('admin_ticket_detail', ticket_id=action.ticket_id) if action.ticket_id \
         else url_for('admin_asset_assign', asset_tag=action.asset_tag)
     if action.status != 'pending':
@@ -617,7 +618,7 @@ def admin_pending_action_confirm(action_id):
 def admin_pending_action_dismiss(action_id):
     """Declines a staged PendingDeviceAction without running it — e.g. the
     ticket was mis-categorized, or the device turned out fine."""
-    action = PendingDeviceAction.query.get_or_404(action_id)
+    action = db.get_or_404(PendingDeviceAction, action_id)
     fallback_url = url_for('admin_ticket_detail', ticket_id=action.ticket_id) if action.ticket_id \
         else url_for('admin_asset_assign', asset_tag=action.asset_tag)
     if action.status != 'pending':
@@ -627,7 +628,7 @@ def admin_pending_action_dismiss(action_id):
     _, actor_label, _ = _current_actor()
     action.status = 'dismissed'
     action.resolved_by_label = actor_label
-    action.resolved_at = datetime.utcnow()
+    action.resolved_at = utcnow()
     action_label = AUTOMATION_ACTIONS.get(action.action_type, action.action_type)
     _log_activity('automation_dismissed', f'Dismissed pending {action_label} for {action.asset_tag}.',
                    ticket_id=action.ticket_id)

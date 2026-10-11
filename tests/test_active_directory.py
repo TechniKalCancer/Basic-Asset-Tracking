@@ -6,6 +6,7 @@ import pytest
 from flask import g
 
 from conftest import ADMIN_PASSWORD, A, patch_everywhere
+from foxdesk.clock import utcnow
 
 BASE = 'DC=fchs,DC=net'
 
@@ -19,7 +20,7 @@ def ad_env(monkeypatch):
 
 
 def filetime(days_ago):
-    when = datetime.utcnow() - timedelta(days=days_ago)
+    when = utcnow() - timedelta(days=days_ago)
     return str(int((when - datetime(1601, 1, 1)).total_seconds() * 10 ** 7)).encode()
 
 
@@ -59,7 +60,7 @@ def test_parse_user(ad_env):
     assert u['guid'] == str(uuid.UUID(int=7)) and u['mail'] == 'ana.ruiz@foxcreekstudents.org'
     assert u['parent'] == 'ou=2029,dc=fchs,dc=net' and u['role'] == 'student' and u['grad_year'] == 2029
     assert u['aliases'] == ['ana.ruiz@foxcreekstudents.org', 'aruiz@fchs.net'] and u['enabled']
-    assert (datetime.utcnow() - u['last_logon']).days == 3
+    assert (utcnow() - u['last_logon']).days == 3
     staff = ad_user(8, 'OU=U_Teachers', disabled=True)
     assert staff['role'] == 'staff' and staff['grad_year'] is None and not staff['enabled'] and staff['mail'] is None
 
@@ -110,7 +111,7 @@ def test_sync_attaches_accounts_and_never_creates_people(ad_env, make):
     assert A.Person.query.count() == people_before, 'AD never creates people'
     ident = lambda n: A.PersonIdentity.query.filter_by(source='ad', external_key=str(uuid.UUID(int=n))).first()  # noqa: E731
     assert ident(1).person_id == kid.id and ident(1).enabled and ident(1).directory_path.startswith('CN=Ana Ruiz,OU=2029')
-    assert A.Person.query.get(kid.id).grad_year == 2029, 'blank graduation year filled from the OU'
+    assert A.db.session.get(A.Person, kid.id).grad_year == 2029, 'blank graduation year filled from the OU'
     assert ident(2).person_id == teacher.id, 'matched through the UPN = an existing alias email'
     assert ident(3).person_id is None and ident(3).suggested_person.first_name == 'Sam', 'name match is only suggested'
     assert ident(4).person_id is None and ident(4).review_status is None, 'unknown and enabled: waits for review'

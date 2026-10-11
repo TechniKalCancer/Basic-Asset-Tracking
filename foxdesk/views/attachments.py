@@ -9,7 +9,7 @@ from foxdesk.services.attachments import _attachment_owner_in_scope, _attachment
 @app.route('/admin/attachments/<int:attachment_id>')
 @login_required
 def admin_attachment_view(attachment_id):
-    attachment = Attachment.query.get_or_404(attachment_id)
+    attachment = db.get_or_404(Attachment, attachment_id)
     if not _attachment_owner_in_scope(attachment.owner_type, attachment.owner_id):
         abort(404)
     response = app.response_class(attachment.data, mimetype=attachment.content_type)
@@ -43,7 +43,7 @@ def admin_attachment_upload(owner_type, owner_id):
 @app.route('/admin/attachments/<int:attachment_id>/delete', methods=['POST'])
 @login_required
 def admin_attachment_delete(attachment_id):
-    attachment = Attachment.query.get_or_404(attachment_id)
+    attachment = db.get_or_404(Attachment, attachment_id)
     owner = _attachment_owner_in_scope(attachment.owner_type, attachment.owner_id)
     if not owner:
         abort(404)

@@ -5,6 +5,7 @@ from datetime import datetime
 from flask import abort, flash, redirect, render_template, request, url_for
 from urllib.parse import quote
 
+from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
@@ -125,7 +126,7 @@ def admin_asset_assign(asset_tag):
                            repair_categories=repair_categories,
                            open_repair=open_repair, closed_repairs=closed_repairs, repair_outcomes=REPAIR_OUTCOMES,
                            asset_statuses=ASSET_STATUSES, custom_field_labels=custom_field_labels,
-                           now=datetime.utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED,
+                           now=utcnow().date(), google_sync_enabled=GOOGLE_SYNC_ENABLED,
                            pending_action=pending_action, action_labels=AUTOMATION_ACTIONS)
 
 
@@ -250,7 +251,7 @@ def admin_bulk_print():
     except ValueError:
         since = None
     if not since:
-        since = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        since = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     since_str = since.strftime('%Y-%m-%d')
 
     if type_filter not in DEVICE_TYPES:
@@ -407,7 +408,7 @@ def admin_asset_status(asset_tag):
         asset.status = new_status
         open_repair = Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).first()
         if open_repair:
-            open_repair.returned_at = datetime.utcnow()
+            open_repair.returned_at = utcnow()
             open_repair.notes = ((open_repair.notes + ' ') if open_repair.notes else '') + '[auto-closed: status changed manually]'
         _log_activity('device_status', f'Set {asset_tag} status to {new_status}.', site_id=registry_row.site_id)
         db.session.commit()

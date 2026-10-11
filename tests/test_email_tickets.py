@@ -61,7 +61,7 @@ def test_reply_threads_onto_its_ticket_and_reopens_it(make, monkeypatch, sent_em
                       in_reply_to=f'<foxdesk-ticket-{t.id}-abc123@district.org>'),
             raw_email('Stranger <who@else.org>', f'Re: Update on your ticket #{t.id}: Charger', 'let me in', '<r2@else.org>'))
     A.check_mailbox()
-    t = A.Ticket.query.get(t.id)
+    t = A.db.session.get(A.Ticket, t.id)
     comment = A.TicketComment.query.filter_by(ticket_id=t.id).one()
     assert comment.body == 'Still broken, sorry!' and comment.from_requester and t.status == 'open'
     stranger = A.Ticket.query.filter(A.Ticket.id != t.id).one()

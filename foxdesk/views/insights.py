@@ -4,6 +4,7 @@ import io
 from collections import defaultdict
 from datetime import datetime
 from flask import Response, abort, flash, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.models import ASSET_STATUSES, Asset, AssetRegistry, AuditScan, DEVICE_TYPES, Person, SigninReview
 from foxdesk.services.util import resolve_scan
@@ -202,7 +203,7 @@ def admin_audit():
     except ValueError:
         since = None
     if not since:
-        since = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        since = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     since_str = since.strftime('%Y-%m-%d')
 
     status_filter = request.args.get('status', '').strip()

@@ -15,7 +15,7 @@ def model(name='Chromebook 3100'):
 
 def repair_on(make, device_model):
     dev = make.device()
-    A.AssetRegistry.query.get(dev.id).device_model_id = device_model.id
+    A.db.session.get(A.AssetRegistry, dev.id).device_model_id = device_model.id
     cat = make.ticket_category('Device Repair')
     t = A.Ticket(category_id=cat.id, subject='Repair', description='d', asset_tag=dev.asset_tag)
     A.db.session.add(t)
@@ -61,7 +61,7 @@ def test_use_on_repair_with_charge(client, make):
     r = client.post('/admin/parts/use', data={'part_id': screen.id, 'quantity': '1', 'repair_id': repair.id, 'charge': 'on'},
                     follow_redirects=True)
     assert b'Running low' in r.data
-    screen = A.Part.query.get(screen.id)
+    screen = A.db.session.get(A.Part, screen.id)
     move = A.PartMovement.query.filter_by(part_id=screen.id, reason='used').one()
     assert screen.quantity_on_hand == 1 and screen.is_low
     assert (move.repair_id, move.ticket_id, move.asset_tag) == (repair.id, repair.ticket_id, repair.asset_tag)
@@ -70,7 +70,7 @@ def test_use_on_repair_with_charge(client, make):
 
     r = client.post('/admin/parts/use', data={'part_id': screen.id, 'quantity': '5', 'repair_id': repair.id},
                     follow_redirects=True)
-    assert b'Only 1' in r.data and A.Part.query.get(screen.id).quantity_on_hand == 1, 'stock never goes negative'
+    assert b'Only 1' in r.data and A.db.session.get(A.Part, screen.id).quantity_on_hand == 1, 'stock never goes negative'
     assert '11.6' in client.get(f'/admin/tickets/{repair.ticket_id}').get_data(as_text=True), 'shows on the ticket too'
 
 

@@ -63,7 +63,7 @@ def admin_help_new():
 @app.route('/admin/help/<int:article_id>/edit', methods=['GET', 'POST'])
 @require_permission('admin')
 def admin_help_edit(article_id):
-    article = HelpArticle.query.get_or_404(article_id)
+    article = db.get_or_404(HelpArticle, article_id)
     if request.method == 'POST':
         values = _help_article_form_values()
         if values['article_type'] not in HELP_ARTICLE_TYPES:
@@ -88,7 +88,7 @@ def admin_help_edit(article_id):
 @app.route('/admin/help/<int:article_id>/delete', methods=['POST'])
 @require_permission('admin')
 def admin_help_delete(article_id):
-    article = HelpArticle.query.get_or_404(article_id)
+    article = db.get_or_404(HelpArticle, article_id)
     title, article_type = article.title, article.article_type
     db.session.delete(article)
     _log_activity('help_article_delete', f'Deleted {HELP_ARTICLE_TYPES[article_type]} "{title}".')

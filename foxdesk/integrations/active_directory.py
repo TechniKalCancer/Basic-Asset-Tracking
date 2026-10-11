@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 
 from flask import has_request_context, request
 
+from foxdesk.clock import utcnow
 from foxdesk.core import AD_BASE_DN, AD_BIND_PASSWORD, AD_BIND_USER, AD_CA_FILE, AD_SERVERS, db, logger
 from foxdesk.models import DeviceRecord, DirectorySettings, PersonIdentity
 from foxdesk.services.auth import _log_activity
@@ -437,7 +438,7 @@ def build_tree(snapshot):
                 node(parent)
         return nodes[key]
 
-    cutoff = datetime.utcnow() - timedelta(days=STALE_DAYS)
+    cutoff = utcnow() - timedelta(days=STALE_DAYS)
     for u in snapshot['users']:
         n = node(dn_parent(u['dn']))
         n['users' if u['enabled'] else 'users_off'] += 1
@@ -487,7 +488,7 @@ def run_ad_sync(snapshot=None):
     settings = ad_settings()
     if snapshot is None:
         snapshot = read_directory(settings)
-    now = datetime.utcnow()
+    now = utcnow()
     settings.tree = build_tree(snapshot)
     settings.tree_updated_at = now
     if not snapshot['users']:

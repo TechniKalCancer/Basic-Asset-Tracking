@@ -3,6 +3,7 @@ from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from flask import request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import db
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import (
@@ -37,7 +38,7 @@ def _dashboard_charts(site_ids):
     week/date truncation differs between SQLite (local dev) and Postgres,
     and the row counts involved (a year of tickets/incidents) are small."""
     charts = []
-    now = datetime.utcnow()
+    now = utcnow()
     year_ago = now - timedelta(days=365)
 
     if _has_permission('tickets'):
@@ -252,13 +253,13 @@ def _data_quality_checks(site_ids):
         lambda p: {'cells': [p.full_name, p.email, p.site.name if p.site else '—'],
                    'link': url_for('admin_person_edit', person_id=p.id)})
 
-    stale_cutoff = datetime.utcnow() - timedelta(days=STALE_REPAIR_DAYS)
+    stale_cutoff = utcnow() - timedelta(days=STALE_REPAIR_DAYS)
     stale_repairs = _scope_repairs(Repair.query, site_ids).filter(
         Repair.returned_at.is_(None), Repair.sent_at < stale_cutoff).order_by(Repair.sent_at).all()
     add('stale_repairs', f'Repairs open more than {STALE_REPAIR_DAYS} days',
         'Chase the vendor, or close it out if the device came back and nobody marked it returned.',
         'warning', ['Asset Tag', 'Sent', 'Days Out', 'Issue'], stale_repairs,
-        lambda r: {'cells': [r.asset_tag, r.sent_at.strftime('%Y-%m-%d'), (datetime.utcnow() - r.sent_at).days,
+        lambda r: {'cells': [r.asset_tag, r.sent_at.strftime('%Y-%m-%d'), (utcnow() - r.sent_at).days,
                              (r.issue_description or '—')[:80]],
                    'link': url_for('admin_repair_detail', repair_id=r.id)})
 
@@ -353,7 +354,7 @@ def _signin_mismatches(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS, include
     only_tags narrows to specific devices (the device page's own flag) —
     swap detection then can't see the other half of a swap, which is fine
     for a single-device badge."""
-    now = datetime.utcnow()
+    now = utcnow()
     cutoff = now - timedelta(days=window_days)
 
     rows = _scope_registry(AssetRegistry.query, site_ids) \
@@ -530,7 +531,7 @@ def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
     devices, are left out (those go through checkouts and the sign-in
     check). A device skipped here, or marked OK on Sign-in Mismatches, for
     the same account doesn't come back."""
-    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    cutoff = utcnow() - timedelta(days=window_days)
     rows = (_scope_registry(AssetRegistry.query, site_ids)
             .join(Asset, Asset.asset_tag == AssetRegistry.asset_tag)
             .filter(Asset.assigned_to_id.is_(None), Asset.google_recent_user.isnot(None),
@@ -612,7 +613,7 @@ def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
 
 
 def _ago(when):
-    days = (datetime.utcnow() - when).days if when else None
+    days = (utcnow() - when).days if when else None
     return 'today' if days == 0 else ('yesterday' if days == 1 else f'{days} days ago')
 
 

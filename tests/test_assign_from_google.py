@@ -1,7 +1,8 @@
 """Assign from Google sign-ins: who each unassigned in-use device should go to, and how sure."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from conftest import A, patch_everywhere
+from foxdesk.clock import utcnow
 
 
 def in_use(make, *emails, days_ago=1, **kw):
@@ -10,7 +11,7 @@ def in_use(make, *emails, days_ago=1, **kw):
     asset = A.Asset.query.filter_by(asset_tag=row.asset_tag).one()
     asset.google_recent_users = list(emails)
     asset.google_recent_user = emails[0]
-    asset.google_last_activity = datetime.utcnow() - timedelta(days=days_ago)
+    asset.google_last_activity = utcnow() - timedelta(days=days_ago)
     A.db.session.commit()
     return row
 
@@ -51,7 +52,7 @@ def test_loaners_and_merged_accounts(make):
     kid = make.person('Kai', 'Kid')
     old = make.person('Kai', 'Kid', email='kai.old@example.edu', active=False, custom_fields={'merged_into': kid.id})
     pool = in_use(make, kid.email)
-    A.AssetRegistry.query.get(pool.id).is_loaner = True
+    A.db.session.get(A.AssetRegistry, pool.id).is_loaner = True
     via_old = in_use(make, old.email)
     A.db.session.commit()
     p = proposals()

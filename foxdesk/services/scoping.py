@@ -1,5 +1,6 @@
 """Query helpers that narrow results to the current user's sites."""
-from datetime import datetime, timedelta
+from datetime import timedelta
+from foxdesk.clock import utcnow
 from foxdesk.core import db
 from foxdesk.models import PersonIdentity, ActivityLog, Asset, AssetRegistry, DeviceModel, Person, Repair, Site, Ticket, User
 
@@ -16,7 +17,7 @@ WARRANTY_WARNING_DAYS = 60
 
 def _filter_registry_by_warranty(query, mode):
     """mode='expiring': warranty runs out within WARRANTY_WARNING_DAYS. mode='expired': already past."""
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     if mode == 'expired':
         return query.filter(AssetRegistry.warranty_expiration.isnot(None),
                              AssetRegistry.warranty_expiration < today)

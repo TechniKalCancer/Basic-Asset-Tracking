@@ -1,8 +1,9 @@
 """Pages: help desk tools — saved replies, signatures, teams, and who's on a ticket."""
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from flask import flash, jsonify, redirect, render_template, request, session, url_for
 
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.models import CannedReply, Site, Team, Ticket, TicketCategory, TicketPresence, User
 from foxdesk.services.auth import _current_actor, _current_site_ids, _current_user, _log_activity, require_permission
@@ -119,7 +120,7 @@ def admin_teams():
     site_ids = _current_site_ids()
     techs = _ticket_assignees(site_ids)
     if request.method == 'POST':
-        team = Team.query.get(request.form.get('team_id', type=int)) if request.form.get('team_id') else Team()
+        team = db.session.get(Team, request.form.get('team_id', type=int)) if request.form.get('team_id') else Team()
         if request.form.get('action') == 'delete' and team.id:
             Ticket.query.filter_by(team_id=team.id).update({'team_id': None})
             db.session.delete(team)
@@ -137,7 +138,7 @@ def admin_teams():
             return redirect(url_for('admin_teams'))
         team.name = name
         site_id = request.form.get('site_id', type=int)
-        team.site_id = site_id if site_id and Site.query.get(site_id) else None
+        team.site_id = site_id if site_id and db.session.get(Site, site_id) else None
         allowed = {u.id for u in techs}
         team.members = User.query.filter(User.id.in_([i for i in request.form.getlist('member_ids', type=int) if i in allowed])).all()
         db.session.add(team)
@@ -162,7 +163,7 @@ def admin_ticket_presence(ticket_id):
     ticket = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
     _, label, user_id = _current_actor()
     key = f'user:{user_id}' if user_id else f'session:{session.get("presence_key") or _session_key()}'
-    now = datetime.utcnow()
+    now = utcnow()
     row = TicketPresence.query.filter_by(ticket_id=ticket.id, actor_key=key).first()
     if row is None:
         row = TicketPresence(ticket_id=ticket.id, actor_key=key, actor_label=label)

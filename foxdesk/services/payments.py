@@ -8,11 +8,12 @@ return from Stripe, and again from a background check every 15 minutes for
 anyone who paid and closed the tab. No webhook (and so no public endpoint)
 is needed. Card details never touch FoxDesk.
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import requests
 
+from foxdesk.clock import utcnow
 from foxdesk.core import db, logger
 from foxdesk.models import FeePayment, Incident, PortalSettings
 from foxdesk.services.secrets import decrypt_secret, encrypt_secret
@@ -27,7 +28,7 @@ class PaymentError(Exception):
 
 
 def portal_settings():
-    row = PortalSettings.query.get(1)
+    row = db.session.get(PortalSettings, 1)
     if row is None:
         row = PortalSettings(id=1)
         db.session.add(row)
@@ -36,7 +37,7 @@ def portal_settings():
 
 
 def stripe_key():
-    row = PortalSettings.query.get(1)
+    row = db.session.get(PortalSettings, 1)
     return decrypt_secret(row.stripe_secret_key, SECRET_PURPOSE) if row and row.stripe_secret_key else None
 
 
@@ -113,11 +114,11 @@ def confirm(session_id):
     if payment is None or payment.status == 'paid':
         return payment
     data = _stripe('GET', f'/checkout/sessions/{session_id}')
-    incident = Incident.query.get(payment.incident_id)
+    incident = db.session.get(Incident, payment.incident_id)
     matches = (data.get('payment_status') == 'paid' and data.get('amount_total') == cents(payment.amount)
                and str((data.get('metadata') or {}).get('incident_id')) == str(payment.incident_id))
     if matches:
-        payment.status, payment.paid_at = 'paid', datetime.utcnow()
+        payment.status, payment.paid_at = 'paid', utcnow()
         if incident and not incident.paid_at:
             incident.paid_at = payment.paid_at
             _log_activity('fee_paid', f'Damage fee for {incident.asset_tag} ({incident.person_name or "unknown"}) '
@@ -138,7 +139,7 @@ def reconcile_pending():
         return 0
     settled = 0
     for p in FeePayment.query.filter(FeePayment.status == 'pending',
-                                     FeePayment.created_at >= datetime.utcnow() - timedelta(days=2)):
+                                     FeePayment.created_at >= utcnow() - timedelta(days=2)):
         try:
             if confirm(p.provider_ref).status == 'paid':
                 settled += 1

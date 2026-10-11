@@ -1,9 +1,10 @@
 """Pages: Active Directory — setup, what to sync, computers (domain join) and
 people disabled in AD. The sync itself is integrations/active_directory."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from flask import flash, redirect, render_template, request, url_for
 
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.models import Asset, AssetRegistry, DeviceRecord, Person, PersonIdentity
 from foxdesk.integrations.active_directory import (
@@ -22,7 +23,7 @@ WORKGROUP_TYPES = ('laptop', 'desktop')
 def _ad_counts():
     ad_people = PersonIdentity.query.filter_by(source='ad')
     ad_devices = DeviceRecord.query.filter_by(source='ad')
-    stale_before = datetime.utcnow() - timedelta(days=STALE_DAYS)
+    stale_before = utcnow() - timedelta(days=STALE_DAYS)
     return dict(
         people_linked=ad_people.filter(PersonIdentity.person_id.isnot(None)).count(),
         people_review=accounts_to_review_query().filter(PersonIdentity.source == 'ad').count(),
@@ -173,7 +174,7 @@ def admin_directory_refresh():
     try:
         snapshot = read_directory(settings)
         settings.tree = build_tree(snapshot)
-        settings.tree_updated_at = datetime.utcnow()
+        settings.tree_updated_at = utcnow()
         db.session.commit()
         flash(f'Read {len(snapshot["users"])} users and {len(snapshot["computers"])} computers from AD.', 'success')
     except DirectoryError as e:
@@ -228,7 +229,7 @@ def admin_directory_computers():
     tab = request.args.get('show', 'linked')
     tab = tab if tab in dict(COMPUTER_TABS) else 'linked'
     site_ids = _current_site_ids()
-    stale_before = datetime.utcnow() - timedelta(days=STALE_DAYS)
+    stale_before = utcnow() - timedelta(days=STALE_DAYS)
 
     def in_scope(query):
         # A computer not tied to a device has no site yet, so everyone with device access sees it.

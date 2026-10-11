@@ -1,6 +1,6 @@
 """Damage/loss incidents, fees, and guardian damage notices."""
-from datetime import datetime
 from decimal import Decimal
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, db, logger
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import AssetRegistry, Incident, Person, Ticket, TicketCharge
@@ -43,7 +43,7 @@ def _send_damage_notice(incident):
     notices) because it's always an explicit office action and the person
     clicking needs to know whether it actually went out. Commits the
     guardian_notified_at stamp. Returns (ok, message)."""
-    person = Person.query.get(incident.person_id) if incident.person_id else None
+    person = db.session.get(Person, incident.person_id) if incident.person_id else None
     if not feature_enabled('guardian_notices'):
         return False, 'Parent/guardian damage notices are turned off (Settings → Features).'
     if not EMAIL_ENABLED:
@@ -67,7 +67,7 @@ def _send_damage_notice(incident):
     except Exception as e:
         logger.error('Damage notice for incident %s failed: %s', incident.id, e)
         return False, f'Could not send the notice: {e}'
-    incident.guardian_notified_at = datetime.utcnow()
+    incident.guardian_notified_at = utcnow()
     registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
     _log_activity('damage_notice', f'Emailed damage notice for {incident.asset_tag} to {person.full_name}\'s guardian ({person.guardian_email}).',
                    site_id=registry_row.site_id if registry_row else None)

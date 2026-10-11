@@ -1,7 +1,7 @@
 """Pages: public."""
-from datetime import datetime
 from flask import jsonify, redirect, render_template, request
 from sqlalchemy import text
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db, logger
 from foxdesk.models import Asset, AssetRegistry, Event
 from foxdesk.services.util import resolve_scan
@@ -76,12 +76,12 @@ def scan_asset():
             asset.is_valid = True
 
         if action == 'checkin':
-            asset.check_in  = datetime.utcnow()
+            asset.check_in  = utcnow()
             asset.check_out = None
         else:
             if not asset.check_in:
                 return jsonify({'error': f'Asset {asset_tag} has not been checked in yet'}), 409
-            asset.check_out = datetime.utcnow()
+            asset.check_out = utcnow()
 
         event = Event(
             asset_tag=asset_tag,

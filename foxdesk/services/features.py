@@ -238,7 +238,7 @@ app.jinja_env.globals.update(feature=feature_enabled, feature_on=feature_switch)
 
 def set_feature(key, enabled, actor_label):
     """Stores an override. Does not commit — caller's responsibility."""
-    row = FeatureToggle.query.get(key)
+    row = db.session.get(FeatureToggle, key)
     if row is None:
         row = FeatureToggle(key=key, enabled=enabled, updated_by=actor_label)
         db.session.add(row)

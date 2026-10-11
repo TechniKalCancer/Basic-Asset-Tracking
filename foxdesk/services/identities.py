@@ -14,8 +14,8 @@ account is held on Accounts to Review with that person suggested.
 A person merged into another (custom_fields.merged_into) resolves to the
 surviving record everywhere.
 """
-from datetime import datetime
 
+from foxdesk.clock import utcnow
 from foxdesk.core import db
 from foxdesk.models import AssetRegistry, DeviceRecord, Person, PersonIdentity
 
@@ -30,7 +30,7 @@ def resolve_merged(person):
         target = (person.custom_fields or {}).get('merged_into') if person else None
         if not target:
             break
-        nxt = Person.query.get(target)
+        nxt = db.session.get(Person, target)
         if not nxt:
             break
         person = nxt
@@ -97,7 +97,7 @@ def place_account(source, external_key, email=None, student_id=None, first_name=
     ident.email = email or ident.email
     for key, value in fields.items():
         setattr(ident, key, value)
-    ident.last_synced_at = datetime.utcnow()
+    ident.last_synced_at = utcnow()
 
     if ident.review_status == 'ignored':
         return ident, None, 'ignored'  # an admin said this account isn't anyone — don't re-link it
@@ -178,7 +178,7 @@ def place_device_record(source, external_key, serial_number=None, hostname=None,
     rec.hostname = hostname or rec.hostname
     for key, value in fields.items():
         setattr(rec, key, value)
-    rec.last_synced_at = datetime.utcnow()
+    rec.last_synced_at = utcnow()
     if rec.registry_id is None and rec.review_status != 'ignored':
         row = find_registry_row(serial_number=serial_number, hostname=hostname)
         if row:

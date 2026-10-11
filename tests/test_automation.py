@@ -1,7 +1,7 @@
 """Automation rules: conditions, event and scheduled triggers, the builder, templates, legacy conversion."""
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,6 +9,7 @@ from flask import g
 from flask_migrate import downgrade, upgrade
 
 from conftest import A, ROOT
+from foxdesk.clock import utcnow
 
 
 def rule(trigger, conditions=(), actions=(), **kw):
@@ -77,7 +78,7 @@ def test_ticket_rule_runs_and_is_logged(client, make):
     assert A.TicketComment.query.filter_by(ticket_id=hit.id).one().body == f'Auto: Broken screen ({hit.id})'
     run = A.AutomationRun.query.one()
     assert run.status == 'ran' and run.subject_label.startswith(f'Ticket #{hit.id}')
-    assert A.AutomationRule.query.get(r.id).run_count == 1
+    assert A.db.session.get(A.AutomationRule, r.id).run_count == 1
     assert A.ActivityLog.query.filter_by(action='automation_run', ticket_id=hit.id).count() == 1
 
 
@@ -151,7 +152,7 @@ def test_damage_escalation_template(client, make, sent_emails):
 
 def test_scheduled_rule_fires_once_per_subject(make, sent_emails):
     late, recent = make.device(), make.device()
-    now = datetime.utcnow()
+    now = utcnow()
     rep = A.Repair(asset_tag=late.asset_tag, issue_description='Screen', sent_at=now - timedelta(days=20))
     A.db.session.add_all([rep, A.Repair(asset_tag=recent.asset_tag, issue_description='Key', sent_at=now - timedelta(days=3))])
     A.db.session.commit()
@@ -218,7 +219,7 @@ def test_dry_run_changes_nothing(client, make):
     r = rule('ticket.created', [c('ticket.subject', 'contains', 'screen')], [a('set_priority', value='urgent')])
     body = client.post(f'/admin/rules/{r.id}/test').get_data(as_text=True)
     assert 'Would set Priority to urgent' in body and f'Ticket #{t.id}' in body
-    assert A.Ticket.query.get(t.id).priority == 'normal' and A.AutomationRun.query.count() == 0
+    assert A.db.session.get(A.Ticket, t.id).priority == 'normal' and A.AutomationRun.query.count() == 0
 
 
 def test_toggle_and_delete_keep_staged_actions(client, make):
@@ -227,7 +228,7 @@ def test_toggle_and_delete_keep_staged_actions(client, make):
     A.db.session.add(A.AutomationRun(rule_id=r.id, trigger='ticket.created', status='ran'))
     A.db.session.commit()
     client.post(f'/admin/rules/{r.id}/toggle')
-    assert A.AutomationRule.query.get(r.id).enabled is False
+    assert A.db.session.get(A.AutomationRule, r.id).enabled is False
     client.post(f'/admin/rules/{r.id}/delete')
     assert A.AutomationRule.query.count() == 0 and A.AutomationRun.query.count() == 0
     assert A.PendingDeviceAction.query.one().rule_id is None
@@ -265,5 +266,5 @@ def test_migration_converts_legacy_ticket_automations(client, make):
     dev = make.device(holder=make.person())
     new_ticket(client, other, asset_tag=dev.asset_tag)
     assert A.Repair.query.count() == 0, 'other categories are untouched'
-    new_ticket(client, A.TicketCategory.query.get(cat_id), asset_tag=dev.asset_tag)
+    new_ticket(client, A.db.session.get(A.TicketCategory, cat_id), asset_tag=dev.asset_tag)
     assert A.Repair.query.one().repair_category_id == screen_id, 'the converted rule behaves like the old automation'

@@ -6,6 +6,7 @@ import pytest
 from flask_migrate import downgrade, upgrade
 
 from conftest import A, ROOT, patch_everywhere
+from foxdesk.clock import utcnow
 
 
 def place(**kw):
@@ -154,20 +155,19 @@ def test_review_link_create_ignore(client, make):
     client.post(f'/admin/accounts/{held.id}/review', data={'action': 'link', 'person_id': kid.id})
     client.post(f'/admin/accounts/{new.id}/review', data={'action': 'create', 'role': 'student', 'site_id': site.id})
     client.post(f'/admin/accounts/{junk.id}/review', data={'action': 'ignore'})
-    assert A.PersonIdentity.query.get(held.id).person_id == kid.id
+    assert A.db.session.get(A.PersonIdentity, held.id).person_id == kid.id
     assert A.Person.query.filter_by(email='new.kid@school.org').one().site_id == site.id
-    assert A.PersonIdentity.query.get(junk.id).review_status == 'ignored'
+    assert A.db.session.get(A.PersonIdentity, junk.id).review_status == 'ignored'
     assert A.accounts_to_review_query().count() == 0
 
 
 def test_signin_check_counts_alias_as_the_holder(client, make, monkeypatch):
-    from datetime import datetime
     patch_everywhere(monkeypatch, 'GOOGLE_SYNC_ENABLED', True)
     kid = make.person(email='ava@school.org')
     A.add_alias(kid, 'ava.second@school.org')
     make.device(tag='AL1', holder=kid, google_recent_user='ava.second@school.org',
-                google_recent_users=['ava.second@school.org'], google_last_activity=datetime.utcnow(),
-                google_last_sync_at=datetime.utcnow())
+                google_recent_users=['ava.second@school.org'], google_last_activity=utcnow(),
+                google_last_sync_at=utcnow())
     with A.app.test_request_context():
         assert all(m['asset_tag'] != 'AL1' for m in A._signin_mismatches(None, 30))
 

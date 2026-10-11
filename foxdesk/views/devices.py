@@ -1,9 +1,9 @@
 """Pages: devices."""
 import csv
 import io
-from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.models import (
     ASSET_STATUSES,
@@ -230,7 +230,7 @@ def admin_registry_new():
         if not tag:
             existing_tags = {t for (t,) in db.session.query(AssetRegistry.asset_tag).all()}
             if range_id:
-                asset_range = AssetNumberRange.query.get(range_id)
+                asset_range = db.session.get(AssetNumberRange, range_id)
                 if not asset_range:
                     flash('That reserved range no longer exists.', 'error')
                     return render_template('admin_registry_new.html', device_types=DEVICE_TYPES, device_models=device_models, asset_number_ranges=asset_number_ranges, form=request.form, sites=sites)
@@ -437,7 +437,7 @@ def admin_device_model_new():
 @app.route('/admin/device_models/<int:model_id>/edit', methods=['GET', 'POST'])
 @require_permission('devices_manage')
 def admin_device_model_edit(model_id):
-    model = DeviceModel.query.get_or_404(model_id)
+    model = db.get_or_404(DeviceModel, model_id)
     if request.method == 'POST':
         manufacturer = request.form.get('manufacturer', '').strip()
         model_name = request.form.get('model_name', '').strip()
@@ -471,7 +471,7 @@ def admin_device_model_edit(model_id):
 @app.route('/admin/device_models/<int:model_id>/delete', methods=['POST'])
 @require_permission('devices_manage')
 def admin_device_model_delete(model_id):
-    model = DeviceModel.query.get_or_404(model_id)
+    model = db.get_or_404(DeviceModel, model_id)
     in_use = AssetRegistry.query.filter_by(device_model_id=model_id).count()
     if in_use:
         flash(f'Cannot delete "{model.full_name}" — {in_use} device(s) still reference it.', 'error')
@@ -546,7 +546,7 @@ def admin_asset_number_range_new():
 @app.route('/admin/asset_number_ranges/<int:range_id>/edit', methods=['GET', 'POST'])
 @require_permission('devices_manage')
 def admin_asset_number_range_edit(range_id):
-    asset_range = AssetNumberRange.query.get_or_404(range_id)
+    asset_range = db.get_or_404(AssetNumberRange, range_id)
     if request.method == 'POST':
         label = request.form.get('label', '').strip()
         notes = request.form.get('notes', '').strip() or None
@@ -576,7 +576,7 @@ def admin_asset_number_range_edit(range_id):
 def admin_asset_number_range_set_default(range_id):
     """Toggles this range as THE default _generate_asset_tag() draws from —
     at most one range is ever default, so setting one clears any other."""
-    asset_range = AssetNumberRange.query.get_or_404(range_id)
+    asset_range = db.get_or_404(AssetNumberRange, range_id)
     if asset_range.is_default:
         asset_range.is_default = False
         _log_activity('asset_number_range_edit', f'Unset "{asset_range.label}" as the default range.')
@@ -593,7 +593,7 @@ def admin_asset_number_range_set_default(range_id):
 @app.route('/admin/asset_number_ranges/<int:range_id>/delete', methods=['POST'])
 @require_permission('devices_manage')
 def admin_asset_number_range_delete(range_id):
-    asset_range = AssetNumberRange.query.get_or_404(range_id)
+    asset_range = db.get_or_404(AssetNumberRange, range_id)
     label = asset_range.label
     db.session.delete(asset_range)
     _log_activity('asset_number_range_delete', f'Deleted reserved range "{label}".')
@@ -616,7 +616,7 @@ def admin_registry_delete(asset_tag):
     try:
         open_loaner = LoanerCheckout.query.filter_by(asset_tag=asset_tag, checked_in_at=None).first()
         if open_loaner:
-            open_loaner.checked_in_at = datetime.utcnow()
+            open_loaner.checked_in_at = utcnow()
             open_loaner.condition_notes = ((open_loaner.condition_notes + ' ') if open_loaner.condition_notes else '') + '[auto-closed: device deleted]'
 
         asset = Asset.query.filter_by(asset_tag=asset_tag).first()
@@ -800,7 +800,7 @@ def admin_registry():
                            type_filter=type_filter, device_types=DEVICE_TYPES,
                            sort=sort, sort_dir=sort_dir,
                            person_filter=person_filter, person_filter_name=person_filter_name,
-                           warranty_filter=warranty_filter, today=datetime.utcnow().date(),
+                           warranty_filter=warranty_filter, today=utcnow().date(),
                            assets_by_tag=assets_by_tag, sites=_sites_for_actor(site_ids),
                            quick_device_type=quick_device_type, quick_site_id=quick_site_id)
 

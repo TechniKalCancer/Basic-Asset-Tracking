@@ -157,8 +157,8 @@
     btn.className = 'cam-btn';
     btn.title = 'Scan with camera';
     btn.setAttribute('aria-label', 'Scan barcode with camera');
-    // A camera icon once static/icons/camera.svg exists (see icon() in
-    // foxdesk/web.py); until then, a plain word.
+    // Camera icon when the icon set provides one (see icon() in
+    // foxdesk/web.py); otherwise a plain text label.
     if ((window.APP_ICONS || []).indexOf('camera') !== -1) {
       const ic = document.createElement('span');
       ic.className = 'icon'; ic.style.setProperty('--icon', "url('/static/icons/camera.svg')"); ic.style.marginRight = '0';

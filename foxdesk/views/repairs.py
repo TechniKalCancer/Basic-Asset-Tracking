@@ -1,6 +1,6 @@
 """Pages: repairs."""
-from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
@@ -119,7 +119,7 @@ def admin_repair_return(repair_id):
     asset = Asset.query.filter_by(asset_tag=repair.asset_tag).first()
     registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
     try:
-        repair.returned_at = datetime.utcnow()
+        repair.returned_at = utcnow()
         repair.outcome = outcome
         repair.notes = notes
         if asset:
@@ -131,7 +131,7 @@ def admin_repair_return(repair_id):
             _, actor_label, _ = _current_actor()
             comment_body = f'Returned from repair: {REPAIR_OUTCOMES[outcome]}.' + (f' {notes}' if notes else '')
             db.session.add(TicketComment(ticket_id=repair.ticket_id, body=comment_body, author_label=actor_label))
-            repair.ticket.updated_at = datetime.utcnow()
+            repair.ticket.updated_at = utcnow()
         _log_activity('repair_return', f'{repair.asset_tag} returned from repair ({REPAIR_OUTCOMES[outcome]}).',
                        site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
         open_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
@@ -262,4 +262,4 @@ def admin_repairs():
     return render_template('admin_repairs.html', open_repairs=open_repairs, closed_repairs=closed_repairs,
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
                            active_repair_loaners=active_repair_loaners,
-                           today=datetime.utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)
+                           today=utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)

@@ -1,11 +1,12 @@
 """Google sign-in vs assignment check ("Possible Violators")."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
 from conftest import A, patch_everywhere
+from foxdesk.clock import utcnow
 
-NOW = datetime.utcnow()
+NOW = utcnow()
 
 
 @pytest.fixture(autouse=True)

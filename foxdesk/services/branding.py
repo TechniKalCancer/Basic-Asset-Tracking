@@ -147,9 +147,8 @@ def generate_palette(primary_hex, bg_hex=APP_BG_HEX):
     }
 
 
-# Every value here is a literal match for what base.html's :root already
-# hardcoded before branding existed — an unconfigured install (or a
-# BrandingSettings field left blank) must look pixel-identical to today.
+# Defaults match the built-in theme in base.html's :root, so an unconfigured
+# install (or a BrandingSettings field left blank) renders the stock look.
 _DEFAULT_BRANDING = {
     'logo_url': None,
     'favicon_url': None,
@@ -171,7 +170,7 @@ def _current_branding():
     even when their logos differ — split further into per-site colors later
     if that stops being true.
     """
-    settings = BrandingSettings.query.get(1)
+    settings = db.session.get(BrandingSettings, 1)
     branding = dict(_DEFAULT_BRANDING)
     if settings:
         branding['app_name']       = settings.app_name or None
@@ -187,7 +186,7 @@ def _current_branding():
     logo_filename = settings.logo_filename if settings else None
     site_ids = _current_site_ids()
     if site_ids and len(site_ids) == 1:
-        site = Site.query.get(site_ids[0])
+        site = db.session.get(Site, site_ids[0])
         if site and site.logo_filename:
             logo_filename = site.logo_filename
     if logo_filename:
@@ -200,7 +199,7 @@ def _current_branding():
 
 def _get_branding_settings():
     """Get-or-create the single BrandingSettings row (always id=1)."""
-    settings = BrandingSettings.query.get(1)
+    settings = db.session.get(BrandingSettings, 1)
     if not settings:
         settings = BrandingSettings(id=1)
         db.session.add(settings)

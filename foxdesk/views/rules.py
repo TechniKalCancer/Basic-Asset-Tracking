@@ -196,7 +196,7 @@ def admin_rule_new():
 @app.route('/admin/rules/<int:rule_id>/edit', methods=['GET', 'POST'])
 @require_super_admin
 def admin_rule_edit(rule_id):
-    rule = AutomationRule.query.get_or_404(rule_id)
+    rule = db.get_or_404(AutomationRule, rule_id)
     if request.method == 'POST':
         try:
             _rule_from_form(rule)
@@ -231,7 +231,7 @@ def _render_detail(rule, test_results=None):
 @app.route('/admin/rules/<int:rule_id>')
 @require_super_admin
 def admin_rule_detail(rule_id):
-    return _render_detail(AutomationRule.query.get_or_404(rule_id))
+    return _render_detail(db.get_or_404(AutomationRule, rule_id))
 
 
 @app.route('/admin/rules/<int:rule_id>/test', methods=['POST'])
@@ -239,7 +239,7 @@ def admin_rule_detail(rule_id):
 def admin_rule_test(rule_id):
     """Dry run: what the rule would do against recent (or currently due)
     items, without changing anything."""
-    rule = AutomationRule.query.get_or_404(rule_id)
+    rule = db.get_or_404(AutomationRule, rule_id)
     if rule.trigger not in TRIGGERS:
         flash('This rule\'s trigger no longer exists. Edit it to choose another.', 'error')
         return redirect(url_for('admin_rule_detail', rule_id=rule.id))
@@ -249,7 +249,7 @@ def admin_rule_test(rule_id):
 @app.route('/admin/rules/<int:rule_id>/toggle', methods=['POST'])
 @require_super_admin
 def admin_rule_toggle(rule_id):
-    rule = AutomationRule.query.get_or_404(rule_id)
+    rule = db.get_or_404(AutomationRule, rule_id)
     rule.enabled = not rule.enabled
     _log_activity('automation_rule', f'{"Turned on" if rule.enabled else "Paused"} automation "{rule.name}".')
     db.session.commit()
@@ -261,7 +261,7 @@ def admin_rule_toggle(rule_id):
 @app.route('/admin/rules/<int:rule_id>/delete', methods=['POST'])
 @require_super_admin
 def admin_rule_delete(rule_id):
-    rule = AutomationRule.query.get_or_404(rule_id)
+    rule = db.get_or_404(AutomationRule, rule_id)
     name = rule.name
     # Staged device actions outlive the rule: a tech can still confirm or dismiss them.
     PendingDeviceAction.query.filter_by(rule_id=rule.id).update({'rule_id': None})

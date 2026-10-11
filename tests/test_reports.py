@@ -4,6 +4,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from conftest import A, patch_everywhere
+from foxdesk.clock import utcnow
 
 ET = ZoneInfo('America/New_York')
 
@@ -63,7 +64,7 @@ def test_every_report_builds(make):
     kid = make.person()
     dev = make.device(holder=kid)
     cat = make.ticket_category()
-    now = datetime.utcnow()
+    now = utcnow()
     A.db.session.add_all([
         A.Ticket(category_id=cat.id, subject='Cracked', description='d', priority='urgent'),
         A.Incident(asset_tag=dev.asset_tag, person_name=kid.full_name, description='Dropped', fee_charged=True,

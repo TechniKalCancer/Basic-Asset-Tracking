@@ -15,7 +15,7 @@ import struct
 import sys
 import tempfile
 import zlib
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -40,6 +40,7 @@ os.environ.update({
 sys.path.insert(0, ROOT)
 
 import foxdesk  # noqa: E402,F401  (must come after the environment is pinned)
+from foxdesk.clock import utcnow  # noqa: E402
 from flask_migrate import upgrade  # noqa: E402
 
 
@@ -167,7 +168,7 @@ class Factory:
         A.db.session.add(asset)
         if holder:
             A.db.session.add(A.AssignmentHistory(asset_tag=tag, person_id=holder.id, person_name=holder.full_name,
-                                                 assigned_at=datetime.utcnow() - timedelta(days=assigned_days_ago)))
+                                                 assigned_at=utcnow() - timedelta(days=assigned_days_ago)))
         A.db.session.commit()
         return row
 

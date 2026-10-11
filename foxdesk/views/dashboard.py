@@ -138,11 +138,10 @@ def admin_panel():
         } for site in Site.query.order_by(Site.name).all()]
         unassigned_devices = AssetRegistry.query.filter(AssetRegistry.site_id.is_(None)).count()
         fresh_install = Site.query.first() is None
-        # Same check that already logs a SECURITY WARNING to stdout at startup
-        # (see the IS_PRODUCTION block above) — surfaced here too since that
-        # log line is invisible unless someone is tailing container logs, and
-        # a reused volume could already have a Site while still running on
-        # dev-fallback secrets.
+        # Same check that logs a SECURITY WARNING at startup (IS_PRODUCTION in
+        # foxdesk/core.py), surfaced here because that log line is invisible
+        # unless someone tails container logs, and a reused volume can already
+        # have a Site while still running on dev-fallback secrets.
         dev_secrets_in_use = (
             app.secret_key == 'dev-secret-change-in-prod'
             or os.environ.get('ADMIN_PASSWORD') is None
@@ -152,7 +151,7 @@ def admin_panel():
         feature_enabled('google') and feature_enabled('loaners') and GOOGLE_LOANER_AUTO_DISABLE_ENABLED
         and Site.query.filter_by(google_loaner_autodisable_enabled=True).first() is not None
     )
-    branding_settings = BrandingSettings.query.get(1)
+    branding_settings = db.session.get(BrandingSettings, 1)
     branding_configured = bool(branding_settings and (branding_settings.primary_color_raw or branding_settings.logo_filename))
 
     data_quality_errors = None

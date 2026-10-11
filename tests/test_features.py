@@ -17,7 +17,7 @@ def test_everything_on_by_default_except_the_portals(client):
 
 def test_turning_loaners_off_hides_and_blocks_it(client):
     save(client, 'loaners')
-    assert A.FeatureToggle.query.get('loaners').enabled is False
+    assert A.db.session.get(A.FeatureToggle, 'loaners').enabled is False
     dash = client.get('/admin').get_data(as_text=True)
     assert '>Loaners<' not in dash.replace('</span>', '')  # nav tab gone
     r = client.get('/admin/loaners')

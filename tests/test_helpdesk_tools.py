@@ -1,9 +1,10 @@
 """Queues, teams, saved replies, signatures, and "someone else is on this ticket"."""
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from werkzeug.security import generate_password_hash
 
 from conftest import A
+from foxdesk.clock import utcnow
 
 
 def tech(username, **kw):
@@ -38,7 +39,7 @@ def test_queues_and_teams(client, make):
     mine = ticket(cat, 'SUBJ-mine', assigned_to_user_id=jo.id)
     teams = ticket(cat, 'SUBJ-team', team_id=team.id)
     nobody = ticket(cat, 'SUBJ-nobody')
-    old = ticket(cat, 'SUBJ-old', assigned_to_user_id=al.id, updated_at=datetime.utcnow() - timedelta(days=5))
+    old = ticket(cat, 'SUBJ-old', assigned_to_user_id=al.id, updated_at=utcnow() - timedelta(days=5))
     ticket(cat, 'SUBJ-done', status='resolved')
 
     c = login(client, 'jo')
@@ -51,7 +52,7 @@ def test_queues_and_teams(client, make):
     assert 'SUBJ-done' not in page('')
 
     client.post(f'/admin/tickets/{nobody.id}/assign', data={'assigned_to_user_id': '', 'team_id': str(team.id)})
-    assert A.Ticket.query.get(nobody.id).team_id == team.id
+    assert A.db.session.get(A.Ticket, nobody.id).team_id == team.id
     assert 'SUBJ-nobody' in client.get(f'/admin/tickets?team_id={team.id}').get_data(as_text=True)
     log = A.ActivityLog.query.filter_by(ticket_id=nobody.id, action='ticket_assign').one()
     assert 'nobody → FCHS techs' in log.summary
@@ -72,7 +73,7 @@ def test_saved_replies_and_signature(client, make, sent_emails):
 
     r = al_client.get(f'/admin/tickets/{t.id}/canned/{shared.id}')
     assert r.get_json()['text'] == f'Hi Ana, re #{t.id} (T123): hold refresh + power. al'
-    assert A.CannedReply.query.get(shared.id).use_count == 1
+    assert A.db.session.get(A.CannedReply, shared.id).use_count == 1
     assert al_client.get(f'/admin/tickets/{t.id}/canned/{personal.id}').status_code == 404
 
     al_client.post('/admin/canned_replies', data={'action': 'signature', 'signature': 'Al\nDistrict IT'})
@@ -93,7 +94,7 @@ def test_presence(client, make):
     assert jo_client.post(f'/admin/tickets/{t.id}/presence', data={'typing': '0'}).get_json()['others'] == [{'name': 'al', 'typing': True}]
     al_client.post(f'/admin/tickets/{t.id}/presence', data={'leaving': '1'})
     assert jo_client.post(f'/admin/tickets/{t.id}/presence', data={'typing': '0'}).get_json() == {'others': []}
-    A.TicketPresence.query.update({'updated_at': datetime.utcnow() - timedelta(minutes=2)})
+    A.TicketPresence.query.update({'updated_at': utcnow() - timedelta(minutes=2)})
     A.db.session.commit()
     assert al_client.post(f'/admin/tickets/{t.id}/presence', data={}).get_json() == {'others': []}, 'stale heartbeats ignored'
 

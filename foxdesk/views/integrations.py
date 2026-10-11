@@ -1,7 +1,7 @@
 """Pages: integrations."""
 import time
-from datetime import datetime
 from flask import flash, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import (
     GOOGLE_ADMIN_IMPERSONATE_EMAIL,
     GOOGLE_LOANER_AUTO_DISABLE_ENABLED,
@@ -71,7 +71,7 @@ def admin_asset_google_sync(asset_tag):
         asset.google_recent_users = info.get('recent_users')
         asset.google_last_activity = info.get('last_activity')
         asset.google_enabled      = info.get('enabled')
-        asset.google_last_sync_at = datetime.utcnow()
+        asset.google_last_sync_at = utcnow()
         db.session.commit()
         flash(f'Synced {asset_tag} from Google.', 'success')
     except LookupError as e:
@@ -107,7 +107,7 @@ def admin_asset_google_toggle(asset_tag):
             asset = Asset(asset_tag=asset_tag, is_valid=True)
             db.session.add(asset)
         asset.google_enabled = new_enabled
-        asset.google_last_sync_at = datetime.utcnow()
+        asset.google_last_sync_at = utcnow()
         _log_activity('device_google_toggle',
                        f'{"Enabled" if new_enabled else "Disabled"} {asset_tag} in Google Workspace.',
                        site_id=registry_row.site_id)
@@ -238,7 +238,7 @@ def admin_google_ou_push():
 @app.route('/admin/google_ou_push/loaners/<int:site_id>', methods=['POST'])
 @require_super_admin
 def admin_google_ou_push_loaners(site_id):
-    site = Site.query.get_or_404(site_id)
+    site = db.get_or_404(Site, site_id)
     if not site.loaner_org_unit_path:
         flash(f'Set a Loaner Org Unit on {site.name} first (under Sites) before pushing.', 'error')
         return redirect(url_for('admin_google_ou_push'))
@@ -323,7 +323,7 @@ def admin_google_field_mapping_new():
 @app.route('/admin/google_field_mapping/<int:mapping_id>/delete', methods=['POST'])
 @require_super_admin
 def admin_google_field_mapping_delete(mapping_id):
-    mapping = GoogleFieldMapping.query.get_or_404(mapping_id)
+    mapping = db.get_or_404(GoogleFieldMapping, mapping_id)
     entity_type = mapping.entity_type
     _log_activity('google_field_mapping_delete', f'Removed mapping "{mapping.google_field}" -> "{mapping.target_field}" ({entity_type}).')
     db.session.delete(mapping)
@@ -442,7 +442,7 @@ def admin_kace_field_mapping_new():
 @app.route('/admin/kace_field_mapping/<int:mapping_id>/delete', methods=['POST'])
 @require_super_admin
 def admin_kace_field_mapping_delete(mapping_id):
-    mapping = KaceFieldMapping.query.get_or_404(mapping_id)
+    mapping = db.get_or_404(KaceFieldMapping, mapping_id)
     _log_activity('kace_field_mapping_delete', f'Removed mapping "{mapping.kace_field}" -> "{mapping.target_field}".')
     db.session.delete(mapping)
     db.session.commit()

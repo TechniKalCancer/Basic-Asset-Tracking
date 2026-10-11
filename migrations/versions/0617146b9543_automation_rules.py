@@ -10,7 +10,7 @@ Revises: 4a5368f32367
 Create Date: 2026-10-08 09:47:15.525298
 
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from alembic import op
 import sqlalchemy as sa
@@ -96,7 +96,7 @@ def _convert_ticket_automations():
                     sa.column('actions', sa.JSON), sa.column('enabled', sa.Boolean), sa.column('run_count', sa.Integer),
                     sa.column('created_by', sa.String), sa.column('created_at', sa.DateTime),
                     sa.column('updated_at', sa.DateTime))
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     new_rules = []
     for cat_id, action_type, confirm, active, repair_cat, org_unit, cat_name in rows:
         params = {'confirm': bool(confirm)}

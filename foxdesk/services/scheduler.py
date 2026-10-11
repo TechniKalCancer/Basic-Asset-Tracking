@@ -1,7 +1,7 @@
 """Background loops: loaner reminders and scheduled syncs."""
 import threading
 import time
-from datetime import datetime
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, app, db, logger
 from foxdesk.services.features import feature_enabled
 from foxdesk.models import SyncSchedule
@@ -58,7 +58,7 @@ def _run_due_scheduled_syncs():
     ad_on, dell_on = feature_enabled('active_directory'), feature_enabled('dell_warranty')
     if not (google_on or kace_on or ad_on or dell_on):
         return
-    now = datetime.utcnow()
+    now = utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
         if schedule.sync_type in ('person', 'device') and not google_on:
             continue

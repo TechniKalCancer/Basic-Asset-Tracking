@@ -1,5 +1,5 @@
 """Tickets, repairs (which open tickets), requester emails, and ticket automations."""
-from datetime import datetime
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, GOOGLE_SYNC_ENABLED, db
 from foxdesk.models import (
     AUTOMATION_ACTIONS,
@@ -57,7 +57,7 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
     person = asset.assigned_to if asset else None
 
-    repair_category = RepairCategory.query.get(repair_category_id) if repair_category_id else None
+    repair_category = db.session.get(RepairCategory, repair_category_id) if repair_category_id else None
     ticket_category = _get_or_create_repair_ticket_category()
     subject = f'Repair: {asset_tag}' + (f' ({repair_category.name})' if repair_category else '')
     ticket = _create_ticket(
@@ -87,7 +87,7 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     creation time (correctable/removable later, more can be added as the
     ticket progresses) — no charge fields shown on either creation form,
     matching report_problem_page's "not the submitter's decision" reasoning."""
-    category = TicketCategory.query.get(category_id)
+    category = db.session.get(TicketCategory, category_id)
     default_price = category.default_price if category else None
     ticket = Ticket(
         category_id=category_id, subject=subject, description=description,
@@ -193,7 +193,7 @@ def _execute_device_automation_action(action_type, asset_tag, ticket=None, autom
             asset = Asset(asset_tag=asset_tag, is_valid=True)
             db.session.add(asset)
         asset.google_enabled = False
-        asset.google_last_sync_at = datetime.utcnow()
+        asset.google_last_sync_at = utcnow()
         return 'ok', f'{asset_tag} disabled in Google Workspace.'
 
     if action_type == 'send_to_repair':
@@ -240,7 +240,7 @@ def _run_pending_device_action(action, resolved_by='Automatic', automation=None)
         action.action_type, action.asset_tag, ticket=action.ticket, automation=automation, params=action.params)
     action.status = 'confirmed' if status == 'ok' else 'failed'
     action.error_message = None if status == 'ok' else message
-    action.resolved_at = datetime.utcnow()
+    action.resolved_at = utcnow()
     action.resolved_by_label = resolved_by
     action_label = AUTOMATION_ACTIONS.get(action.action_type, action.action_type)
     outcome = 'done' if status == 'ok' else f'failed — {message}'

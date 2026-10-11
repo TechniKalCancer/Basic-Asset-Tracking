@@ -28,7 +28,7 @@ class SigninError(Exception):
 
 
 def signin_settings():
-    row = SigninSettings.query.get(1)
+    row = db.session.get(SigninSettings, 1)
     if row is None:
         row = SigninSettings(id=1, shared_password_disabled=False)
         db.session.add(row)
@@ -37,7 +37,7 @@ def signin_settings():
 
 
 def google_config():
-    row = SigninSettings.query.get(1)
+    row = db.session.get(SigninSettings, 1)
     saved_secret = decrypt_secret(row.google_client_secret, SECRET_PURPOSE) if row and row.google_client_secret else None
     client_id = (row.google_client_id if row else None) or GOOGLE_OAUTH_CLIENT_ID
     secret = saved_secret or GOOGLE_OAUTH_CLIENT_SECRET
@@ -63,7 +63,7 @@ def save_google_settings(client_id, secret, domains):
 def shared_password_allowed():
     if ALLOW_SHARED_PASSWORD:
         return True
-    row = SigninSettings.query.get(1)
+    row = db.session.get(SigninSettings, 1)
     return not (row and row.shared_password_disabled)
 
 

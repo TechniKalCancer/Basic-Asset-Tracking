@@ -23,12 +23,13 @@ import html
 import imaplib
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from email.utils import getaddresses, parseaddr
 
 import requests
 from sqlalchemy.exc import IntegrityError
 
+from foxdesk.clock import utcnow
 from foxdesk.core import SMTP_FROM_EMAIL, db, logger
 from foxdesk.models import InboundEmail, MailboxSettings, Ticket, TicketCategory, TicketComment, User
 from foxdesk.services.secrets import decrypt_secret, encrypt_secret
@@ -49,7 +50,7 @@ class MailboxError(Exception):
 
 
 def mailbox_settings():
-    row = MailboxSettings.query.get(1)
+    row = db.session.get(MailboxSettings, 1)
     if row is None:
         row = MailboxSettings(id=1, enabled=False)
         db.session.add(row)
@@ -58,7 +59,7 @@ def mailbox_settings():
 
 
 def mailbox_configured(row=None):
-    row = row or MailboxSettings.query.get(1)
+    row = row or db.session.get(MailboxSettings, 1)
     if not row or not row.address:
         return False
     if row.kind == 'graph':
@@ -93,7 +94,7 @@ def save_mailbox(row, form):
 def reply_headers(ticket_id):
     """(reply_to, extra headers) for a ticket email, or (None, {}) when the
     help desk mailbox isn't in use."""
-    row = MailboxSettings.query.get(1)
+    row = db.session.get(MailboxSettings, 1)
     if not (row and row.enabled and row.address):
         return None, {}
     domain = row.address.split('@')[-1]
@@ -327,7 +328,7 @@ def process_message(m, row):
         return record
 
     who = m.get('from_name') or sender
-    ticket = Ticket.query.get(ticket_reference(m)) if ticket_reference(m) else None
+    ticket = db.session.get(Ticket, ticket_reference(m)) if ticket_reference(m) else None
     staff = User.query.filter(db.func.lower(User.email) == sender, User.is_active.is_(True)).first()
     person = find_person(email=sender)
     allowed = ticket is not None and (
@@ -339,7 +340,7 @@ def process_message(m, row):
                                      from_requester=staff is None))
         if staff is None and ticket.status in ('resolved', 'closed'):
             ticket.status, ticket.resolved_at = 'open', None
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = utcnow()
         count = _save_mail_attachments(ticket, m, who)
         _log_activity('ticket_comment', f'Email reply from {sender} on ticket #{ticket.id}'
                       + (f' with {count} attachment(s)' if count else '') + '.', site_id=ticket.site_id, ticket_id=ticket.id)
@@ -348,7 +349,7 @@ def process_message(m, row):
         return record
 
     recent = InboundEmail.query.filter(InboundEmail.from_email == sender, InboundEmail.outcome == 'new',
-                                       InboundEmail.received_at >= datetime.utcnow() - timedelta(hours=1)).count()
+                                       InboundEmail.received_at >= utcnow() - timedelta(hours=1)).count()
     if recent >= MAX_NEW_PER_SENDER_PER_HOUR:
         record.outcome, record.detail = 'ignored', 'Too many new tickets from this sender in the last hour (mail loop?).'
         db.session.commit()
@@ -394,13 +395,13 @@ def check_mailbox():
         summary = (f'{counts["new"]} new ticket(s), {counts["reply"]} repl(ies), {counts["ignored"]} ignored'
                    + (f', {counts["error"]} failed' if counts['error'] else ''))
         row = mailbox_settings()
-        row.last_check_at, row.last_summary, row.last_error = datetime.utcnow(), summary[:255], None
+        row.last_check_at, row.last_summary, row.last_error = utcnow(), summary[:255], None
         db.session.commit()
         return summary
     except MailboxError as e:
         db.session.rollback()
         row = mailbox_settings()
-        row.last_check_at, row.last_error = datetime.utcnow(), str(e)
+        row.last_check_at, row.last_error = utcnow(), str(e)
         db.session.commit()
         raise
     finally:

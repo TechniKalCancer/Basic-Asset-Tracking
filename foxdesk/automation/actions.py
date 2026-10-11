@@ -13,6 +13,7 @@ import json
 import re
 from decimal import Decimal, InvalidOperation
 
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, db
 from foxdesk.models import (
     ASSET_STATUSES, TICKET_PRIORITIES, TICKET_STATUSES,
@@ -110,8 +111,7 @@ def _set_ticket_field(field, choices_label):
         old = getattr(t, field)
         setattr(t, field, value)
         if field == 'status' and value in ('resolved', 'closed'):
-            from datetime import datetime
-            t.resolved_at = t.resolved_at or datetime.utcnow()
+            t.resolved_at = t.resolved_at or utcnow()
         return 'ok', f'{choices_label}: {old} → {value}'
     return run
 

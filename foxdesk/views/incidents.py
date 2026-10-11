@@ -1,8 +1,8 @@
 """Pages: incidents."""
 from collections import OrderedDict
-from datetime import datetime
 from decimal import Decimal
 from flask import abort, flash, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
@@ -134,8 +134,8 @@ def report_problem_page():
 @app.route('/admin/incidents/<int:incident_id>/mark_paid', methods=['POST'])
 @require_permission('devices')
 def admin_incident_mark_paid(incident_id):
-    incident = Incident.query.get_or_404(incident_id)
-    incident.paid_at = datetime.utcnow()
+    incident = db.get_or_404(Incident, incident_id)
+    incident.paid_at = utcnow()
     registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
     _log_activity('fee_paid', f'Marked fee paid for {incident.asset_tag} ({incident.person_name or "unknown"}).',
                    site_id=registry_row.site_id if registry_row else None)
@@ -149,7 +149,7 @@ def admin_incident_mark_paid(incident_id):
 def admin_incident_fee(incident_id):
     """Corrects an incident's fee amount after the fact (e.g. the office
     negotiated a lower repair cost than first estimated)."""
-    incident = Incident.query.get_or_404(incident_id)
+    incident = db.get_or_404(Incident, incident_id)
     fee_amount = _parse_money(request.form.get('fee_amount'))
     incident.fee_amount = fee_amount
     incident.fee_charged = bool(fee_amount)
@@ -169,7 +169,7 @@ def admin_incident_delete(incident_id):
     against the wrong person. Unlike editing the fee to blank, this drops
     the row entirely, so it also stops counting toward that device's
     incident-escalation history."""
-    incident = Incident.query.get_or_404(incident_id)
+    incident = db.get_or_404(Incident, incident_id)
     asset_tag, person_name, description = incident.asset_tag, incident.person_name, incident.description
     registry_row = AssetRegistry.query.filter_by(asset_tag=asset_tag).first()
     Attachment.query.filter_by(owner_type='incident', owner_id=incident.id).delete()
@@ -279,8 +279,8 @@ def admin_asset_invoice(asset_tag):
     incidents = Incident.query.filter_by(asset_tag=asset_tag).order_by(Incident.created_at).all()
     total = sum((inc.fee_amount or Decimal('0')) for inc in incidents if inc.fee_charged)
     return render_template('admin_asset_invoice.html', registry_row=registry_row, incidents=incidents,
-                           total=total, branding_settings=BrandingSettings.query.get(1),
-                           generated_at=datetime.utcnow())
+                           total=total, branding_settings=db.session.get(BrandingSettings, 1),
+                           generated_at=utcnow())
 
 
 @app.route('/admin/repair_categories')
@@ -322,7 +322,7 @@ def admin_repair_category_new():
 @app.route('/admin/repair_categories/<int:category_id>/edit', methods=['GET', 'POST'])
 @require_permission('devices')
 def admin_repair_category_edit(category_id):
-    category = RepairCategory.query.get_or_404(category_id)
+    category = db.get_or_404(RepairCategory, category_id)
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         default_price = _parse_money(request.form.get('default_price'))
@@ -349,7 +349,7 @@ def admin_repair_category_edit(category_id):
 @app.route('/admin/repair_categories/<int:category_id>/delete', methods=['POST'])
 @require_permission('devices')
 def admin_repair_category_delete(category_id):
-    category = RepairCategory.query.get_or_404(category_id)
+    category = db.get_or_404(RepairCategory, category_id)
     # Both Incident and Repair reuse this same category catalog (see
     # RepairCategory's docstring) — checking only one would let the other's
     # reference through to a ForeignKeyViolation on delete.

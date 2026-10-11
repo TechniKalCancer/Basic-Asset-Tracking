@@ -1,5 +1,5 @@
 """SQLAlchemy models and the enums that belong to them."""
-from datetime import datetime
+from foxdesk.clock import utcnow
 from foxdesk.core import db
 
 
@@ -11,7 +11,7 @@ class Site(db.Model):
     google_loaner_autodisable_enabled = db.Column(db.Boolean, nullable=False, default=False)  # per-site opt-in pilot gate, see _sync_device_google_state — despite the name, also gates the OU-move-to-borrower behavior on assignment
     loaner_org_unit_path = db.Column(db.String(255), nullable=True)  # where this site's loaner Chromebooks should live in Google Workspace — see _push_loaners_to_ou
     logo_filename = db.Column(db.String(255), nullable=True)  # overrides BrandingSettings.logo_filename in the nav for this site's users; falls back when unset
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class BrandingSettings(db.Model):
@@ -38,7 +38,7 @@ class BrandingSettings(db.Model):
     secondary_text_color = db.Column(db.String(7), nullable=True)
     tertiary_color       = db.Column(db.String(7), nullable=True)
     tertiary_text_color  = db.Column(db.String(7), nullable=True)
-    updated_at           = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at           = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class EmailSettings(db.Model):
@@ -71,7 +71,7 @@ class EmailSettings(db.Model):
     # Master switch for the automatic requester emails (received/resolved).
     # Replies are an explicit per-comment choice, so they ignore this.
     ticket_notifications_enabled = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
-    updated_at                  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at                  = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class CustomField(db.Model):
@@ -88,7 +88,7 @@ class CustomField(db.Model):
     field_key   = db.Column(db.String(60), nullable=False)  # slug, used as the JSON key
     label       = db.Column(db.String(120), nullable=False)
     field_type  = db.Column(db.String(20), nullable=False, default='text')  # 'text' | 'number' | 'date' | 'boolean' | 'email'
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
     __table_args__ = (db.UniqueConstraint('entity_type', 'field_key', name='uq_custom_field_entity_key'),)
 
 
@@ -108,7 +108,7 @@ class GoogleFieldMapping(db.Model):
     google_field = db.Column(db.String(120), nullable=False)
     target_field = db.Column(db.String(80), nullable=False)
     org_unit_scope = db.Column(db.String(255), nullable=True)  # None=all; '__staff__'/'__student__'=category; else an exact org unit path — see _mapping_applies_to_org_unit()
-    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class KaceFieldMapping(db.Model):
@@ -128,7 +128,7 @@ class KaceFieldMapping(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
     kace_field   = db.Column(db.String(80), nullable=False)
     target_field = db.Column(db.String(80), nullable=False)
-    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class GoogleOrgUnit(db.Model):
@@ -151,7 +151,7 @@ class GoogleOrgUnit(db.Model):
     name          = db.Column(db.String(255), nullable=True)
     category      = db.Column(db.String(20), nullable=False, default='unclassified')  # 'unclassified' | 'staff' | 'student'
     site_id       = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
-    updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at    = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
     site = db.relationship('Site')
 
@@ -230,7 +230,7 @@ class AssetNumberRange(db.Model):
     range_end   = db.Column(db.Integer, nullable=False)
     is_default  = db.Column(db.Boolean, nullable=False, default=False)
     notes       = db.Column(db.Text, nullable=True)
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class AssetRegistry(db.Model):
@@ -287,7 +287,7 @@ class Asset(db.Model):
     assigned_to_id = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
     status         = db.Column(db.String(20), nullable=False, default='available')
 
-    # Populated by Google Workspace Chrome device sync (Stage 2, not yet implemented).
+    # Cached from the Google Workspace Chrome device sync (_run_google_sync).
     google_model       = db.Column(db.String(120), nullable=True)
     google_org_unit    = db.Column(db.String(255), nullable=True)
     google_recent_user = db.Column(db.String(255), nullable=True)
@@ -338,7 +338,7 @@ class Person(db.Model):
     insurance_opted_in = db.Column(db.Boolean, nullable=False, default=False)  # family paid for the device protection plan this year
     guardian_name  = db.Column(db.String(160), nullable=True)
     guardian_email = db.Column(db.String(160), nullable=True)  # where damage notices go — students only, usually filled from the SIS export via People CSV import
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
 
     # Populated by the "Sync from Google" button on the person edit page —
@@ -380,7 +380,7 @@ class AssignmentHistory(db.Model):
     asset_tag      = db.Column(db.String(120), nullable=False, index=True)
     person_id      = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
     person_name    = db.Column(db.String(160), nullable=False)
-    assigned_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    assigned_at    = db.Column(db.DateTime, nullable=False, default=utcnow)
     unassigned_at  = db.Column(db.DateTime, nullable=True)
     due_date       = db.Column(db.Date, nullable=True)
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
@@ -398,7 +398,7 @@ class Event(db.Model):
     __tablename__ = 'event'
     id        = db.Column(db.Integer, primary_key=True)
     asset_tag = db.Column(db.String(120), nullable=False, index=True)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, default=utcnow)
     action    = db.Column(db.String(50), nullable=False)
     scanned_value = db.Column(db.String(120), nullable=True)   # raw scan (tag or serial)
     scan_type     = db.Column(db.String(20), nullable=True)    # 'asset_tag' | 'serial'
@@ -415,10 +415,9 @@ class Event(db.Model):
         }
 
 
-# Where a named User lands right after logging in — key into this dict,
-# stored on User.default_landing. 'dashboard' is the long-standing default;
-# 'loaners' exists for an admin whose day-to-day job is really the loaner
-# pool and would rather skip the Dashboard detour every time.
+# Where a named User lands right after logging in, keyed by
+# User.default_landing. 'dashboard' is the default; 'loaners' sends a
+# loaner-pool operator straight to the pool.
 LANDING_PAGES = {'dashboard': 'Dashboard', 'loaners': 'Loaner Pool'}
 
 
@@ -446,7 +445,7 @@ class User(db.Model):
     can_tickets   = db.Column(db.Boolean, nullable=False, default=False)  # help-desk ticket queue: view/comment/assign/resolve, manage categories
     can_manage_users = db.Column(db.Boolean, nullable=False, default=False)  # add/edit/delete User accounts, narrower than is_admin (can't grant is_admin/is_super_admin)
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
-    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, nullable=False, default=utcnow)
     default_landing = db.Column(db.String(20), nullable=False, default='dashboard')  # key into LANDING_PAGES — where login sends this user
     # A super admin's own standing "which site am I looking at" preference —
     # None means all sites (this app's normal super-admin default). Only
@@ -472,7 +471,7 @@ class KioskDevice(db.Model):
     token      = db.Column(db.String(64), unique=True, nullable=False, index=True)
     label      = db.Column(db.String(120), nullable=True)
     site_id    = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     site = db.relationship('Site')
 
@@ -487,7 +486,7 @@ class AuditScan(db.Model):
     __tablename__ = 'audit_scan'
     id         = db.Column(db.Integer, primary_key=True)
     asset_tag  = db.Column(db.String(120), nullable=False, index=True)
-    scanned_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    scanned_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 class RepairCategory(db.Model):
@@ -525,7 +524,7 @@ class Incident(db.Model):
     fee_charged = db.Column(db.Boolean, nullable=False, default=False)
     fee_amount  = db.Column(db.Numeric(8, 2), nullable=True)
     paid_at     = db.Column(db.DateTime, nullable=True)
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
     guardian_notified_at = db.Column(db.DateTime, nullable=True)  # last damage notice emailed to the student's guardian
 
     repair_category = db.relationship('RepairCategory')
@@ -552,7 +551,7 @@ class Repair(db.Model):
     ticket_number        = db.Column(db.String(80), nullable=True)
     issue_description    = db.Column(db.Text, nullable=True)  # required at the form level (see admin_repair_send*/admin_repair_edit) — nullable here so existing rows with none don't need a migration backfill, same reasoning as the registry serial-number requirement
     person_name_snapshot = db.Column(db.String(160), nullable=True)
-    sent_at              = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    sent_at              = db.Column(db.DateTime, nullable=False, default=utcnow)
     expected_return_at   = db.Column(db.Date, nullable=True)
     returned_at          = db.Column(db.DateTime, nullable=True)
     outcome              = db.Column(db.String(20), nullable=True)  # 'fixed' | 'could_not_repair' | 'replaced'
@@ -606,8 +605,8 @@ class HelpArticle(db.Model):
     body         = db.Column(db.Text, nullable=False)  # the answer (FAQ) or step-by-step content (How-To)
     sort_order   = db.Column(db.Integer, nullable=False, default=0)
     is_active    = db.Column(db.Boolean, nullable=False, default=True)
-    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class Ticket(db.Model):
@@ -635,8 +634,8 @@ class Ticket(db.Model):
     requester_email = db.Column(db.String(160), nullable=True)
     assigned_to_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     team_id             = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True, index=True)
-    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
-    updated_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+    updated_at    = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
     resolved_at   = db.Column(db.DateTime, nullable=True)
 
     category     = db.relationship('TicketCategory')
@@ -660,7 +659,7 @@ class TicketComment(db.Model):
     ticket_id   = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=False, index=True)
     body        = db.Column(db.Text, nullable=False)
     author_label = db.Column(db.String(160), nullable=False)
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
     emailed_to_requester = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     from_requester = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())  # the requester's own reply (email or portal)
 
@@ -676,7 +675,7 @@ class TicketCharge(db.Model):
     description = db.Column(db.Text, nullable=False)
     amount      = db.Column(db.Numeric(8, 2), nullable=False)
     paid_at     = db.Column(db.DateTime, nullable=True)
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed']
@@ -722,7 +721,7 @@ class TicketAutomation(db.Model):
     action_type           = db.Column(db.String(30), nullable=False)  # key into AUTOMATION_ACTIONS
     require_confirmation  = db.Column(db.Boolean, nullable=False, default=True)
     is_active             = db.Column(db.Boolean, nullable=False, default=True)
-    created_at            = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at            = db.Column(db.DateTime, nullable=False, default=utcnow)
     # Only meaningful for specific action_types — nullable/unused otherwise,
     # same reasoning as Repair.repair_category_id being optional.
     repair_category_id    = db.Column(db.Integer, db.ForeignKey('repair_category.id'), nullable=True)  # 'send_to_repair'
@@ -748,7 +747,7 @@ class PendingDeviceAction(db.Model):
     asset_tag         = db.Column(db.String(120), nullable=False, index=True)
     action_type       = db.Column(db.String(30), nullable=False)
     status            = db.Column(db.String(20), nullable=False, default='pending')  # 'pending' | 'confirmed' | 'dismissed' | 'failed'
-    created_at        = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at        = db.Column(db.DateTime, nullable=False, default=utcnow)
     resolved_at       = db.Column(db.DateTime, nullable=True)
     resolved_by_label = db.Column(db.String(160), nullable=True)
     error_message     = db.Column(db.String(255), nullable=True)
@@ -773,7 +772,7 @@ class ActivityLog(db.Model):
     """
     __tablename__ = 'activity_log'
     id            = db.Column(db.Integer, primary_key=True)
-    timestamp     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    timestamp     = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     actor_type    = db.Column(db.String(20), nullable=False)  # 'user' | 'legacy_admin' | 'kiosk' | 'system'
     actor_label   = db.Column(db.String(160), nullable=False)
     actor_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -795,7 +794,7 @@ class LoanerCheckout(db.Model):
     asset_tag        = db.Column(db.String(120), nullable=False, index=True)
     person_id        = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
     person_name      = db.Column(db.String(160), nullable=False)
-    checked_out_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    checked_out_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
     due_date         = db.Column(db.Date, nullable=True)
     checked_in_at    = db.Column(db.DateTime, nullable=True)
     reminder_sent_at = db.Column(db.DateTime, nullable=True)
@@ -843,7 +842,7 @@ class PersonIdentity(db.Model):
     review_status  = db.Column(db.String(20), nullable=True)    # None | 'ignored' | 'inactive' (disabled in its source and nobody's — kept off the review list)
     raw            = db.Column(db.JSON, nullable=True)          # extra attributes from the source, for display only
     last_synced_at = db.Column(db.DateTime, nullable=True)
-    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at     = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     person = db.relationship('Person', foreign_keys=[person_id], backref=db.backref('identities', lazy='select'))
     suggested_person = db.relationship('Person', foreign_keys=[suggested_person_id])
@@ -895,7 +894,7 @@ class DeviceRecord(db.Model):
     raw            = db.Column(db.JSON, nullable=True)
     last_seen_at   = db.Column(db.DateTime, nullable=True)      # the device's own last logon/check-in in that system
     last_synced_at = db.Column(db.DateTime, nullable=True)
-    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at     = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     registry_row = db.relationship('AssetRegistry', backref=db.backref('records', lazy='select'))
 
@@ -935,7 +934,7 @@ class Part(db.Model):
     vendor           = db.Column(db.String(160), nullable=True)
     notes            = db.Column(db.Text, nullable=True)
     is_active        = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
-    created_at       = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at       = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     site = db.relationship('Site')
 
@@ -958,7 +957,7 @@ class PartMovement(db.Model):
     asset_tag      = db.Column(db.String(120), nullable=True)
     note           = db.Column(db.String(255), nullable=True)
     actor_label    = db.Column(db.String(160), nullable=True)
-    created_at     = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at     = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
     part = db.relationship('Part', backref=db.backref('movements', lazy='dynamic', order_by='PartMovement.id.desc()'))
     repair = db.relationship('Repair')
@@ -999,7 +998,7 @@ class CannedReply(db.Model):
     user_id     = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     category_id = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=True)
     use_count   = db.Column(db.Integer, nullable=False, default=0, server_default='0')
-    created_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     user     = db.relationship('User')
     category = db.relationship('TicketCategory')
@@ -1015,7 +1014,7 @@ class TicketPresence(db.Model):
     actor_key   = db.Column(db.String(80), nullable=False)
     actor_label = db.Column(db.String(160), nullable=False)
     typing      = db.Column(db.Boolean, nullable=False, default=False)
-    updated_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     __table_args__ = (db.UniqueConstraint('ticket_id', 'actor_key', name='uq_ticket_presence_actor'),)
 
@@ -1056,7 +1055,7 @@ class InboundEmail(db.Model):
     outcome     = db.Column(db.String(20), nullable=False, default='pending')  # new | reply | ignored | error | pending
     detail      = db.Column(db.String(255), nullable=True)
     ticket_id   = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
-    received_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    received_at = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
 
 class PortalSettings(db.Model):
@@ -1075,7 +1074,7 @@ class PortalLogin(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     token_hash = db.Column(db.String(64), nullable=False, unique=True)
     email      = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     used_at    = db.Column(db.DateTime, nullable=True)
 
 
@@ -1091,7 +1090,7 @@ class FeePayment(db.Model):
     provider_ref = db.Column(db.String(255), nullable=False, unique=True)
     status       = db.Column(db.String(20), nullable=False, default='pending')
     payer_email  = db.Column(db.String(255), nullable=True)
-    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
     paid_at      = db.Column(db.DateTime, nullable=True)
 
     incident = db.relationship('Incident')
@@ -1190,8 +1189,8 @@ class AutomationRule(db.Model):
     run_count    = db.Column(db.Integer, nullable=False, default=0, server_default='0')
     last_run_at  = db.Column(db.DateTime, nullable=True)
     created_by   = db.Column(db.String(160), nullable=True)
-    created_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at   = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
     site = db.relationship('Site')
 
@@ -1213,7 +1212,7 @@ class AutomationRun(db.Model):
     dedupe_key    = db.Column(db.String(120), nullable=True)
     status        = db.Column(db.String(20), nullable=False)  # 'ran' | 'error'
     results       = db.Column(db.JSON, nullable=True)
-    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
 
     rule = db.relationship('AutomationRule', backref=db.backref('runs', lazy='dynamic', cascade='all, delete-orphan'))
 
@@ -1231,7 +1230,7 @@ class FeatureToggle(db.Model):
     key        = db.Column(db.String(50), primary_key=True)
     enabled    = db.Column(db.Boolean, nullable=False)
     updated_by = db.Column(db.String(160), nullable=True)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
 class SigninReview(db.Model):
@@ -1248,7 +1247,7 @@ class SigninReview(db.Model):
     signin_email = db.Column(db.String(255), nullable=False)
     note         = db.Column(db.String(255), nullable=True)
     reviewed_by  = db.Column(db.String(160), nullable=True)
-    reviewed_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     __table_args__ = (db.UniqueConstraint('asset_tag', 'signin_email', name='uq_signin_review_asset_email'),)
 
@@ -1276,7 +1275,7 @@ class Attachment(db.Model):
     size_bytes    = db.Column(db.Integer, nullable=False)
     data          = db.deferred(db.Column(db.LargeBinary, nullable=False))  # deferred so listing attachments never loads the bytes
     uploaded_by   = db.Column(db.String(160), nullable=True)
-    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     __table_args__ = (db.Index('ix_attachment_owner', 'owner_type', 'owner_id'),)
 

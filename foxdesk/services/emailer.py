@@ -1,8 +1,8 @@
 """Outgoing email: SMTP send, background send, and admin-editable templates."""
 import smtplib
 import threading
-from datetime import datetime
 from email.message import EmailMessage
+from foxdesk.clock import utcnow
 from foxdesk.core import (
     EMAIL_ENABLED,
     SMTP_FROM_EMAIL,
@@ -185,7 +185,7 @@ class _SafeFormatDict(dict):
 
 
 def _get_email_settings():
-    settings = EmailSettings.query.get(1)
+    settings = db.session.get(EmailSettings, 1)
     if not settings:
         settings = EmailSettings(id=1)
         db.session.add(settings)
@@ -201,7 +201,7 @@ def _render_email_template(kind, variables):
     become malformed (e.g. an unclosed brace), so a bad template can never
     crash a reminder send — /admin/emails also validates on save to catch
     this before it's ever stored."""
-    settings = EmailSettings.query.get(1)
+    settings = db.session.get(EmailSettings, 1)
     default = EMAIL_TEMPLATE_KINDS[kind]
     subject_tpl = (getattr(settings, f'{kind}_subject', None) if settings else None) or default['subject']
     body_tpl = (getattr(settings, f'{kind}_body', None) if settings else None) or default['body']
@@ -220,12 +220,12 @@ def _email_template_sample_vars():
     server process happened to start."""
     return {
         'first_name': 'Jordan', 'full_name': 'Jordan Smith', 'asset_tag': '123456',
-        'due_date': datetime.utcnow().date().isoformat(), 'days_overdue': '3', 'days_overdue_plural': 's',
+        'due_date': utcnow().date().isoformat(), 'days_overdue': '3', 'days_overdue_plural': 's',
         'ticket_id': '1042', 'ticket_subject': 'Chromebook won\'t charge',
         'ticket_description': 'The charging light doesn\'t come on with any charger I try.',
         'ticket_status': 'resolved', 'tech_name': 'Tech Office',
         'reply_body': 'We swapped the charging port — you can pick it up from the library.',
         'guardian_name': 'Pat Smith', 'student_name': 'Jordan Smith',
-        'incident_date': datetime.utcnow().date().isoformat(),
+        'incident_date': utcnow().date().isoformat(),
         'incident_description': 'Cracked screen', 'fee_line': 'A repair fee of $45.00 has been assessed.',
     }

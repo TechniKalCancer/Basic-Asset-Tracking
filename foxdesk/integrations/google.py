@@ -1,6 +1,7 @@
 """Google Workspace (Admin SDK): Chromebooks, people, org units, write-back."""
 import time
 from datetime import datetime, timezone
+from foxdesk.clock import utcnow
 from foxdesk.core import (
     GOOGLE_ADMIN_IMPERSONATE_EMAIL,
     GOOGLE_LOANER_AUTO_DISABLE_ENABLED,
@@ -453,7 +454,7 @@ def _run_google_people_sync():
     it without a live lookup (see admin_person_google_sync for the
     single-person on-demand version of the same cache). An unmatched
     account is auto-created (see _auto_create_person_from_google) when it
-    qualifies; otherwise it's counted as unmatched exactly as before.
+    qualifies; otherwise it's counted as unmatched.
 
     Matching goes through services/identities.place_account: each Google
     account is recorded as a 'google' PersonIdentity and placed on an
@@ -507,7 +508,7 @@ def _run_google_people_sync():
             if person.google_org_unit != org_unit_path:
                 person.google_org_unit = org_unit_path
                 row_changed = True
-            person.google_last_sync_at = datetime.utcnow()
+            person.google_last_sync_at = utcnow()
             if row_changed:
                 updated += 1
         page_token = response.get('nextPageToken')
@@ -578,7 +579,7 @@ def _run_google_device_sync(deadline=None):
     service = _google_directory_service([GOOGLE_SCOPE_MANAGE])
     matched = updated = unmatched = pushed = processed = 0
     page_token = None
-    now = datetime.utcnow()
+    now = utcnow()
     truncated = False
     while True:
         response = service.chromeosdevices().list(

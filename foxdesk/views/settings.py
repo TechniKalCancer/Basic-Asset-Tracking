@@ -1,8 +1,8 @@
 """Pages: settings."""
 import secrets
-from datetime import datetime
 from flask import flash, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from werkzeug.security import generate_password_hash
+from foxdesk.clock import utcnow
 from foxdesk.core import BRANDING_UPLOAD_DIR, EMAIL_ENABLED, app, db, logger
 from foxdesk.services.features import FEATURE_GROUPS, FEATURES, feature_enabled, feature_switch, set_feature
 from foxdesk.models import (
@@ -96,7 +96,7 @@ def admin_custom_field_delete(field_id):
     """Deletes a custom field's definition and any mappings that fed it —
     existing values already written into rows' custom_fields JSON are left
     alone (harmless orphaned data, not worth a bulk cleanup pass)."""
-    field = CustomField.query.get_or_404(field_id)
+    field = db.get_or_404(CustomField, field_id)
     target = f'custom:{field.field_key}'
     GoogleFieldMapping.query.filter_by(entity_type=field.entity_type, target_field=target).delete()
     _log_activity('custom_field_delete', f'Deleted custom field "{field.label}" ({field.entity_type}).')
@@ -582,7 +582,7 @@ def admin_set_active_site():
         flash('The shared admin login can\'t narrow to one site — log in with a named account to use this.', 'info')
         return redirect(request.referrer or url_for('admin_panel'))
     site_id = request.form.get('site_id', type=int)
-    site = Site.query.get(site_id) if site_id else None
+    site = db.session.get(Site, site_id) if site_id else None
     user.default_site_id = site.id if site else None
     db.session.commit()
     flash(f'Now viewing {site.name}.' if site else 'Now viewing all locations.', 'success')
@@ -641,7 +641,7 @@ def admin_site_new():
 @app.route('/admin/sites/<int:site_id>/edit', methods=['GET', 'POST'])
 @require_super_admin
 def admin_site_edit(site_id):
-    site = Site.query.get_or_404(site_id)
+    site = db.get_or_404(Site, site_id)
     org_units = GoogleOrgUnit.query.order_by(GoogleOrgUnit.org_unit_path).all()
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
@@ -680,7 +680,7 @@ def admin_site_edit(site_id):
 @app.route('/admin/sites/<int:site_id>/delete', methods=['POST'])
 @require_super_admin
 def admin_site_delete(site_id):
-    site = Site.query.get_or_404(site_id)
+    site = db.get_or_404(Site, site_id)
     in_use = (
         Person.query.filter_by(site_id=site.id).first()
         or AssetRegistry.query.filter_by(site_id=site.id).first()
@@ -720,7 +720,7 @@ def admin_reminders():
     if search:
         needle = search.lower()
         overdue = [r for r in overdue if needle in r.asset_tag.lower() or needle in (r.person_name or '').lower()]
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     return render_template('admin_reminders.html', overdue=overdue, today=today,
                            email_enabled=EMAIL_ENABLED, search=search)
 
@@ -736,11 +736,11 @@ def admin_reminders_send():
     sent, failed, skipped = 0, 0, 0
 
     for row in overdue:
-        person = Person.query.get(row.person_id) if row.person_id else None
+        person = db.session.get(Person, row.person_id) if row.person_id else None
         if not person:
             skipped += 1
             continue
-        days_overdue = (datetime.utcnow().date() - row.due_date).days
+        days_overdue = (utcnow().date() - row.due_date).days
         subject, body = _render_email_template('assignment_overdue', {
             'first_name': person.first_name, 'full_name': person.full_name, 'asset_tag': row.asset_tag,
             'due_date': row.due_date.strftime('%Y-%m-%d'),
@@ -748,7 +748,7 @@ def admin_reminders_send():
         })
         try:
             send_email(person.email, subject, body)
-            row.reminder_sent_at = datetime.utcnow()
+            row.reminder_sent_at = utcnow()
             sent += 1
         except Exception as e:
             failed += 1

@@ -1,10 +1,10 @@
 """Pages: people."""
 import csv
 import io
-from datetime import datetime
 from decimal import Decimal
 from flask import flash, jsonify, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
+from foxdesk.clock import utcnow
 from foxdesk.core import GOOGLE_SYNC_ENABLED, app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
@@ -353,7 +353,7 @@ def admin_person_google_sync(person_id):
     try:
         info = sync_person_from_google(person.email)
         person.google_org_unit = info.get('org_unit')
-        person.google_last_sync_at = datetime.utcnow()
+        person.google_last_sync_at = utcnow()
         db.session.commit()
         flash(f'Synced {person.full_name} from Google.', 'success')
     except LookupError as e:

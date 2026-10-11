@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from flask import abort, flash, redirect, render_template, request, session, url_for
 
+from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, EMAIL_ENABLED, app, db
 from foxdesk.models import AssetRegistry, Incident, Ticket, TicketCategory, TicketComment
 from foxdesk.services.features import feature_enabled
@@ -61,7 +62,7 @@ def portal_home():
 
 def _payment_note():
     from foxdesk.models import PortalSettings
-    row = PortalSettings.query.get(1)
+    row = db.session.get(PortalSettings, 1)
     return (row.payment_note if row else None) or 'Pay at your school\'s front office.'
 
 
@@ -197,7 +198,7 @@ def portal_ticket(ticket_id):
     v = _require_viewer()
     if not v:
         return redirect(url_for('portal_home'))
-    ticket = Ticket.query.get_or_404(ticket_id)
+    ticket = db.get_or_404(Ticket, ticket_id)
     if not may_see_ticket(v, ticket):
         abort(404)
     if request.method == 'POST':
@@ -207,8 +208,7 @@ def portal_ticket(ticket_id):
                                          author_label=f'{v["person"].full_name} (portal)'))
             if ticket.status in ('resolved', 'closed'):
                 ticket.status, ticket.resolved_at = 'open', None
-            from datetime import datetime
-            ticket.updated_at = datetime.utcnow()
+            ticket.updated_at = utcnow()
             db.session.commit()
             flash('Sent to the help desk.', 'success')
         return redirect(url_for('portal_ticket', ticket_id=ticket.id))
@@ -223,7 +223,7 @@ def portal_pay(incident_id):
     v = _require_viewer()
     if not v:
         return redirect(url_for('portal_home'))
-    incident = Incident.query.get_or_404(incident_id)
+    incident = db.get_or_404(Incident, incident_id)
     if not may_pay(v, incident) or not _payments_on():
         abort(404)
     try:

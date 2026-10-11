@@ -12,10 +12,11 @@ serials) are remembered too, so they aren't asked about every night.
 A device is looked up again after RECHECK_DAYS (warranties get extended).
 """
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import requests
 
+from foxdesk.clock import utcnow
 from foxdesk.core import DELL_CLIENT_ID, DELL_CLIENT_SECRET, db, logger
 from foxdesk.models import AssetRegistry, DeviceRecord, WarrantySettings
 from foxdesk.services.auth import _log_activity
@@ -35,7 +36,7 @@ class WarrantyError(Exception):
 
 
 def warranty_settings():
-    row = WarrantySettings.query.get(1)
+    row = db.session.get(WarrantySettings, 1)
     if row is None:
         row = WarrantySettings(id=1)
         db.session.add(row)
@@ -45,7 +46,7 @@ def warranty_settings():
 
 def dell_credentials():
     """(client_id, client_secret, sources) — saved on the page, else .env."""
-    row = WarrantySettings.query.get(1)
+    row = db.session.get(WarrantySettings, 1)
     saved_secret = decrypt_secret(row.dell_client_secret, SECRET_PURPOSE) if row and row.dell_client_secret else None
     client_id = (row.dell_client_id if row else None) or DELL_CLIENT_ID
     secret = saved_secret or DELL_CLIENT_SECRET
@@ -137,7 +138,7 @@ def fetch_warranties(token, tags):
 
 def candidates(force=False):
     """Registry rows with a Dell-style service tag that are due a lookup."""
-    now = datetime.utcnow()
+    now = utcnow()
     last = {r.registry_id: r for r in DeviceRecord.query.filter_by(source='dell') if r.registry_id}
     due = []
     for row in AssetRegistry.query.filter(AssetRegistry.serial_number.isnot(None)).order_by(AssetRegistry.id):
@@ -190,7 +191,7 @@ def run_dell_lookup(limit=None, force=False):
             batch = rows[i:i + BATCH]
             by_tag = {r.serial_number.strip().upper(): r for r in batch}
             results = fetch_warranties(token, list(by_tag))
-            now = datetime.utcnow()
+            now = utcnow()
             seen = set()
             for info in results:
                 row = by_tag.get(info['tag'])
@@ -203,7 +204,7 @@ def run_dell_lookup(limit=None, force=False):
             db.session.commit()
     summary['remaining'] = remaining_before - summary['checked']
     settings = warranty_settings()
-    settings.last_run_at, settings.last_summary, settings.last_error = datetime.utcnow(), summary, None
+    settings.last_run_at, settings.last_summary, settings.last_error = utcnow(), summary, None
     _log_activity('warranty_lookup', 'Dell warranty lookup: ' + describe_summary(summary))
     db.session.commit()
     logger.info('Dell warranty lookup: %s', summary)

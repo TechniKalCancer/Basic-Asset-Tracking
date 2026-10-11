@@ -1,8 +1,9 @@
 """Template globals, filters, navigation and the Settings hub listing."""
 import os
-from datetime import date, datetime
+from datetime import date
 from flask import request, session
 from markupsafe import Markup, escape
+from foxdesk.clock import utcnow
 from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
 from foxdesk.integrations.active_directory import short_dn
 from foxdesk.services.features import feature_enabled, feature_switch
@@ -241,7 +242,7 @@ def _ago_filter(value):
     timestamp when scanning a list for what's recent."""
     if not value:
         return '—'
-    seconds = max(0, int((datetime.utcnow() - value).total_seconds()))
+    seconds = max(0, int((utcnow() - value).total_seconds()))
     if seconds < 3600:
         return f'{max(1, seconds // 60)}m ago'
     if seconds < 86400:

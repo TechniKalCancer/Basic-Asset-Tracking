@@ -12,11 +12,12 @@ flags) are checked by run_scheduled() from the background loop, and fire
 once per subject per rule — enforced by a unique (rule, dedupe_key) run
 row, so several gunicorn workers checking at once can't double-fire.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from flask import g, has_request_context
 from sqlalchemy.exc import IntegrityError
 
+from foxdesk.clock import utcnow
 from foxdesk.core import db, logger
 from foxdesk.models import (
     ActivityLog, AssetRegistry, AssignmentHistory, AutomationRule, AutomationRun, Incident, LoanerCheckout,
@@ -126,7 +127,7 @@ def run_rule(rule, ctx, dry_run=False, dedupe_key=None):
     run.results = results
     run.status = 'error' if any(r['status'] == 'error' for r in results) else 'ran'
     rule.run_count = (rule.run_count or 0) + 1
-    rule.last_run_at = datetime.utcnow()
+    rule.last_run_at = utcnow()
     db.session.add(ActivityLog(actor_type='system', actor_label=f'Automation: {rule.name}'[:160],
                                action='automation_run', site_id=_subject_site(facts),
                                ticket_id=ctx['ticket'].id if ctx.get('ticket') else None,

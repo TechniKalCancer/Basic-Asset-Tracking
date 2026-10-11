@@ -170,7 +170,7 @@ def admin_part_use():
     part = _scoped_parts().filter_by(id=request.form.get('part_id', type=int), is_active=True).first()
     repair = ticket = None
     if request.form.get('repair_id', type=int):
-        repair = Repair.query.get_or_404(request.form.get('repair_id', type=int))
+        repair = db.get_or_404(Repair, request.form.get('repair_id', type=int))
         _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=repair.asset_tag).first_or_404()
         back = url_for('admin_repair_detail', repair_id=repair.id)
     elif request.form.get('ticket_id', type=int):

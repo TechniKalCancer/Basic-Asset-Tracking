@@ -1,6 +1,7 @@
 """Pages: loaners."""
 from datetime import datetime
 from flask import flash, jsonify, redirect, render_template, request, url_for
+from foxdesk.clock import utcnow
 from foxdesk.core import EMAIL_ENABLED, app, db, logger
 from foxdesk.models import Asset, AssetRegistry, LoanerCheckout, Person, Site
 from foxdesk.services.util import resolve_scan
@@ -78,7 +79,7 @@ def admin_loaners():
         sort = 'asset_tag'
     if sort_dir not in ('asc', 'desc'):
         sort_dir = 'asc'
-    today = datetime.utcnow().date()
+    today = utcnow().date()
 
     query = _scope_registry(AssetRegistry.query, site_ids).filter_by(is_loaner=True)
     if search:
@@ -117,7 +118,7 @@ def admin_loaners():
     overdue_count = len(_overdue_loaners(site_ids))
     return render_template('admin_loaners.html', loaner_rows=loaner_rows, open_checkouts=open_checkouts,
                            overdue_count=overdue_count, email_enabled=EMAIL_ENABLED,
-                           today=datetime.utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)
+                           today=utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)
 
 
 @app.route('/admin/collection')
@@ -170,7 +171,7 @@ def admin_collection():
         open_loaners = loaner_query.order_by(LoanerCheckout.checked_out_at).all()
 
     return render_template('admin_collection.html', assigned_rows=assigned_rows, open_loaners=open_loaners,
-                           now=datetime.utcnow().date(), search=search)
+                           now=utcnow().date(), search=search)
 
 
 @app.route('/admin/loaners/send_reminders', methods=['POST'])
@@ -214,10 +215,10 @@ def admin_loaners_email_selected():
             .filter(AssetRegistry.site_id.in_(site_ids))
     rows = query.all()
 
-    now = datetime.utcnow()
+    now = utcnow()
     sent = failed = skipped = 0
     for row in rows:
-        person = Person.query.get(row.person_id) if row.person_id else None
+        person = db.session.get(Person, row.person_id) if row.person_id else None
         if not person:
             skipped += 1
             continue

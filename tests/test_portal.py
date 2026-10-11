@@ -1,11 +1,12 @@
 """The portal (students/staff and parents), paying fees online, QR device links, and the refresh forecast."""
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from flask import g
 
 from conftest import A, patch_everywhere
+from foxdesk.clock import utcnow
 
 
 def turn_on(*keys):
@@ -62,7 +63,7 @@ def test_email_link_sign_in(anon_client, make, sent_emails):
     assert b'expired or was already used' in r.data, 'links work once'
 
     anon_client.post('/my/login', data={'email': 'ana@students.org'})
-    A.PortalLogin.query.update({'created_at': datetime.utcnow() - timedelta(minutes=30)})
+    A.PortalLogin.query.update({'created_at': utcnow() - timedelta(minutes=30)})
     A.db.session.commit()
     assert b'expired' in anon_client.get(link_from(sent_emails), follow_redirects=True).data
     for _ in range(3):
@@ -105,7 +106,7 @@ def test_report_and_ticket_privacy(anon_client, make, sent_emails):
     page = anon_client.get(f'/my/tickets/{t.id}').get_data(as_text=True)
     assert 'We ordered a screen' in page and 'INTERNAL NOTE' not in page
     anon_client.post(f'/my/tickets/{t.id}', data={'body': 'Thanks!'})
-    t = A.Ticket.query.get(t.id)
+    t = A.db.session.get(A.Ticket, t.id)
     assert t.status == 'open' and A.TicketComment.query.filter_by(ticket_id=t.id, from_requester=True).one().body == 'Thanks!'
     assert anon_client.get(f'/my/tickets/{theirs.id}').status_code == 404
 
@@ -128,7 +129,7 @@ def test_parent_sees_child_and_pays_online(client, anon_client, make, sent_email
     assert b'Stripe secret key' in r.data
     client.post('/admin/portal', data={'stripe_secret_key': 'sk_test_notreal', 'payment_note': 'Pay at the office'})
     g.pop('_feature_overrides', None)
-    assert A.feature_enabled('online_payments') and 'sk_test_notreal' not in A.PortalSettings.query.get(1).stripe_secret_key
+    assert A.feature_enabled('online_payments') and 'sk_test_notreal' not in A.db.session.get(A.PortalSettings, 1).stripe_secret_key
 
     stripe = FakeStripe(paid_cents=4500)
     patch_everywhere(monkeypatch, 'requests', type('R', (), {'request': staticmethod(stripe),
@@ -140,7 +141,7 @@ def test_parent_sees_child_and_pays_online(client, anon_client, make, sent_email
     assert sent['line_items[0][price_data][unit_amount]'] == 4500 and sent['customer_email'] == 'mom@home.org'
     r = anon_client.get('/my/paid?session_id=cs_test_1', follow_redirects=True)
     assert b'Payment received: $45.00' in r.data
-    assert A.Incident.query.get(fee.id).paid_at and A.FeePayment.query.one().status == 'paid'
+    assert A.db.session.get(A.Incident, fee.id).paid_at and A.FeePayment.query.one().status == 'paid'
     assert A.ActivityLog.query.filter_by(action='fee_paid').count() == 1
 
 
@@ -157,7 +158,7 @@ def test_wrong_amount_is_never_marked_paid(client, anon_client, make, sent_email
     sign_in(anon_client, 'mom@home.org', sent_emails)
     anon_client.post(f'/my/pay/{fee.id}')
     A.reconcile_pending()
-    assert A.FeePayment.query.one().status == 'review' and A.Incident.query.get(fee.id).paid_at is None
+    assert A.FeePayment.query.one().status == 'review' and A.db.session.get(A.Incident, fee.id).paid_at is None
 
 
 def test_portal_google_sign_in(client, anon_client, make, monkeypatch):

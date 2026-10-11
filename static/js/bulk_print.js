@@ -76,7 +76,7 @@
     }
 
     // Prints one row (and optionally its charger label) then recurses to the
-    // next, with a short delay between jobs so the spooler isn't hammered.
+    // next, with a short delay between jobs so the print spooler isn't flooded.
     function printQueue(rows, printerName, includeCharger, index) {
         if (index >= rows.length) {
             progressEl.textContent = 'Done — printed ' + rows.length + ' label' +

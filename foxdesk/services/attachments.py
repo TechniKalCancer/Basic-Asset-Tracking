@@ -83,7 +83,7 @@ def _attachment_owner_in_scope(owner_type, owner_id):
         return _scope_tickets(Ticket.query, site_ids).filter_by(id=owner_id).first()
     if owner_type == 'repair':
         return _scope_repairs(Repair.query, site_ids).filter_by(id=owner_id).first()
-    incident = Incident.query.get(owner_id)
+    incident = db.session.get(Incident, owner_id)
     if incident and site_ids is not None:
         in_scope = _scope_registry(AssetRegistry.query, site_ids).filter_by(asset_tag=incident.asset_tag).first()
         return incident if in_scope else None

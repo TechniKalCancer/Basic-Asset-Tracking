@@ -2,9 +2,10 @@
 summaries of a period (yesterday, last week, last month), for one school or
 the whole district."""
 from collections import Counter, OrderedDict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
+from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, db
 from foxdesk.models import (
     Asset, AssetRegistry, AssignmentHistory, Incident, LoanerCheckout, Part, Repair, Site, Ticket,
@@ -23,7 +24,7 @@ REPAIR_LONG_DAYS = 14
 def _app_name():
     try:
         from foxdesk.models import BrandingSettings
-        row = BrandingSettings.query.get(1)
+        row = db.session.get(BrandingSettings, 1)
         return (row.app_name if row and row.app_name else None) or 'FoxDesk'
     except Exception:
         return 'FoxDesk'
@@ -52,7 +53,7 @@ def _scoped(query, model, site_id):
 
 def build_report(kind, start, end, site_id=None, period_label=''):
     """(subject, body) for one report over [start, end) — naive UTC datetimes."""
-    site = Site.query.get(site_id) if site_id else None
+    site = db.session.get(Site, site_id) if site_id else None
     where = site.name if site else 'all schools'
     title = REPORTS.get(kind, kind).split(':')[0]
     subject = f'{_app_name()} {title.lower()}, {period_label} ({where})'
@@ -65,7 +66,7 @@ def build_report(kind, start, end, site_id=None, period_label=''):
 
 
 def _summary(start, end, site_id):
-    now = datetime.utcnow()
+    now = utcnow()
     t = _scoped(Ticket.query, Ticket, site_id)
     opened = t.filter(Ticket.created_at >= start, Ticket.created_at < end).count()
     resolved = t.filter(Ticket.resolved_at >= start, Ticket.resolved_at < end).count()
@@ -123,7 +124,7 @@ def _summary(start, end, site_id):
 
 
 def _overdue(start, end, site_id):
-    today = datetime.utcnow().date()
+    today = utcnow().date()
     lines = []
     if feature_enabled('loaners'):
         loans = (_scoped(LoanerCheckout.query, LoanerCheckout, site_id)
@@ -132,11 +133,11 @@ def _overdue(start, end, site_id):
         lines += [f'OVERDUE LOANERS ({len(loans)})'] + _or_none(
             [f'  {l.asset_tag}  {l.person_name}, {(today - l.due_date).days} days overdue' for l in loans[:100]]) + ['']
     if feature_enabled('repairs'):
-        cutoff = datetime.utcnow() - timedelta(days=REPAIR_LONG_DAYS)
+        cutoff = utcnow() - timedelta(days=REPAIR_LONG_DAYS)
         reps = (_scoped(Repair.query, Repair, site_id).filter(Repair.returned_at.is_(None), Repair.sent_at <= cutoff)
                 .order_by(Repair.sent_at).all())
         lines += [f'REPAIRS OUT {REPAIR_LONG_DAYS}+ DAYS ({len(reps)})'] + _or_none(
-            [f'  {r.asset_tag}  {(datetime.utcnow() - r.sent_at).days} days'
+            [f'  {r.asset_tag}  {(utcnow() - r.sent_at).days} days'
              + (f', ticket #{r.ticket_id}' if r.ticket_id else '') for r in reps[:100]]) + ['']
     due = (_scoped(AssignmentHistory.query, AssignmentHistory, site_id)
            .filter(AssignmentHistory.unassigned_at.is_(None), AssignmentHistory.due_date < today)
@@ -146,7 +147,7 @@ def _overdue(start, end, site_id):
 
 
 def _tickets(start, end, site_id):
-    now = datetime.utcnow()
+    now = utcnow()
     order = {'urgent': 0, 'high': 1, 'normal': 2, 'low': 3}
     tickets = (_scoped(Ticket.query, Ticket, site_id).filter(Ticket.status.in_(('open', 'in_progress'))).all())
     tickets.sort(key=lambda t: (order.get(t.priority, 9), t.created_at))

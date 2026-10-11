@@ -81,12 +81,12 @@ def _backfill_identities():
       gets a 'google' account keyed by email (the sync re-keys nothing; it
       matches this row by email on its next run)."""
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
     conn = op.get_bind()
     people = conn.execute(sa.text(
         'SELECT id, email, custom_fields, google_org_unit, google_last_sync_at FROM person')).fetchall()
     ids = {row[0] for row in people}
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows, seen = [], set()
     for pid, email, custom, org_unit, synced_at in people:
         email = (email or '').strip().lower()

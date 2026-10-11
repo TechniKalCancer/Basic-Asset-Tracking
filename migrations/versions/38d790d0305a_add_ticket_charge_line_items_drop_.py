@@ -5,7 +5,7 @@ Revises: ffa09543e108
 Create Date: 2026-08-20 12:53:26.364609
 
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from alembic import op
 import sqlalchemy as sa
@@ -55,7 +55,7 @@ def upgrade():
         sa.column('created_at', sa.DateTime),
     )
     conn = op.get_bind()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = conn.execute(
         sa.select(ticket.c.id, ticket.c.fee_amount, ticket.c.paid_at, ticket_category.c.name)
         .select_from(ticket.outerjoin(ticket_category, ticket_category.c.id == ticket.c.category_id))

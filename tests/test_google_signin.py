@@ -102,7 +102,7 @@ def test_settings_page_and_user_emails(client, monkeypatch):
     assert A.redirect_uri('http://10.16.100.105:8081/') == 'https://assets.fcmiddle.net/auth/google/callback'
 
     set_up_google(client)
-    row = A.SigninSettings.query.get(1)
+    row = A.db.session.get(A.SigninSettings, 1)
     assert 'GOCSPX-not-real' not in row.google_client_secret and A.google_config()['secret'] == 'GOCSPX-not-real'
     r = client.post('/admin/signin/google', data={'client_id': 'x', 'domains': 'not a domain'}, follow_redirects=True)
     assert b'should look like' in r.data
@@ -110,9 +110,9 @@ def test_settings_page_and_user_emails(client, monkeypatch):
     first = staff()
     other = staff('ajones', None)
     r = client.post(f'/admin/users/{other.id}/edit', data={'email': 'JSMITH@fchs.net', 'is_active': 'on'}, follow_redirects=True)
-    assert b'already used by' in r.data and A.User.query.get(other.id).email is None
+    assert b'already used by' in r.data and A.db.session.get(A.User, other.id).email is None
     client.post(f'/admin/users/{other.id}/edit', data={'email': 'AJones@fchs.net', 'is_active': 'on'})
-    assert A.User.query.get(other.id).email == 'ajones@fchs.net' and first.email == 'jsmith@fchs.net'
+    assert A.db.session.get(A.User, other.id).email == 'ajones@fchs.net' and first.email == 'jsmith@fchs.net'
 
 
 def test_google_button_hidden_until_set_up(anon_client):

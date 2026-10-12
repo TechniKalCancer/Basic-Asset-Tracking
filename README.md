@@ -12,8 +12,6 @@ the one place staff go to check a device out, open a ticket, or find out who has
 
 ## Quickstart (5 minutes)
 
-FoxDesk is designed to be the district's single in-house source of truth for hardware lifecycle, repairs, tickets, and user assignment — and it is intentionally vendor-agnostic so one deployment can cover a mixed Dell/Lenovo/HP fleet without forcing the district into a single OEM workflow. Device records normalize through a shared vendor layer so future integrations can layer in warranty checks, support portals, and serial-based lifecycle logic without spreading brand-specific rules across the app.
-
 The fastest way to run this — no build step, just the published image:
 
 ```sh
@@ -632,6 +630,21 @@ screen Internal) in Google Cloud Console, with the redirect URI the Sign-in page
 accepts `https://` on a public domain name, so set `APP_URL` to that address (it can resolve to the
 server only inside your network). Once staff sign in with their own accounts, turn off the **shared
 admin password** on the same page; `ALLOW_SHARED_PASSWORD=1` in `.env` turns it back on if needed.
+
+## Vendors
+
+`foxdesk/integrations/vendors.py` is one catalog of the makers K-12 districts buy from — devices
+(Dell, HP, Lenovo, Apple, Acer/AOpen, ASUS, Google, Microsoft, Samsung, CTL, Dynabook, Panasonic),
+classroom AV (Promethean, SMART, Newline, Boxlight/Clevertouch, ViewSonic, Epson, BenQ, ELMO, …),
+printers (Kyocera, Canon, Brother, Xerox, Ricoh, Konica Minolta, Lexmark, DYMO, Zebra), network
+(Cisco/Meraki, HPE/Aruba, Ruckus/Brocade, Ubiquiti, Juniper, Extreme, Fortinet, Palo Alto,
+SonicWall, NETGEAR, TP-Link), servers, storage and power (Supermicro, Synology, QNAP, NetApp, APC,
+Eaton, CyberPower, Tripp Lite), phones (Yealink, Poly, Grandstream), security (Axis, Verkada,
+Hanwha) and charging carts — with the spellings each one shows up under ("Dell Inc.", "ASUSTeK
+COMPUTER INC.", "Dell Chromebook 3120"). The Device Models form suggests these names and saves a
+known maker under one name. Integrations use it to tell who made a device: a named maker always
+wins, an unknown maker stays unknown, and the serial's shape only counts for 7-character Dell
+service tags.
 
 ## Purchase & Warranty Tracking
 

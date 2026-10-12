@@ -5,6 +5,7 @@ from flask import flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from foxdesk.clock import utcnow
 from foxdesk.core import app, db
+from foxdesk.integrations.vendors import vendor_name, vendor_names
 from foxdesk.models import (
     ASSET_STATUSES,
     Asset,
@@ -411,6 +412,7 @@ def admin_device_models():
 def admin_device_model_new():
     if request.method == 'POST':
         manufacturer = request.form.get('manufacturer', '').strip()
+        manufacturer = vendor_name(manufacturer) or manufacturer  # "DELL INC." and "Dell" are one maker
         model_name = request.form.get('model_name', '').strip()
         device_type = request.form.get('device_type', 'chromebook').strip()
         device_type = device_type if device_type in DEVICE_TYPES else 'chromebook'
@@ -418,11 +420,11 @@ def admin_device_model_new():
 
         if not manufacturer or not model_name:
             flash('Manufacturer and model name are required.', 'error')
-            return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, vendors=vendor_names(), form=request.form)
         if DeviceModel.query.filter(db.func.lower(DeviceModel.manufacturer) == manufacturer.lower(),
                                      db.func.lower(DeviceModel.model_name) == model_name.lower()).first():
             flash(f'"{manufacturer} {model_name}" already exists.', 'error')
-            return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, form=request.form)
+            return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, vendors=vendor_names(), form=request.form)
 
         model = DeviceModel(manufacturer=manufacturer, model_name=model_name, device_type=device_type, notes=notes)
         db.session.add(model)
@@ -431,7 +433,7 @@ def admin_device_model_new():
         flash(f'Added "{manufacturer} {model_name}".', 'success')
         return redirect(url_for('admin_device_models'))
 
-    return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, form=None)
+    return render_template('admin_device_model_form.html', model=None, device_types=DEVICE_TYPES, vendors=vendor_names(), form=None)
 
 
 @app.route('/admin/device_models/<int:model_id>/edit', methods=['GET', 'POST'])
@@ -440,6 +442,7 @@ def admin_device_model_edit(model_id):
     model = db.get_or_404(DeviceModel, model_id)
     if request.method == 'POST':
         manufacturer = request.form.get('manufacturer', '').strip()
+        manufacturer = vendor_name(manufacturer) or manufacturer
         model_name = request.form.get('model_name', '').strip()
         device_type = request.form.get('device_type', 'chromebook').strip()
         device_type = device_type if device_type in DEVICE_TYPES else 'chromebook'
@@ -448,12 +451,12 @@ def admin_device_model_edit(model_id):
 
         if not manufacturer or not model_name:
             flash('Manufacturer and model name are required.', 'error')
-            return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, form=None)
+            return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, vendors=vendor_names(), form=None)
         if DeviceModel.query.filter(db.func.lower(DeviceModel.manufacturer) == manufacturer.lower(),
                                      db.func.lower(DeviceModel.model_name) == model_name.lower(),
                                      DeviceModel.id != model_id).first():
             flash(f'"{manufacturer} {model_name}" already exists.', 'error')
-            return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, form=None)
+            return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, vendors=vendor_names(), form=None)
 
         model.manufacturer = manufacturer
         model.model_name = model_name
@@ -465,7 +468,7 @@ def admin_device_model_edit(model_id):
         flash(f'Updated "{manufacturer} {model_name}".', 'success')
         return redirect(url_for('admin_device_models'))
 
-    return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, form=None)
+    return render_template('admin_device_model_form.html', model=model, device_types=DEVICE_TYPES, vendors=vendor_names(), form=None)
 
 
 @app.route('/admin/device_models/<int:model_id>/delete', methods=['POST'])

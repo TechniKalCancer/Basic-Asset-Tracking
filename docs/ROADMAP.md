@@ -37,7 +37,7 @@ district only sees what it uses.
 - [x] Parts inventory
 - [x] Dell warranty lookup (TechDirect API)
 - [ ] Lenovo / HP warranty lookup; warranty claims
-- [x] Shared vendor normalization layer for mixed Dell/Lenovo/HP fleets (foundation for OEM-specific integrations without spreading vendor logic through unrelated modules)
+- [x] Shared catalog of K-12 hardware vendors (devices, AV, printers, network, servers, power, phones, security) used to name who made a device
 - [x] Scheduled report emails (e.g. weekly summary per principal), as an automation trigger + action
 
 ## Phase 5b — Like Incident IQ / Manage1to1 / osTicket / Zammad

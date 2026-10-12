@@ -12,7 +12,9 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Manufacturer</label>
-      <input name="manufacturer" value="{{ (form.manufacturer if form else (model.manufacturer if model else '')) }}" placeholder="e.g. Dell" required />
+      <input name="manufacturer" list="vendorNames" autocomplete="off" value="{{ (form.manufacturer if form else (model.manufacturer if model else '')) }}" placeholder="e.g. Dell" required />
+      <datalist id="vendorNames">{% for v in vendors %}<option value="{{ v }}">{% endfor %}</datalist>
+      <span style="display:block;margin-top:.3rem;color:var(--muted);font-size:.76rem;">Known makers are saved under one name, so "DELL INC." and "Dell" don't become two.</span>
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Model Name</label>

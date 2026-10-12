@@ -1,14 +1,4 @@
-"""Connectors to outside systems (Google Workspace, KACE, vendor APIs).
-
-The repo now treats vendor-specific device metadata as a separate but shared
-concern: a district may mix Dell, Lenovo, and HP devices, and each integration
-should normalize them behind a common vendor profile instead of hard-coding
-brand-specific assumptions throughout the app.
+"""Connectors to outside systems (Google Workspace, KACE, Active Directory,
+Dell), plus the shared catalog of hardware vendors (vendors.py) they all
+use to name who made a device.
 """
-
-from foxdesk.integrations.vendors import (  # noqa: F401
-    normalize_device_identity,
-    normalize_vendor_name,
-    supported_vendors,
-    vendor_from_serial,
-)

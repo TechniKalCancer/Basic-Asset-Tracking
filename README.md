@@ -12,6 +12,8 @@ the one place staff go to check a device out, open a ticket, or find out who has
 
 ## Quickstart (5 minutes)
 
+FoxDesk is designed to be the district's single in-house source of truth for hardware lifecycle, repairs, tickets, and user assignment — and it is intentionally vendor-agnostic so one deployment can cover a mixed Dell/Lenovo/HP fleet without forcing the district into a single OEM workflow. Device records normalize through a shared vendor layer so future integrations can layer in warranty checks, support portals, and serial-based lifecycle logic without spreading brand-specific rules across the app.
+
 The fastest way to run this — no build step, just the published image:
 
 ```sh

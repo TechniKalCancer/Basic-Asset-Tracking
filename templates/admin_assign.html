@@ -1,15 +1,16 @@
 {% extends 'base.html' %}
-{% block title %}Assign {{ registry_row.asset_tag }}{% endblock %}
+{% block title %}{{ type_label(registry_row.device_type) if registry_row.is_equipment else 'Assign' }} {{ registry_row.asset_tag }}{% endblock %}
 {% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
-  <h1 style="margin:0;">Assign <code>{{ registry_row.asset_tag }}</code></h1>
+  <h1 style="margin:0;">{% if registry_row.is_equipment %}{{ type_label(registry_row.device_type) }}{% else %}Assign{% endif %} <code>{{ registry_row.asset_tag }}</code></h1>
   {% if registry_row.site %}<span class="badge badge-blue">{{ icon('site') }}{{ registry_row.site.name }}</span>{% endif %}
   {% if registry_row.is_loaner %}<span class="badge badge-yellow">{{ icon('loaner') }}Loaner</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
   {% if can('devices_manage') %}
+  {% if registry_row.is_equipment and feature('equipment') %}<a href="/admin/equipment/{{ registry_row.asset_tag|urlencode }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit Details</a>{% endif %}
   <a href="/admin/registry/{{ registry_row.asset_tag }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit Device</a>
-  {% if feature('loaners') %}
+  {% if feature('loaners') and not registry_row.is_equipment %}
   {% if not registry_row.is_loaner and asset and asset.assigned_to %}
   <button type="button" class="btn btn-ghost" disabled title="Unassign this device first before marking it a loaner.">{{ icon('loaner') }}Mark as Loaner</button>
   {% else %}
@@ -76,6 +77,27 @@
   </form>
 </div>
 
+{% if registry_row.is_equipment %}
+{% set mon = monitor_status(registry_row) %}{% set sup = support_status(registry_row) %}
+<div class="card">
+  <h2 style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">{{ icon('computer') }}Equipment
+    {% if mon %}<span class="badge {{ 'badge-green' if mon.up else 'badge-red' }}" style="font-size:.7rem;">{{ 'Up' if mon.up else 'Down' }} in LibreNMS</span>{% endif %}
+    {% if sup %}<span class="badge {{ sup.css }}" style="font-size:.7rem;">{{ sup.text }}</span>{% endif %}</h2>
+  <table style="width:100%;">
+    <tr><td style="color:var(--muted);width:150px;">Model</td><td>{{ registry_row.device_model.full_name if registry_row.device_model else (registry_row.description or '—') }}</td></tr>
+    {% if registry_row.device_model and registry_row.description %}<tr><td style="color:var(--muted);">Description</td><td>{{ registry_row.description }}</td></tr>{% endif %}
+    <tr><td style="color:var(--muted);">Where</td><td>{{ registry_row.site.name if registry_row.site else '—' }}{% if registry_row.location %} › {{ registry_row.location.path }}{% endif %}{% if registry_row.rack_position %} · {{ registry_row.rack_position }}{% endif %}</td></tr>
+    <tr><td style="color:var(--muted);">Hostname</td><td>{{ registry_row.hostname or '—' }}</td></tr>
+    <tr><td style="color:var(--muted);">IP address</td><td>{% if registry_row.management_url %}<a class="tag-link" href="{{ registry_row.management_url }}" target="_blank" rel="noopener">{{ registry_row.ip_address or registry_row.management_url }}</a>{% else %}{{ registry_row.ip_address or '—' }}{% endif %}</td></tr>
+    {% if registry_row.mac_address %}<tr><td style="color:var(--muted);">MAC address</td><td><code>{{ registry_row.mac_address }}</code></td></tr>{% endif %}
+    <tr><td style="color:var(--muted);">Firmware</td><td>{{ registry_row.firmware or '—' }}</td></tr>
+    {% if registry_row.support_ends %}<tr><td style="color:var(--muted);">Support contract</td><td>until {{ registry_row.support_ends }}</td></tr>{% endif %}
+    {% if registry_row.end_of_support %}<tr><td style="color:var(--muted);">End of support</td><td>{{ registry_row.end_of_support }}</td></tr>{% endif %}
+    {% if registry_row.funding_source or registry_row.erate_frn %}<tr><td style="color:var(--muted);">Funding</td><td>{{ registry_row.funding_source or '' }}{% if registry_row.erate_frn %} · FRN {{ registry_row.erate_frn }}{% endif %}{% if registry_row.funding_year %} · {{ registry_row.funding_year }}{% endif %}</td></tr>{% endif %}
+    {% if mon %}<tr><td style="color:var(--muted);">LibreNMS</td><td>{% if mon.seen %}polled {{ mon.seen|ago }} · {% endif %}{% for r in registry_row.records if r.source == 'librenms' %}<a class="tag-link" href="{{ (r.raw or {}).get('url', '#') }}" target="_blank" rel="noopener">open in LibreNMS</a>{% endfor %}</td></tr>{% endif %}
+  </table>
+</div>
+{% else %}
 <div class="card">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     {{ registry_row.description or 'No description on file.' }}
@@ -184,6 +206,8 @@
   {% endif %}
 </div>
 
+{% endif %}
+
 <div class="card">
   <h2>{{ icon('sync') }}Check-In/Out Log</h2>
   {% if events %}
@@ -212,7 +236,7 @@
   {% endif %}
 </div>
 
-{% if feature('incidents') %}
+{% if feature('incidents') and not registry_row.is_equipment %}
 <div class="card">
   <div style="display:flex;align-items:center;gap:.6rem;">
     <h2 style="margin:0;">{{ icon('repair') }}Incidents / Damage Reports</h2>

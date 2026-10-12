@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}Spot check{% endblock %}
+{% block content %}
+<div class="sc-head">
+  <h1 style="margin:0;">{{ icon('scan') }}Spot check</h1>
+  <span class="badge badge-blue" id="scCount">{{ checked }} checked</span>
+  <span class="badge {{ 'badge-red' if problems_today else 'badge-neutral' }}" id="scProblems">{{ problems_today }} problem{{ 's' if problems_today != 1 }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/spot_check/history" class="btn btn-ghost">History</a>
+</div>
+<p class="sc-muted sc-intro">Scan a device's label (or its serial barcode), then confirm who has it or scan their ID card.
+  Or scan the ID card first, then the device.</p>
+
+<div class="sc-grid">
+  <div class="card sc-camera">
+    <div class="sc-frame" id="scFrame" hidden>
+      <video id="scVideo" playsinline muted></video>
+      <div class="sc-reticle"></div>
+    </div>
+    <p class="sc-status" id="scStatus" role="status" aria-live="polite">Camera is off.</p>
+    <div class="sc-row">
+      <button type="button" class="btn btn-primary" id="scStart">{{ icon('camera') }}Start camera</button>
+      <button type="button" class="btn btn-ghost" id="scStop" hidden>Stop</button>
+      <button type="button" class="btn btn-ghost" id="scTorch" hidden aria-pressed="false">Flashlight</button>
+    </div>
+    <form class="sc-row sc-manual" id="scManual" autocomplete="off">
+      <label for="scCode" class="sr-only">Tag, serial or ID number</label>
+      <input id="scCode" data-scan="off" placeholder="Or type a tag, serial or student ID" inputmode="text">
+      <button type="submit" class="btn btn-ghost">Look up</button>
+    </form>
+  </div>
+
+  <div class="card sc-result" id="scResult" aria-live="polite">
+    <p class="sc-muted" style="margin:0;">Waiting for the first scan.</p>
+  </div>
+</div>
+
+{% if open_problems %}
+<h2 class="sc-h2">Open problems</h2>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Device</th><th>Found</th><th>Had it</th><th>Should have it</th><th></th></tr></thead>
+    <tbody>
+    {% for c in open_problems %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ c.asset_tag|urlencode }}/assign">{{ c.asset_tag }}</a><div class="sc-muted">{{ c.created_at|ago }} · {{ c.checked_by }}</div></td>
+        <td><span class="badge {{ 'badge-red' if c.result == 'wrong_student' else 'badge-yellow' }}">{{ c.result_label }}</span></td>
+        <td>{{ c.found.full_name if c.found else '—' }}</td>
+        <td>{{ c.expected.full_name if c.expected else '—' }}</td>
+        <td style="text-align:right;">
+          <form method="POST" action="/admin/spot_check/{{ c.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-small">Resolved</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script src="/static/js/scanner.js"></script>
+<script src="/static/js/spot_check.js"></script>
+<style>
+  .sc-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .4rem; }
+  .sc-intro { margin: 0 0 1rem; max-width: 70ch; }
+  .sc-muted { color: var(--muted); font-size: .85rem; }
+  .sc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 1rem; align-items: start; margin-bottom: 1.5rem; }
+  .sc-grid .card { margin: 0; }
+  .sc-frame { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden; background: #000; }
+  .sc-frame[hidden] { display: none; }
+  .sc-frame video { width: 100%; height: 100%; object-fit: cover; }
+  .sc-reticle { position: absolute; left: 12%; right: 12%; top: 30%; bottom: 30%; border: 2px solid var(--accent); border-radius: 8px;
+                box-shadow: 0 0 0 9999px rgba(0,0,0,.3); pointer-events: none; }
+  .sc-status { margin: .7rem 0; font-size: .9rem; }
+  .sc-row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .sc-row [hidden] { display: none; }
+  .sc-manual { margin-top: .8rem; }
+  .sc-manual input { flex: 1; min-width: 0; }
+  .sc-result { min-height: 180px; }
+  .sc-tag { font-size: 1.5rem; font-weight: 700; letter-spacing: .02em; margin: 0; }
+  .sc-who { font-size: 1.25rem; font-weight: 600; margin: .2rem 0; }
+  .sc-actions { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem; }
+  .sc-actions .btn { width: 100%; justify-content: center; min-height: 48px; font-size: 1rem; }
+  .sc-banner { border-radius: 10px; padding: 1rem; margin-bottom: .8rem; }
+  .sc-banner h2 { margin: 0 0 .3rem; font-size: 1.25rem; }
+  .sc-ok { background: #14532d55; border: 1px solid var(--success); }
+  .sc-bad { background: #7f1d1d55; border: 1px solid var(--danger); }
+  .sc-warn { background: #78350f55; border: 1px solid var(--warning); }
+  .sc-hint { font-size: .85rem; padding: .45rem .7rem; border-radius: 6px; background: var(--surface2); margin-top: .6rem; }
+  .sc-people { display: flex; flex-direction: column; gap: .3rem; margin-top: .5rem; }
+  .sc-people button { text-align: left; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+                      border-radius: 8px; padding: .6rem .8rem; font: inherit; cursor: pointer; min-height: 44px; }
+  .sc-people button:hover, .sc-people button:focus-visible { border-color: var(--accent); }
+  .sc-h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+  .btn-small { padding: .25rem .6rem; font-size: .8rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

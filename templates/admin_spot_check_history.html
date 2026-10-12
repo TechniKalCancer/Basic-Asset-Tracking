@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}Spot check history{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('history') }}Spot check history</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/spot_check/history/export?show={{ show }}&days={{ days }}{% if site_id %}&site_id={{ site_id }}{% endif %}" class="btn btn-ghost">{{ icon('download') }}Export CSV</a>
+  <a href="/admin/spot_check" class="btn btn-primary">{{ icon('scan') }}Spot check</a>
+</div>
+
+<div class="sh-tiles">
+  {% set total = totals.values()|sum %}
+  <div class="card sh-tile"><div class="sh-label">Checked, last {{ days }} days</div><div class="sh-value">{{ '{:,}'.format(total) }}</div></div>
+  <div class="card sh-tile"><div class="sh-label">Right student</div><div class="sh-value">{{ '{:,}'.format(totals.get('match', 0)) }}</div>
+    {% if total %}<div class="sh-note">{{ (totals.get('match', 0) * 100 / total)|round|int }}% of checks</div>{% endif %}</div>
+  <div class="card sh-tile"><div class="sh-label">Someone else's device</div><div class="sh-value">{{ '{:,}'.format(totals.get('wrong_student', 0)) }}</div></div>
+  <div class="card sh-tile"><div class="sh-label">Assigned to no one</div><div class="sh-value">{{ '{:,}'.format(totals.get('unassigned_in_use', 0)) }}</div></div>
+</div>
+
+<form method="GET" class="sh-filters">
+  <select name="show" onchange="this.form.submit()" aria-label="Show">
+    <option value="problems" {{ 'selected' if show == 'problems' }}>Open problems</option>
+    <option value="all" {{ 'selected' if show == 'all' }}>Every check</option>
+    {% for key, label in results.items() %}<option value="{{ key }}" {{ 'selected' if show == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="days" onchange="this.form.submit()" aria-label="Period">
+    {% for d, label in [(1, 'Today'), (7, 'Last 7 days'), (30, 'Last 30 days'), (90, 'Last 90 days'), (365, 'Last year')] %}
+    <option value="{{ d }}" {{ 'selected' if days == d }}>{{ label }}</option>{% endfor %}
+  </select>
+  {% if sites|length > 1 %}
+  <select name="site_id" onchange="this.form.submit()" aria-label="School">
+    <option value="">All schools</option>
+    {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if site_id == s.id }}>{{ s.name }}</option>{% endfor %}
+  </select>
+  {% endif %}
+</form>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>When</th><th>Device</th><th>Result</th><th>Had it</th><th>Should have it</th><th>Checked by</th><th></th></tr></thead>
+    <tbody>
+    {% for c in checks %}
+      <tr>
+        <td style="white-space:nowrap;">{{ c.created_at|ago }}</td>
+        <td><a class="tag-link" href="/admin/assets/{{ c.asset_tag|urlencode }}/assign">{{ c.asset_tag }}</a></td>
+        <td><span class="badge {{ {'match': 'badge-green', 'wrong_student': 'badge-red'}.get(c.result, 'badge-yellow') }}">{{ c.result_label }}</span>
+          {% if c.resolved_at %}<div class="sh-note">resolved by {{ c.resolved_by }}</div>{% endif %}</td>
+        <td>{{ c.found.full_name if c.found else '—' }}</td>
+        <td>{{ c.expected.full_name if c.expected else '—' }}</td>
+        <td class="sh-note">{{ c.checked_by }}</td>
+        <td style="text-align:right;">
+          {% if c.is_problem and not c.resolved_at %}
+          <form method="POST" action="/admin/spot_check/{{ c.id }}/resolve">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-small">Resolved</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="sh-note" style="text-align:center;padding:1.5rem;">Nothing here.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .sh-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .sh-tiles .card { margin: 0; }
+  .sh-tile { padding: .9rem 1rem; }
+  .sh-label { color: var(--muted); font-size: .8rem; }
+  .sh-value { font-size: 1.6rem; font-weight: 600; margin-top: .2rem; }
+  .sh-note { color: var(--muted); font-size: .78rem; }
+  .sh-filters { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .sh-filters select { width: auto; }
+  .btn-small { padding: .25rem .6rem; font-size: .8rem; }
+</style>
+{% endblock %}

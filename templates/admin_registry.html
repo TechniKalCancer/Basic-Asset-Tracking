@@ -31,7 +31,7 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Type</label>
       <select name="device_type">
         {% for t in device_types %}
-        <option value="{{ t }}" {{ 'selected' if t == quick_device_type }}>{{ t|capitalize }}</option>
+        <option value="{{ t }}" {{ 'selected' if t == quick_device_type }}>{{ type_label(t) }}</option>
         {% endfor %}
       </select>
     </div>
@@ -71,7 +71,7 @@
   <select name="device_type" style="max-width:160px;">
     <option value="">All device types</option>
     {% for t in device_types %}
-      <option value="{{ t }}" {{ 'selected' if t == type_filter }}>{{ t|capitalize }}</option>
+      <option value="{{ t }}" {{ 'selected' if t == type_filter }}>{{ type_label(t) }}</option>
     {% endfor %}
   </select>
   <select name="warranty" style="max-width:180px;">
@@ -114,7 +114,7 @@
         <td><a href="/admin/assets/{{ row.asset_tag }}/assign" class="tag-link"><code>{{ row.asset_tag }}</code></a></td>
         <td>{{ row.serial_number or '—' }}</td>
         <td style="color:var(--muted);">{{ row.description or '—' }}</td>
-        <td style="color:var(--muted);">{{ row.device_type|capitalize }}</td>
+        <td style="color:var(--muted);">{{ type_label(row.device_type) }}</td>
         {% if current_site_ids() is none or current_site_ids()|length > 1 %}
         <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
         {% endif %}

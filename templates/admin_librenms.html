@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}LibreNMS{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('integration') }}LibreNMS</h1>
+  <span class="badge {{ 'badge-green' if config.configured else 'badge-yellow' }}">{{ 'Connected' if config.configured else 'Not connected' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/equipment" class="btn btn-ghost">Equipment</a>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p class="ln-muted" style="max-width:76ch;margin:0 0 1.2rem;">
+  Brings in the switches, access points, firewalls, UPSes, servers and printers LibreNMS monitors as equipment, matched to
+  devices you already have by serial number, then hostname. Each sync refreshes the hostname, IP, firmware and up/down
+  status; the tag, school, location, funding and support dates you set are never overwritten. Nothing is written back
+  to LibreNMS.
+</p>
+
+<form method="POST" class="card ln-form" autocomplete="off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2 class="ln-wide" style="margin:0;">Connection</h2>
+  <label>LibreNMS address <input name="url" value="{{ row.url or '' }}" placeholder="http://10.16.100.105:8000"></label>
+  <label>API token <input name="api_token" type="password" autocomplete="new-password"
+         placeholder="{{ 'Saved. Leave blank to keep it' if row.api_token else 'From LibreNMS: your user menu → API → Create token' }}">
+    {% if config.token_unreadable %}<span class="ln-warn">The saved token can't be read (the app's SECRET_KEY changed). Enter it again.</span>{% endif %}</label>
+  <label class="ln-check ln-wide"><input type="checkbox" name="verify_tls" {{ 'checked' if row.verify_tls }}> Check the HTTPS certificate (turn off for a self-signed one)</label>
+
+  <h2 class="ln-wide" style="margin:.6rem 0 0;">What to bring in</h2>
+  <fieldset class="ln-wide">
+    <legend>Equipment types</legend>
+    <div class="ln-types">
+      {% for t in types %}<label class="ln-check"><input type="checkbox" name="import_types" value="{{ t }}" {{ 'checked' if t in (row.import_types or types) }}> {{ type_label(t, true) }}</label>{% endfor %}
+    </div>
+  </fieldset>
+  <label class="ln-check ln-wide"><input type="checkbox" name="auto_add" {{ 'checked' if row.auto_add }}> Add devices FoxDesk doesn't have yet (tagged with their system name)</label>
+  <label class="ln-wide">Which school is which (one per line)
+    <textarea name="site_rules" rows="4" placeholder="10.16.0.0/16 = Fox Creek Middle&#10;10.15.0.0/16 = Fox Creek High">{{ row.site_rules or '' }}</textarea>
+    <span class="ln-help">An address range or prefix, then = and the school's name as it is under Settings → Sites. Used only for devices that don't have a school yet.</span>
+  </label>
+  <div class="ln-wide"><button type="submit" class="btn btn-primary">Save</button></div>
+</form>
+
+<div class="card">
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;">
+    <h2 style="margin:0;">Sync</h2>
+    <span class="spacer" style="flex:1;"></span>
+    <form method="POST" action="/admin/librenms/test"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-ghost" {{ 'disabled' if not config.configured }}>Test connection</button></form>
+    <form method="POST" action="/admin/librenms/sync"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary" {{ 'disabled' if not config.configured }}>Sync now</button></form>
+  </div>
+  {% if row.last_error %}<p class="ln-warn" style="margin:.8rem 0 0;">Last sync failed: {{ row.last_error }}</p>{% endif %}
+  <p class="ln-muted" style="margin:.8rem 0 0;">
+    {% if row.last_run_at %}Last synced {{ row.last_run_at|ago }}{% if summary %}: {{ summary }}{% endif %}{% else %}Not synced yet.{% endif %}
+    {{ linked }} FoxDesk device{{ 's' if linked != 1 }} linked to LibreNMS.
+    Run it on a schedule under <a href="/admin/sync_schedule">Scheduled Syncs</a>.
+  </p>
+</div>
+<style>
+  .ln-muted { color: var(--muted); font-size: .88rem; }
+  .ln-help { color: var(--muted); font-size: .76rem; }
+  .ln-warn { color: var(--warning); font-size: .85rem; }
+  .ln-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 1rem 1.2rem; }
+  .ln-form > label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .ln-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ln-form legend { color: var(--muted); font-size: .85rem; margin-bottom: .4rem; }
+  .ln-wide { grid-column: 1 / -1; }
+  .ln-check { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: .4rem !important;
+              color: var(--text) !important; cursor: pointer; }
+  .ln-check input { width: auto; }
+  .ln-types { display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; }
+  .ln-form textarea { width: 100%; resize: vertical; }
+</style>
+{% endblock %}

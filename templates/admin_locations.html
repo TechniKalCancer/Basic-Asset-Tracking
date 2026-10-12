@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% block title %}Locations{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('site') }}Locations</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/equipment" class="btn btn-ghost">← Equipment</a>
+</div>
+<p class="lc-muted" style="max-width:76ch;margin:0 0 1rem;">Buildings, rooms, network closets, racks and carts inside each school.
+  Put one inside another (Rack A in the MDF closet). The LibreNMS sync makes a location for each SNMP location it sees.</p>
+
+{% if can('devices_manage') %}
+<form method="POST" class="card lc-add">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Name <input name="name" required maxlength="120" placeholder="e.g. MDF closet"></label>
+  <label>Kind
+    <select name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select>
+  </label>
+  <label>Inside
+    <select name="parent_id">
+      <option value="">— Nothing (top level) —</option>
+      {% for loc, depth in tree %}<option value="{{ loc.id }}">{{ ('&nbsp;&nbsp;' * depth)|safe }}{{ loc.full_path if not depth else loc.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>School
+    <select name="site_id">
+      {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    <span class="lc-help">Inside another location? It takes that location's school.</span>
+  </label>
+  <div><button type="submit" class="btn btn-primary">Add location</button></div>
+</form>
+{% endif %}
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Location</th><th>Kind</th><th>School</th><th class="num">Devices</th><th></th></tr></thead>
+    <tbody>
+    {% for loc, depth in tree %}
+      <tr>
+        <td style="padding-left:{{ 0.8 + depth * 1.4 }}rem;">{% if depth %}<span class="lc-muted">↳ </span>{% endif %}
+          <a class="tag-link" href="/admin/equipment?location_id={{ loc.id }}">{{ loc.name }}</a>
+          {% if loc.notes %}<div class="lc-muted">{{ loc.notes }}</div>{% endif %}</td>
+        <td>{{ kinds.get(loc.kind, loc.kind) }}</td>
+        <td>{{ loc.site.name if loc.site else '—' }}</td>
+        <td class="num">{{ counts.get(loc.id, 0) }}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          {% if can('devices_manage') %}
+          <div class="row-menu" style="display:inline-block;">
+            <button type="button" class="btn-small" aria-label="Edit {{ loc.name }}">Edit ▾</button>
+            <div class="row-menu-items" style="min-width:260px;">
+              <form method="POST" action="/admin/locations/{{ loc.id }}" style="padding:.5rem;text-align:left;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label class="lc-field">Name <input name="name" value="{{ loc.name }}" maxlength="120"></label>
+                <label class="lc-field">Kind <select name="kind">{% for k, label in kinds.items() %}<option value="{{ k }}" {{ 'selected' if loc.kind == k }}>{{ label }}</option>{% endfor %}</select></label>
+                <label class="lc-field">Notes <input name="notes" value="{{ loc.notes or '' }}"></label>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Save</button>
+              </form>
+              <form method="POST" action="/admin/locations/{{ loc.id }}" style="padding:.5rem;border-top:1px solid var(--border);"
+                    onsubmit="return confirm('Delete {{ loc.name }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="delete">
+                <button type="submit" class="btn btn-danger" style="width:100%;">Delete</button>
+              </form>
+            </div>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="lc-muted" style="text-align:center;padding:1.5rem;">No locations yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .lc-muted { color: var(--muted); font-size: .8rem; }
+  .lc-help { color: var(--muted); font-size: .74rem; }
+  .lc-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: .8rem 1rem; align-items: end; }
+  .lc-add label, .lc-field { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .lc-field { margin-bottom: .5rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .btn-small { padding: .25rem .6rem; font-size: .8rem; }
+</style>
+{% endblock %}

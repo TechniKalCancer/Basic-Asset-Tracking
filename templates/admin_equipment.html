@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Equipment{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('computer') }}Equipment</h1>
+  <span class="badge badge-blue">{{ rows|length }} shown</span>
+  <span class="spacer" style="flex:1;"></span>
+  {% if can('devices_manage') %}<a href="/admin/equipment/new{% if args.get('type') %}?type={{ args.get('type') }}{% endif %}" class="btn btn-primary">+ Add equipment</a>{% endif %}
+  <a href="/admin/locations" class="btn btn-ghost">Locations</a>
+  <a href="/admin/equipment/erate" class="btn btn-ghost">E-rate inventory</a>
+  <a href="/admin/equipment/export?{{ request.query_string.decode() }}" class="btn btn-ghost">{{ icon('download') }}CSV</a>
+</div>
+
+<div class="eq-types" role="navigation" aria-label="Equipment type">
+  <a href="?" class="{{ 'active' if not args.get('type') }}">All <span class="badge badge-blue">{{ counts.values()|sum }}</span></a>
+  {% for t in types %}{% if counts.get(t) %}
+  <a href="?type={{ t }}" class="{{ 'active' if args.get('type') == t }}">{{ type_label(t, true) }} <span class="badge badge-blue">{{ counts[t] }}</span></a>
+  {% endif %}{% endfor %}
+</div>
+
+<form method="GET" class="eq-filters">
+  {% if args.get('type') %}<input type="hidden" name="type" value="{{ args.get('type') }}">{% endif %}
+  <input type="search" name="q" value="{{ args.get('q', '') }}" placeholder="Tag, hostname, IP, serial or model" aria-label="Search equipment">
+  {% if sites|length > 1 %}
+  <select name="site_id" onchange="this.form.submit()" aria-label="School">
+    <option value="">All schools</option>
+    {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if (args.get('site_id')|int) == s.id }}>{{ s.name }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  {% if locations %}
+  <select name="location_id" onchange="this.form.submit()" aria-label="Location">
+    <option value="">Anywhere</option>
+    {% for loc, depth in locations %}<option value="{{ loc.id }}" {{ 'selected' if (args.get('location_id')|int) == loc.id }}>{{ '  ' * depth }}{{ loc.name if depth else loc.full_path }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <select name="support" onchange="this.form.submit()" aria-label="Support">
+    <option value="">Any support</option>
+    <option value="ending" {{ 'selected' if args.get('support') == 'ending' }}>Support ends within a year</option>
+    <option value="past" {{ 'selected' if args.get('support') == 'past' }}>No longer supported</option>
+    <option value="down" {{ 'selected' if args.get('support') == 'down' }}>Down in LibreNMS</option>
+  </select>
+  <button type="submit" class="btn btn-ghost">Search</button>
+</form>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Equipment</th><th>Type</th><th>Model</th><th>Address</th><th>Where</th><th>Firmware</th><th>Support</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      {% set mon = monitor_status(r) %}{% set sup = support_status(r) %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ r.asset_tag|urlencode }}/assign">{{ r.asset_tag }}</a>
+          {% if mon %}<span class="badge {{ 'badge-green' if mon.up else 'badge-red' }}" style="font-size:.66rem;" title="LibreNMS{{ ', polled ' ~ (mon.seen|ago) if mon.seen }}">{{ 'Up' if mon.up else 'Down' }}</span>{% endif %}
+          {% if r.hostname and r.hostname|lower != r.asset_tag|lower %}<div class="eq-sub">{{ r.hostname }}</div>{% endif %}</td>
+        <td>{{ type_label(r.device_type) }}</td>
+        <td>{{ r.device_model.full_name if r.device_model else (r.description or '—') }}{% if r.serial_number %}<div class="eq-sub">{{ r.serial_number }}</div>{% endif %}</td>
+        <td>{% if r.management_url %}<a class="tag-link" href="{{ r.management_url }}" target="_blank" rel="noopener">{{ r.ip_address or 'Open' }}</a>{% else %}{{ r.ip_address or '—' }}{% endif %}</td>
+        <td>{{ r.site.name if r.site else '—' }}{% if r.location %}<div class="eq-sub">{{ r.location.path }}{% if r.rack_position %} · {{ r.rack_position }}{% endif %}</div>{% endif %}</td>
+        <td class="eq-sub">{{ r.firmware or '—' }}</td>
+        <td>{% if sup %}<span class="badge {{ sup.css }}" style="font-size:.7rem;">{{ sup.text }}</span>{% else %}<span class="eq-sub">—</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" style="text-align:center;padding:2rem;" class="eq-sub">
+        No equipment yet.{% if can('devices_manage') %} <a href="/admin/equipment/new">Add some</a>{% if is_super_admin() %}, or <a href="/admin/librenms">bring it in from LibreNMS</a>{% endif %}.{% endif %}
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .eq-types { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .8rem; }
+  .eq-types a { padding: .3rem .75rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); text-decoration: none;
+                font-size: .84rem; display: inline-flex; gap: .35rem; align-items: center; }
+  .eq-types a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .eq-filters { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .eq-filters input[type=search] { flex: 1; min-width: 200px; max-width: 340px; }
+  .eq-filters select { width: auto; max-width: 260px; }
+  .eq-sub { color: var(--muted); font-size: .78rem; }
+</style>
+{% endblock %}

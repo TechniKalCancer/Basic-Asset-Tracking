@@ -15,8 +15,8 @@ def test_manifest_service_worker_and_offline_page(anon_client, client):
     sw = anon_client.get('/sw.js')
     assert sw.headers['Service-Worker-Allowed'] == '/' and 'javascript' in sw.mimetype
     body = sw.get_data(as_text=True)
-    assert "/static/" in body and "caches.match('/offline')" in body
-    assert "'/admin" not in body, 'pages with district data are never cached'
+    assert "caches.match('/offline')" in body and 'onLine === false' in body, 'only steps in when the device is offline'
+    assert "'/admin" not in body and 'cache.put' not in body, 'pages with district data are never cached'
 
     assert b"You're offline" in anon_client.get('/offline').data
     page = client.get('/admin/tickets').get_data(as_text=True)

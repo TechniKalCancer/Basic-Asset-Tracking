@@ -35,6 +35,12 @@ FEATURES = OrderedDict([
                    desc='Walk a room or cart scanning devices to find what\'s missing.')),
     ('labels', dict(group='Devices', label='Label printing',
                     desc='Dymo labels and Avery sheets with barcodes.')),
+    ('equipment', dict(group='Devices', label='Equipment and locations',
+                       desc='Servers, switches, access points, firewalls, UPSes, printers and displays: where each one is, '
+                            'how to reach it, how long it\'s supported, and an E-rate inventory.')),
+    ('spot_check', dict(group='Devices', label='Spot checks',
+                        desc='Walk a classroom with a phone, scan each student\'s device (and ID card), and see at once '
+                             'whether the right student has it.')),
     ('camera_scan', dict(group='Devices', label='Camera barcode scanning',
                          desc='A Scan button on every scan field that uses a phone or tablet camera (needs HTTPS).')),
     ('repairs', dict(group='Help desk', label='Repairs',
@@ -82,6 +88,9 @@ FEATURES = OrderedDict([
                                    'devices, and see which computers are domain-joined. Read-only.')),
     ('google_signin', dict(group='Sign-in', label='Sign in with Google', configured=lambda: _google_signin_configured(),
                            desc='Staff sign in with their school Google account, matched to their FoxDesk user by email.')),
+    ('librenms', dict(group='Integrations', label='LibreNMS', requires=('equipment',), configured=lambda: _librenms_configured(),
+                      desc='Bring in the switches, access points, firewalls, UPSes and servers LibreNMS monitors, and '
+                           'keep their IP, firmware and up/down status current. Read-only.')),
     ('dell_warranty', dict(group='Integrations', label='Dell warranty lookup', configured=lambda: _dell_configured(),
                            desc='Fill in warranty end dates and ship dates for Dell devices from Dell\'s TechDirect API.')),
 ])
@@ -98,6 +107,11 @@ def _mailbox_configured():
 def _google_signin_configured():
     from foxdesk.services.signin import google_config
     return google_config()['configured']
+
+
+def _librenms_configured():
+    from foxdesk.integrations.librenms import librenms_configured
+    return librenms_configured()
 
 
 def _dell_configured():
@@ -157,6 +171,9 @@ MODULE_FEATURES = {
     'foxdesk.views.agreements': 'agreements',
     'foxdesk.views.sla': 'tickets',
     'foxdesk.views.helpdesk_reports': 'tickets',
+    'foxdesk.views.equipment': 'equipment',
+    'foxdesk.views.librenms': 'librenms',
+    'foxdesk.views.spot_check': 'spot_check',
 }
 
 

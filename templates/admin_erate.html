@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}E-rate inventory{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('document') }}E-rate inventory</h1>
+  <span class="badge badge-blue">{{ rows|length }} items</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/equipment/erate/export{% if year %}?year={{ year }}{% endif %}" class="btn btn-ghost">{{ icon('download') }}Export CSV</a>
+  <a href="/admin/equipment" class="btn btn-ghost">← Equipment</a>
+</div>
+<p class="er-muted" style="max-width:78ch;margin:0 0 1rem;">
+  Equipment paid for with E-rate (its funding says E-rate, or it has an FRN). E-rate rules require an inventory of
+  Category 2 equipment — make, model, serial number, where it's installed and when — kept for 10 years after purchase,
+  including after it's retired. Set the funding, FRN and funding year when you add or edit equipment.
+</p>
+
+{% if years %}
+<form method="GET" style="margin-bottom:1rem;">
+  <select name="year" onchange="this.form.submit()" aria-label="Funding year" style="width:auto;">
+    <option value="">Every funding year</option>
+    {% for y in years %}<option value="{{ y }}" {{ 'selected' if year == y }}>{{ y }}</option>{% endfor %}
+  </select>
+</form>
+{% endif %}
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>FRN</th><th>Year</th><th>Make and model</th><th>Serial</th><th>Tag</th><th>Installed at</th><th>Installed</th><th class="num">Cost</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.erate_frn or '—' }}</td>
+        <td>{{ r.funding_year or '—' }}</td>
+        <td>{{ r.device_model.full_name if r.device_model else (r.description or '—') }}<div class="er-muted">{{ type_label(r.device_type) }}</div></td>
+        <td>{{ r.serial_number or '—' }}</td>
+        <td><a class="tag-link" href="/admin/assets/{{ r.asset_tag|urlencode }}/assign">{{ r.asset_tag }}</a></td>
+        <td>{{ r.site.name if r.site else '—' }}{% if r.location %}<div class="er-muted">{{ r.location.path }}</div>{% endif %}</td>
+        <td style="white-space:nowrap;">{{ r.purchase_date or '—' }}</td>
+        <td class="num">{{ '$%.2f'|format(r.purchase_cost) if r.purchase_cost is not none else '—' }}</td>
+        <td>{{ status.get(r.asset_tag, '—') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="er-muted" style="text-align:center;padding:1.5rem;">Nothing marked as E-rate funded yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .er-muted { color: var(--muted); font-size: .8rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}

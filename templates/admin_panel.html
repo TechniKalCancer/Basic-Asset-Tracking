@@ -295,7 +295,7 @@
     <a href="/admin/registry?device_type={{ t }}" style="text-decoration:none;">
       <div class="stat-card">
         <div class="num">{{ count }}</div>
-        <div class="lbl">{{ t|capitalize }}{{ 's' if t != 'other' }}</div>
+        <div class="lbl">{{ type_label(t, true) }}</div>
       </div>
     </a>
     {% endif %}

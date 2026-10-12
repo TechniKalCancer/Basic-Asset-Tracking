@@ -646,6 +646,51 @@ known maker under one name. Integrations use it to tell who made a device: a nam
 wins, an unknown maker stays unknown, and the serial's shape only counts for 7-character Dell
 service tags.
 
+## Equipment and Locations (Devices → Equipment)
+
+Servers, storage, switches, access points, firewalls, routers, UPSes, printers, displays, phones and
+cameras are equipment: ordinary registry devices (so repairs, tickets, labels and warranty all work)
+that are placed in a **location** instead of being checked out to someone. Each one keeps its
+hostname, IP and MAC address, firmware, management page, rack position, support contract end, the
+maker's end-of-support date, and how it was paid for (funding source, E-rate FRN, funding year).
+
+- **Locations** (Devices → Tools → Locations): buildings, rooms, network closets, racks and carts,
+  nested inside each other at each school.
+- **E-rate inventory** (Devices → Tools → E-rate Inventory): everything funded by E-rate with FRN,
+  funding year, make, model, serial, where it's installed and when, and status, with CSV export. E-rate
+  rules require that Category 2 inventory to be kept for 10 years.
+- **Support alerts**: the automation trigger *Equipment support is running out* (checked daily) and a
+  template that emails IT three months ahead.
+
+### LibreNMS (Settings → LibreNMS)
+
+Enter the LibreNMS address and an API token (LibreNMS: your user menu → API → Create token). Each sync
+reads every device LibreNMS monitors (read-only) and:
+- matches it to an existing device by serial number, then hostname, or adds it (tagged with its system
+  name; turn adding off to only match);
+- types it from LibreNMS (network → switch, wireless → access point, firewall, power → UPS, server,
+  printer...), names the maker from the vendor catalog, and fills in the model;
+- places a new device at a school by **site rules** (`10.16.0.0/16 = Fox Creek Middle`) and in a
+  location named after its SNMP location;
+- refreshes hostname, IP, firmware and up/down status every time, and never overwrites the tag,
+  school, location, funding or support dates you set.
+Workstations aren't brought in. Schedule it under Scheduled Syncs.
+
+## Spot Checks (Devices → Spot Check)
+
+A phone-first page for walking classrooms: scan a device's label (its asset tag barcode, its serial
+barcode, or the QR code on a FoxDesk label), see who should have it, and tap **It's with Ana** — or tap
+**Someone else has it** and scan that student's ID card (or search their name). Scanning the ID card
+first and then the device works too. Each check shows green (right student), red (someone else's
+device, with whose it is and the student's own device) or yellow (assigned to no one), with a beep and
+buzz, and is saved. Problems stay open on the page and under History until marked resolved, and the
+automation trigger *A spot check finds a device with the wrong student* can open a ticket.
+
+The camera reads 1D barcodes (Code 128, Code 39, Code 93, Codabar, EAN, UPC, ITF) and 2D codes (QR,
+Data Matrix, PDF417 — common on ID cards — and Aztec), with a flashlight button where the phone
+supports it. Student ID cards match People by their ID number. Like all camera scanning, it needs
+FoxDesk opened over `https://` with a certificate the phone trusts; typing a tag or ID works anywhere.
+
 ## Purchase & Warranty Tracking
 
 Each registry entry can optionally hold a **purchase date**, **purchase cost**, and
@@ -744,8 +789,8 @@ Both portals are off until a district switches them on under Features.
 
 FoxDesk can be installed to a phone, tablet or Chromebook home screen (Chrome: ⋮ → Install / Add to
 Home screen; Safari: Share → Add to Home Screen). It opens full screen with shortcuts to devices,
-check in and tickets. The service worker caches only static files and an offline page, never pages
-with district data. Browsers only offer installing over `https://` (or on localhost).
+check in and tickets. The service worker keeps only an offline page (shown when the device has no
+network) and never touches normal page loads or pages with district data. Browsers only offer installing over `https://` (or on localhost).
 
 ## Self-Service: Report a Problem
 

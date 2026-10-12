@@ -11,7 +11,7 @@
     'input[name="asset_tag"]:not([disabled]):not([type="hidden"])', 'input[name="loaner_asset_tag"]',
     'input#loanerAssetTagInput', 'input[name="serial_number"]', 'input[name="value"][placeholder*="Scan"]',
   ].join(',');
-  const WANTED_FORMATS = ['code_128', 'code_39', 'code_93', 'codabar', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'qr_code', 'data_matrix'];
+  const WANTED_FORMATS = ['code_128', 'code_39', 'code_93', 'codabar', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'qr_code', 'data_matrix', 'pdf417', 'aztec'];
   const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {

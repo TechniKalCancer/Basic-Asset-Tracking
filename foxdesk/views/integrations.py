@@ -477,8 +477,10 @@ def admin_sync_schedule():
     kace_schedule = _get_or_create_sync_schedule('kace')
     ad_schedule = _get_or_create_sync_schedule('ad')
     dell_schedule = _get_or_create_sync_schedule('dell')
+    librenms_schedule = _get_or_create_sync_schedule('librenms')
     return render_template('admin_sync_schedule.html', person_schedule=person_schedule, device_schedule=device_schedule,
-                           kace_schedule=kace_schedule, ad_schedule=ad_schedule, dell_schedule=dell_schedule, intervals=SYNC_SCHEDULE_INTERVALS,
+                           kace_schedule=kace_schedule, ad_schedule=ad_schedule, dell_schedule=dell_schedule,
+                           librenms_schedule=librenms_schedule, intervals=SYNC_SCHEDULE_INTERVALS,
                            google_sync_enabled=GOOGLE_SYNC_ENABLED, kace_sync_enabled=KACE_SYNC_ENABLED,
                            ad_sync_enabled=feature_enabled('active_directory'))
 
@@ -486,7 +488,7 @@ def admin_sync_schedule():
 @app.route('/admin/sync_schedule/<string:sync_type>', methods=['POST'])
 @require_super_admin
 def admin_sync_schedule_update(sync_type):
-    if sync_type not in ('person', 'device', 'kace', 'ad', 'dell'):
+    if sync_type not in ('person', 'device', 'kace', 'ad', 'dell', 'librenms'):
         flash('Unknown sync type.', 'error')
         return redirect(url_for('admin_sync_schedule'))
     schedule = _get_or_create_sync_schedule(sync_type)

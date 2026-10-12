@@ -97,6 +97,7 @@ FIELDS = {
     'device.org_unit':      ('Device Google org unit', 'text', None),
     'device.warranty_days_left': ('Days of warranty left', 'number', None),
     'device.aue_days_left': ('Days until ChromeOS updates stop', 'number', None),
+    'device.support_days_left': ('Days of support left (contract or maker\'s end of support)', 'number', None),
 
     'holder.role':          ('Device holder role', 'choice', ROLES),
     'holder.grad_year':     ('Device holder graduation year', 'number', None),
@@ -123,6 +124,10 @@ FIELDS = {
     'loaner.days_out':      ('Days the loaner has been out', 'number', None),
     'loaner.days_overdue':  ('Days the loaner is overdue', 'number', None),
 
+    'spotcheck.result':     ('Spot check found', 'choice', _plain(['wrong_student', 'unassigned_in_use'],
+                                                                  {'wrong_student': "Someone else's device",
+                                                                   'unassigned_in_use': 'A device assigned to no one'})),
+
     'signin.category':      ('Sign-in flag', 'choice', SIGNIN_CATEGORY_CHOICES),
     'signin.severity':      ('Flag severity', 'choice', _plain(['high', 'medium', 'low'])),
     'signin.foreign_count': ('Devices that aren\'t theirs the account is on', 'number', None),
@@ -147,8 +152,8 @@ OPERATORS = {
 }
 
 DEVICE_FIELDS = ['device.type', 'device.model', 'device.site', 'device.status', 'device.is_loaner', 'device.asset_tag',
-                 'device.org_unit', 'device.warranty_days_left', 'device.aue_days_left', 'holder.role', 'holder.grad_year',
-                 'holder.has_protection_plan']
+                 'device.org_unit', 'device.warranty_days_left', 'device.aue_days_left', 'device.support_days_left',
+                 'holder.role', 'holder.grad_year', 'holder.has_protection_plan']
 PERSON_FIELDS = ['person.role', 'person.site', 'person.grad_year', 'person.device_count', 'person.incident_count',
                  'person.has_protection_plan', 'person.has_guardian_email', 'person.agreement_signed']
 TICKET_FIELDS = ['ticket.category', 'ticket.priority', 'ticket.status', 'ticket.site', 'ticket.subject',
@@ -196,6 +201,14 @@ TRIGGERS = {
                                   fields=['loaner.days_overdue', 'loaner.days_out'] + DEVICE_FIELDS + PERSON_FIELDS),
     'device.warranty_expiring': dict(label='A warranty is running out (checked daily)', group='Devices', subject='device',
                                      scheduled=True, fields=DEVICE_FIELDS),
+    'equipment.support_ending': dict(label='Equipment support is running out (checked daily)', group='Devices',
+                                     subject='device', feature='equipment', scheduled=True, fields=DEVICE_FIELDS,
+                                     hint='Equipment whose support contract or maker\'s end of support is within a year '
+                                          '(or past). Test "Days of support left", e.g. ≤ 90. Runs once per date.'),
+    'spotcheck.problem':     dict(label='A spot check finds a device with the wrong student', group='Devices',
+                                  subject='device', feature='spot_check',
+                                  fields=['spotcheck.result'] + DEVICE_FIELDS + PERSON_FIELDS,
+                                  hint='"Person" is the student who had the device; "holder" is who it\'s assigned to.'),
     'signin.flagged':        dict(label='The Google sign-in check flags a device (checked daily)', group='Devices',
                                   subject='signin', feature='signin_check', scheduled=True,
                                   fields=['signin.category', 'signin.severity', 'signin.foreign_count']
@@ -273,10 +286,16 @@ def _device_facts(row, asset):
         'device.asset_tag': row.asset_tag, 'device.org_unit': asset.google_org_unit if asset else None,
         'device.warranty_days_left': warranty_left,
         'device.aue_days_left': (asset.google_aue_date - date.today()).days if asset and asset.google_aue_date else None,
+        'device.support_days_left': _support_days(row),
         'holder.role': holder.role if holder else None, 'holder.grad_year': holder.grad_year if holder else None,
         'holder.has_protection_plan': bool(holder and holder.insurance_opted_in),
     })
     return facts
+
+
+def _support_days(row):
+    dates = [d for d in (row.support_ends, row.end_of_support) if d]
+    return (min(dates) - date.today()).days if dates else None
 
 
 def _person_facts(person):
@@ -340,6 +359,8 @@ def build_context(trigger_key, subject, **extra):
     facts.update(_person_facts(person))
     if 'device_count' in extra:  # e.g. graduation: devices already unassigned but still in hand
         facts['person.device_count'] = extra['device_count']
+    if 'spot_result' in extra:
+        facts['spotcheck.result'] = extra['spot_result']
     now = utcnow()
     if kind == 'ticket':
         t = subject
@@ -433,6 +454,10 @@ def placeholders(ctx):
         'part_on_hand': str(ctx['part'].quantity_on_hand) if ctx.get('part') else '',
         'part_reorder_level': str(ctx['part'].reorder_level) if ctx.get('part') else '',
         'sla_missed': {'response': 'reply', 'resolve': 'fix'}.get(f.get('ticket.sla_breach'), ''),
+        'support_ends': str(min(d for d in (row.support_ends, row.end_of_support) if d))
+                        if row and (row.support_ends or row.end_of_support) else '',
+        'spot_result': {'wrong_student': "someone else's device", 'unassigned_in_use': 'a device assigned to no one'}
+                       .get(f.get('spotcheck.result'), ''),
     }
 
 
@@ -441,4 +466,4 @@ PLACEHOLDER_NAMES = ['ticket_id', 'ticket_subject', 'ticket_priority', 'ticket_s
                      'holder_email', 'person_name', 'person_email', 'person_first_name', 'guardian_name',
                      'incident_description', 'fee_amount', 'incident_count', 'repair_days_out', 'loaner_days_overdue',
                      'signin_account', 'signin_flag', 'warranty_days_left', 'part_name', 'part_on_hand',
-                     'part_reorder_level', 'sla_missed', 'period', 'today']
+                     'part_reorder_level', 'sla_missed', 'support_ends', 'spot_result', 'period', 'today']

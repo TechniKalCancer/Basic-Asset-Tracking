@@ -128,8 +128,9 @@ def _parse_date(value):
 
 
 def _parse_money(value):
-    """Parses a dollar-amount form field into a Decimal, or None if blank/invalid/negative."""
-    value = (value or '').strip().lstrip('$')
+    """Parses a dollar-amount form field into a Decimal, or None if blank/invalid/negative.
+    "$4,850.00" works — equipment costs run into the thousands."""
+    value = (value or '').strip().lstrip('$').replace(',', '')
     if not value:
         return None
     try:

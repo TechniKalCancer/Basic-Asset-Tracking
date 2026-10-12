@@ -215,6 +215,17 @@ def scheduled_subjects(trigger_key):
         restocked = dict(db.session.query(PartMovement.part_id, db.func.max(PartMovement.id))
                          .filter(PartMovement.change > 0).group_by(PartMovement.part_id).all())
         return [(p, f'part:{p.id}:{restocked.get(p.id, 0)}') for p in low]
+    if trigger_key == 'equipment.support_ending':
+        from foxdesk.models import EQUIPMENT_TYPES
+        horizon = today + timedelta(days=365)
+        rows = AssetRegistry.query.filter(AssetRegistry.device_type.in_(EQUIPMENT_TYPES), db.or_(
+            AssetRegistry.support_ends <= horizon, AssetRegistry.end_of_support <= horizon)).all()
+        out = []
+        for r in rows:
+            when = min(d for d in (r.support_ends, r.end_of_support) if d)
+            if when <= horizon:
+                out.append((r, f'support:{r.id}:{when}'))
+        return out
     if trigger_key == 'ticket.sla_breached':
         from foxdesk.services.sla import breach_kind, overdue_filter
         out = []

@@ -56,7 +56,8 @@ def _run_due_scheduled_syncs():
     per-row resend gate."""
     google_on, kace_on = feature_enabled('google'), feature_enabled('kace')  # configured AND switched on
     ad_on, dell_on = feature_enabled('active_directory'), feature_enabled('dell_warranty')
-    if not (google_on or kace_on or ad_on or dell_on):
+    librenms_on = feature_enabled('librenms')
+    if not (google_on or kace_on or ad_on or dell_on or librenms_on):
         return
     now = utcnow()
     for schedule in SyncSchedule.query.filter_by(enabled=True).all():
@@ -67,6 +68,8 @@ def _run_due_scheduled_syncs():
         if schedule.sync_type == 'ad' and not ad_on:
             continue
         if schedule.sync_type == 'dell' and not dell_on:
+            continue
+        if schedule.sync_type == 'librenms' and not librenms_on:
             continue
         if schedule.last_run_at and (now - schedule.last_run_at).total_seconds() < schedule.interval_hours * 3600:
             continue
@@ -84,6 +87,9 @@ def _run_due_scheduled_syncs():
                 schedule.last_run_summary = f'{matched} matched, {updated} updated, {pushed} pushed, {unmatched} unmatched'
             elif schedule.sync_type == 'ad':
                 schedule.last_run_summary = describe_summary(run_ad_sync())[:255]
+            elif schedule.sync_type == 'librenms':
+                from foxdesk.integrations.librenms import describe_summary as describe_librenms, run_librenms_sync
+                schedule.last_run_summary = describe_librenms(run_librenms_sync())[:255]
             elif schedule.sync_type == 'dell':
                 from foxdesk.integrations.dell import describe_summary as describe_dell, run_dell_lookup
                 schedule.last_run_summary = describe_dell(run_dell_lookup())[:255]

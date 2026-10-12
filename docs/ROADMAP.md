@@ -53,7 +53,10 @@ district only sees what it uses.
 - [x] Installable app (manifest, service worker, offline page)
 - [ ] Custom fields per category, tags, satisfaction survey, time tracking
 - [ ] Knowledge base with ticket deflection
-- [ ] Rooms/carts/locations; collection-day mode; purchasing; facilities tickets
+- [x] Equipment (servers, network gear, printers, displays...) with locations, support dates and an E-rate inventory
+- [x] LibreNMS sync for network gear and servers
+- [x] Spot checks: scan devices and ID cards with a phone to confirm the right student has each device
+- [ ] Collection-day mode; purchasing; facilities tickets
 
 ## Phase 6 — Ship-ready
 - [ ] Privacy: policy page, data retention/purge schedule, SDPC NDPA template

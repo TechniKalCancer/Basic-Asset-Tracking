@@ -153,6 +153,25 @@ TEMPLATES = [
                                         body='Dear {guardian_name},\n\n{person_name} has been issued device '
                                              '{asset_tag}. Please sign this year\'s device agreement in the parent '
                                              'portal.\n\nThank you.')])),
+    dict(key='equipment_support_email', group='Devices',
+         name='Equipment support running out → tell IT',
+         description='Three months before a switch, server or other equipment\'s support contract or end of support, '
+                     'email whoever handles renewals and replacements.',
+         build=lambda: dict(trigger='equipment.support_ending', conditions=[_c('device.support_days_left', 'lte', '90')],
+                            actions=[_a('send_email', to='address', address='',
+                                        subject='Support ends {support_ends}: {asset_tag} ({device_model})',
+                                        body='{asset_tag} ({device_model}) at {device_site} has support until '
+                                             '{support_ends}. Renew it or plan its replacement.')])),
+    dict(key='spotcheck_ticket', group='Devices',
+         name='Spot check finds the wrong student → open a ticket',
+         description='When a spot check finds a student with someone else\'s device (or one assigned to no one), open a '
+                     'ticket to sort it out.',
+         build=lambda: dict(trigger='spotcheck.problem', conditions=[],
+                            actions=[_a('create_ticket', category=_category('collection', 'hardware', 'device'),
+                                        subject='Spot check: {asset_tag} was with {person_name}',
+                                        description='A spot check found {asset_tag} with {person_name} — {spot_result}. '
+                                                    'It belongs to {holder_name}.',
+                                        priority='normal', assignee=None)])),
     dict(key='lost_turned_up', group='Devices',
          name='A lost device turns up → urgent ticket',
          description='If the Google sign-in check sees a device marked lost or retired being used, open an urgent ticket.',

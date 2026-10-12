@@ -253,9 +253,30 @@ class AssetRegistry(db.Model):
     purchase_cost = db.Column(db.Numeric(10, 2), nullable=True)
     warranty_expiration = db.Column(db.Date, nullable=True)
     custom_fields = db.Column(db.JSON, nullable=True)  # {field_key: value, ...} — see CustomField/GoogleFieldMapping
+    # Equipment (servers, network gear, printers...): where it is and how to
+    # reach it. Filled in by hand or by the LibreNMS sync.
+    location_id    = db.Column(db.Integer, db.ForeignKey('location.id'), nullable=True, index=True)
+    rack_position  = db.Column(db.String(20), nullable=True)   # e.g. "U12-13"
+    hostname       = db.Column(db.String(255), nullable=True, index=True)
+    ip_address     = db.Column(db.String(64), nullable=True)
+    mac_address    = db.Column(db.String(32), nullable=True)
+    firmware       = db.Column(db.String(120), nullable=True)  # OS / firmware version
+    management_url = db.Column(db.String(255), nullable=True)
+    support_ends   = db.Column(db.Date, nullable=True)         # support contract / subscription end
+    end_of_support = db.Column(db.Date, nullable=True)         # the maker's end of support (no more updates)
+    # How it was paid for. E-rate Category 2 equipment has to stay on an
+    # inventory (make, model, serial, location) for 10 years.
+    funding_source = db.Column(db.String(80), nullable=True)
+    erate_frn      = db.Column(db.String(40), nullable=True)
+    funding_year   = db.Column(db.Integer, nullable=True)
 
     site = db.relationship('Site')
     device_model = db.relationship('DeviceModel')
+    location = db.relationship('Location')
+
+    @property
+    def is_equipment(self):
+        return self.device_type in EQUIPMENT_TYPES
 
     def to_dict(self):
         return {
@@ -318,7 +339,25 @@ class Asset(db.Model):
 ASSET_STATUSES = ['available', 'assigned', 'repair', 'lost', 'retired']
 
 
-DEVICE_TYPES = ['chromebook', 'laptop', 'desktop', 'ipad', 'charger', 'hotspot', 'other']
+# Devices people carry, then the district's equipment: servers, network
+# gear, printers, classroom displays... Equipment lives somewhere (a
+# Location) instead of being checked out to someone, so its device page
+# shows network details instead of assignment.
+END_USER_TYPES = ['chromebook', 'laptop', 'desktop', 'ipad', 'charger', 'hotspot']
+EQUIPMENT_TYPES = ['server', 'storage', 'switch', 'access_point', 'firewall', 'router', 'ups', 'printer', 'display',
+                   'phone', 'camera']
+DEVICE_TYPES = END_USER_TYPES + EQUIPMENT_TYPES + ['other']
+DEVICE_TYPE_LABELS = {  # (one, many)
+    'chromebook': ('Chromebook', 'Chromebooks'), 'laptop': ('Laptop', 'Laptops'), 'desktop': ('Desktop', 'Desktops'),
+    'ipad': ('iPad', 'iPads'), 'charger': ('Charger', 'Chargers'), 'hotspot': ('Hotspot', 'Hotspots'),
+    'server': ('Server', 'Servers'), 'storage': ('Storage / NAS', 'Storage'), 'switch': ('Switch', 'Switches'),
+    'access_point': ('Access point', 'Access points'), 'firewall': ('Firewall', 'Firewalls'),
+    'router': ('Router', 'Routers'), 'ups': ('UPS', 'UPSes'), 'printer': ('Printer', 'Printers'),
+    'display': ('Display / projector', 'Displays and projectors'), 'phone': ('Phone', 'Phones'),
+    'camera': ('Camera', 'Cameras'), 'other': ('Other', 'Other'),
+}
+FUNDING_SOURCES = ['E-rate Category 1', 'E-rate Category 2', 'ESSER', 'Title I', 'Title IV-A', 'General fund', 'Bond',
+                   'Grant', 'Donation']
 
 
 class Person(db.Model):
@@ -880,6 +919,7 @@ DEVICE_RECORD_SOURCES = {
     'intune': 'Microsoft Intune',
     'jamf': 'Jamf Pro',
     'dell': 'Dell warranty',
+    'librenms': 'LibreNMS',
 }
 JOIN_TYPES = {'ad': 'AD-joined', 'entra': 'Entra-joined', 'hybrid': 'Hybrid-joined', 'workgroup': 'Workgroup'}
 
@@ -1384,3 +1424,95 @@ class AgreementSignature(db.Model):
     person = db.relationship('Person')
 
     __table_args__ = (db.UniqueConstraint('agreement_id', 'person_id', 'signer_role', name='uq_agreement_signature_role'),)
+
+
+LOCATION_KINDS = {'building': 'Building', 'room': 'Room', 'closet': 'Network closet', 'rack': 'Rack', 'cart': 'Cart',
+                  'other': 'Other'}
+
+
+class Location(db.Model):
+    """A place inside a school: a building, room, network closet, rack or
+    cart, nested (Rack A in the MDF closet in the main building). Equipment
+    is placed in a location; the site is the school it's in."""
+    __tablename__ = 'location'
+    id         = db.Column(db.Integer, primary_key=True)
+    site_id    = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=False, index=True)
+    parent_id  = db.Column(db.Integer, db.ForeignKey('location.id'), nullable=True, index=True)
+    name       = db.Column(db.String(120), nullable=False)
+    kind       = db.Column(db.String(20), nullable=False, default='room')
+    notes      = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    site     = db.relationship('Site')
+    parent   = db.relationship('Location', remote_side=[id], backref=db.backref('children', order_by='Location.name'))
+
+    @property
+    def path(self):
+        """'Main building › MDF › Rack A' (without the school)."""
+        names, node, seen = [], self, set()
+        while node is not None and node.id not in seen:
+            seen.add(node.id)
+            names.append(node.name)
+            node = node.parent
+        return ' › '.join(reversed(names))
+
+    @property
+    def full_path(self):
+        return f'{self.site.name} › {self.path}' if self.site else self.path
+
+
+SPOT_CHECK_RESULTS = {
+    'match': 'Right student',
+    'wrong_student': 'Someone else\'s device',
+    'unassigned_in_use': 'Not assigned to anyone',
+    'unknown_device': 'Not in FoxDesk',
+}
+
+
+class SpotCheck(db.Model):
+    """One device checked in a walk-around: who FoxDesk says should have it
+    (expected), who actually had it (found), and what that came to.
+    A problem stays open until someone marks it resolved."""
+    __tablename__ = 'spot_check'
+    id                 = db.Column(db.Integer, primary_key=True)
+    asset_tag          = db.Column(db.String(120), nullable=False, index=True)
+    expected_person_id = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
+    found_person_id    = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True)
+    result             = db.Column(db.String(20), nullable=False, index=True)
+    note               = db.Column(db.Text, nullable=True)
+    site_id            = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
+    checked_by         = db.Column(db.String(160), nullable=False)
+    created_at         = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
+    resolved_at        = db.Column(db.DateTime, nullable=True)
+    resolved_by        = db.Column(db.String(160), nullable=True)
+
+    expected = db.relationship('Person', foreign_keys=[expected_person_id])
+    found    = db.relationship('Person', foreign_keys=[found_person_id])
+    site     = db.relationship('Site')
+
+    @property
+    def result_label(self):
+        return SPOT_CHECK_RESULTS.get(self.result, self.result)
+
+    @property
+    def is_problem(self):
+        return self.result != 'match'
+
+
+class LibreNMSSettings(db.Model):
+    """The LibreNMS connection (one row). Network gear, servers and
+    printers LibreNMS monitors become equipment in FoxDesk. api_token is
+    encrypted (services/secrets). site_rules maps addresses to schools, one
+    per line: "10.16.0.0/16 = Fox Creek Middle". import_types are the
+    FoxDesk equipment types to bring in."""
+    __tablename__ = 'librenms_settings'
+    id           = db.Column(db.Integer, primary_key=True)
+    url          = db.Column(db.String(255), nullable=True)
+    api_token    = db.Column(db.Text, nullable=True)
+    verify_tls   = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    site_rules   = db.Column(db.Text, nullable=True)
+    import_types = db.Column(db.JSON, nullable=True)
+    auto_add     = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    last_run_at  = db.Column(db.DateTime, nullable=True)
+    last_summary = db.Column(db.JSON, nullable=True)
+    last_error   = db.Column(db.Text, nullable=True)

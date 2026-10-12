@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit ' ~ row.asset_tag if row else 'Add equipment' }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('computer') }}{{ 'Edit ' ~ row.asset_tag if row else 'Add equipment' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="{{ '/admin/assets/' ~ (row.asset_tag|urlencode) ~ '/assign' if row else '/admin/equipment' }}" class="btn btn-ghost">← Back</a>
+</div>
+
+<form method="POST" class="card ef-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <fieldset class="ef-wide"><legend>What it is</legend>
+    <div class="ef-cols">
+      <label>Asset tag
+        <input name="asset_tag" value="{{ values.asset_tag or '' }}" {{ 'disabled' if row }} placeholder="Leave blank to use the hostname" maxlength="120">
+        {% if row %}<span class="ef-help">Change the tag from Edit Device in the registry.</span>{% endif %}
+      </label>
+      <label>Type
+        <select name="device_type">
+          {% for t in types %}<option value="{{ t }}" {{ 'selected' if values.device_type == t }}>{{ type_label(t) }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Model
+        <select name="device_model_id">
+          <option value="">— Not on file —</option>
+          {% for m in models %}<option value="{{ m.id }}" {{ 'selected' if values.device_model_id == m.id }}>{{ m.full_name }}</option>{% endfor %}
+        </select>
+        <span class="ef-help"><a href="/admin/device_models/new" target="_blank" rel="noopener">Add a model</a></span>
+      </label>
+      <label>Description <input name="description" value="{{ values.description or '' }}" placeholder="e.g. Core switch, B-wing" maxlength="255"></label>
+      <label>Serial number <input name="serial_number" value="{{ values.serial_number or '' }}" maxlength="120"></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="ef-wide"><legend>Where it is</legend>
+    <div class="ef-cols">
+      <label>School
+        <select name="site_id" id="efSite">
+          <option value="">—</option>
+          {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if values.site_id == s.id }}>{{ s.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Location
+        <select name="location_id" id="efLocation">
+          <option value="">—</option>
+          {% for loc, depth in locations %}<option value="{{ loc.id }}" data-site="{{ loc.site_id }}" {{ 'selected' if values.location_id == loc.id }}>{{ '  ' * depth }}{{ loc.name }} ({{ loc.site.name if loc.site else '' }})</option>{% endfor %}
+        </select>
+        <span class="ef-help"><a href="/admin/locations" target="_blank" rel="noopener">Manage locations</a></span>
+      </label>
+      <label>Rack position <input name="rack_position" value="{{ values.rack_position or '' }}" placeholder="U12-13" maxlength="20"></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="ef-wide"><legend>How to reach it</legend>
+    <div class="ef-cols">
+      <label>Hostname <input name="hostname" value="{{ values.hostname or '' }}" maxlength="255"></label>
+      <label>IP address <input name="ip_address" value="{{ values.ip_address or '' }}" inputmode="decimal" maxlength="64"></label>
+      <label>MAC address <input name="mac_address" value="{{ values.mac_address or '' }}" maxlength="32"></label>
+      <label>Firmware / OS version <input name="firmware" value="{{ values.firmware or '' }}" maxlength="120"></label>
+      <label>Management page <input name="management_url" value="{{ values.management_url or '' }}" placeholder="https://10.16.100.15" maxlength="255"></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="ef-wide"><legend>Purchase and support</legend>
+    <div class="ef-cols">
+      <label>Purchased <input type="date" name="purchase_date" value="{{ values.purchase_date or '' }}"></label>
+      <label>Cost <input name="purchase_cost" value="{{ values.purchase_cost if values.purchase_cost is not none else '' }}" inputmode="decimal" placeholder="0.00"></label>
+      <label>Warranty ends <input type="date" name="warranty_expiration" value="{{ values.warranty_expiration or '' }}"></label>
+      <label>Support contract ends <input type="date" name="support_ends" value="{{ values.support_ends or '' }}"></label>
+      <label>Maker's end of support <input type="date" name="end_of_support" value="{{ values.end_of_support or '' }}">
+        <span class="ef-help">When it stops getting firmware updates.</span></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="ef-wide"><legend>Funding</legend>
+    <div class="ef-cols">
+      <label>Paid for with <input name="funding_source" list="fundingSources" value="{{ values.funding_source or '' }}" maxlength="80">
+        <datalist id="fundingSources">{% for f in funding_sources %}<option value="{{ f }}">{% endfor %}</datalist></label>
+      <label>E-rate FRN <input name="erate_frn" value="{{ values.erate_frn or '' }}" placeholder="Funding Request Number" maxlength="40"></label>
+      <label>Funding year <input name="funding_year" value="{{ values.funding_year or '' }}" inputmode="numeric" placeholder="2026" maxlength="4"></label>
+    </div>
+  </fieldset>
+  <div class="ef-wide"><button type="submit" class="btn btn-primary">{{ 'Save' if row else 'Add equipment' }}</button></div>
+</form>
+<script>
+(function () {
+  // Only offer locations at the chosen school.
+  const site = document.getElementById('efSite'), loc = document.getElementById('efLocation');
+  function filter() {
+    Array.from(loc.options).forEach(function (o) { if (o.value) o.hidden = site.value && o.dataset.site !== site.value; });
+    const chosen = loc.options[loc.selectedIndex];
+    if (chosen && chosen.hidden) loc.value = '';
+  }
+  site.addEventListener('change', filter); filter();
+})();
+</script>
+<style>
+  .ef-form { display: grid; gap: 1.2rem; }
+  .ef-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ef-form legend { font-weight: 600; margin-bottom: .5rem; }
+  .ef-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: .8rem 1rem; }
+  .ef-cols label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .ef-help { color: var(--muted); font-size: .76rem; }
+</style>
+{% endblock %}

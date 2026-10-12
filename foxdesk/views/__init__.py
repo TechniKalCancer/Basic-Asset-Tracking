@@ -7,12 +7,14 @@ from foxdesk.views import auth  # noqa: F401
 from foxdesk.views import dashboard  # noqa: F401
 from foxdesk.views import devices  # noqa: F401
 from foxdesk.views import directory  # noqa: F401
+from foxdesk.views import equipment  # noqa: F401
 from foxdesk.views import help  # noqa: F401
 from foxdesk.views import helpdesk_reports  # noqa: F401
 from foxdesk.views import helpdesk_email  # noqa: F401
 from foxdesk.views import incidents  # noqa: F401
 from foxdesk.views import insights  # noqa: F401
 from foxdesk.views import integrations  # noqa: F401
+from foxdesk.views import librenms  # noqa: F401
 from foxdesk.views import loaners  # noqa: F401
 from foxdesk.views import parts  # noqa: F401
 from foxdesk.views import people  # noqa: F401
@@ -25,6 +27,7 @@ from foxdesk.views import rules  # noqa: F401
 from foxdesk.views import settings  # noqa: F401
 from foxdesk.views import signin_settings  # noqa: F401
 from foxdesk.views import sla  # noqa: F401
+from foxdesk.views import spot_check  # noqa: F401
 from foxdesk.views import ticket_tools  # noqa: F401
 from foxdesk.views import tickets  # noqa: F401
 from foxdesk.views import warranty  # noqa: F401

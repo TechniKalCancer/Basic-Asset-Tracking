@@ -1,17 +1,17 @@
 """Install FoxDesk as an app: the web app manifest, a service worker, and
 the page shown when the network is gone.
 
-The service worker only ever caches the app's own static files (styles,
-scripts, icons) and the offline page — never a page with district data on
-it, since phones and Chromebooks get shared. Browsers only install over
-HTTPS (or on localhost).
+The service worker keeps only the offline page and its icon — never a page
+with district data on it, since phones and Chromebooks get shared — and
+stays out of normal page loads entirely. Browsers only install over HTTPS
+(or on localhost).
 """
 from flask import Response, jsonify, render_template
 
 from foxdesk.core import app
 from foxdesk.services.branding import _current_branding
 
-CACHE_VERSION = 'foxdesk-static-v1'
+CACHE_VERSION = 'foxdesk-offline-v2'
 
 
 @app.route('/manifest.webmanifest')
@@ -38,12 +38,15 @@ def pwa_manifest():
     return response
 
 
-SERVICE_WORKER = """// FoxDesk service worker: static files and the offline page only.
+SERVICE_WORKER = """// FoxDesk service worker: the offline page, and nothing else.
+// Pages and files always load straight from the network (the worker doesn't
+// touch them), so a browser or network that blocks service-worker requests
+// can never break the app; only when the device reports it's offline does a
+// page load get the offline page instead of the browser's error.
 const CACHE = '%(cache)s';
-const PRECACHE = ['/offline', '/static/pwa/icon-192.png', '/static/script.js'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/offline', '/static/pwa/icon-192.png'])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -53,22 +56,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-  if (req.mode === 'navigate') {
-    // Pages always come from the network; the offline page only when there isn't one.
-    event.respondWith(fetch(req).catch(() => caches.match('/offline')));
-    return;
-  }
-  if (url.pathname.startsWith('/static/')) {
-    // Static files: answer from the cache, refresh it in the background.
-    event.respondWith(caches.open(CACHE).then(async (cache) => {
-      const hit = await cache.match(req);
-      const fresh = fetch(req).then((res) => { if (res.ok) cache.put(req, res.clone()); return res; });
-      return hit || fresh;
-    }));
+  if (event.request.mode === 'navigate' && self.navigator.onLine === false) {
+    event.respondWith(caches.match('/offline'));
   }
 });
 """ % {'cache': CACHE_VERSION}

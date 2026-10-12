@@ -441,6 +441,8 @@
         {% if feature('data_quality') %}<a href="/admin/data_quality">Data Quality</a>{% endif %}
         {% if feature('signin_check') %}<a href="/admin/signin_mismatches">Sign-in Mismatches</a>
         <a href="/admin/assign_from_google">Assign from Google</a>{% endif %}
+        {% if feature('spot_check') %}<a href="/admin/spot_check">Spot Check</a>{% endif %}
+        {% if feature('equipment') %}<a href="/admin/equipment">Equipment</a>{% endif %}
         {% if feature('incidents') %}<a href="/admin/fees">Billing</a>{% endif %}
         <div class="row-menu nav-dropdown">
           <button type="button">Tools ▾</button>
@@ -451,6 +453,8 @@
             {% if feature('active_directory') %}<a href="/admin/directory/computers">Computers in AD</a>{% endif %}
             <a href="/admin/registry?warranty=expiring">Warranty Expiring</a>
             {% if feature_on('google') %}<a href="/admin/refresh_forecast">Refresh Forecast</a>{% endif %}
+            {% if feature('equipment') %}<a href="/admin/locations">Locations</a>
+            <a href="/admin/equipment/erate">E-rate Inventory</a>{% endif %}
             <a href="/asset_history">Asset History</a>
             {% if can('checkinout') and feature('incidents') %}<a href="/report_problem">Report a Problem</a>{% endif %}
             <div class="nav-dropdown-divider"></div>
@@ -521,7 +525,7 @@
         <a href="/admin/emails">Email</a>
         <a href="/admin/custom_fields">Custom Fields</a>
         <a href="/admin/features">Features</a>
-        {% if feature_on('google') or feature_on('kace') or feature_on('active_directory') or feature_on('dell_warranty') %}
+        {% if feature_on('google') or feature_on('kace') or feature_on('active_directory') or feature_on('dell_warranty') or feature_on('librenms') %}
         <div class="row-menu nav-dropdown">
           <button type="button">{{ icon('sync') }}Syncs {% if google_sync_enabled or kace_sync_enabled or ad_sync_enabled %}<span class="badge badge-green" style="font-size:.65rem;padding:0 .4rem;">On</span>{% endif %} ▾</button>
           <div class="row-menu-items">
@@ -556,6 +560,10 @@
             {% if feature_on('dell_warranty') %}
             <div class="nav-dropdown-divider"></div>
             <a href="/admin/warranty">Dell warranty lookup</a>
+            {% endif %}
+            {% if feature_on('librenms') %}
+            <div class="nav-dropdown-divider"></div>
+            <a href="/admin/librenms">LibreNMS</a>
             {% endif %}
           </div>
         </div>

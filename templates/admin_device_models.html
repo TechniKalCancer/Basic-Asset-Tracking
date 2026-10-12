@@ -34,7 +34,7 @@
       <tr>
         <td>{{ m.manufacturer }}</td>
         <td>{{ m.model_name }}</td>
-        <td style="color:var(--muted);">{{ m.device_type|capitalize }}</td>
+        <td style="color:var(--muted);">{{ type_label(m.device_type) }}</td>
         <td style="color:var(--muted);">{{ m.notes or '—' }}</td>
         <td><span class="badge {{ 'badge-green' if m.is_active else 'badge-red' }}">{{ 'Active' if m.is_active else 'Inactive' }}</span></td>
         <td style="text-align:right;white-space:nowrap;">

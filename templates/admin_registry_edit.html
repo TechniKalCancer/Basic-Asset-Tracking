@@ -26,7 +26,7 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Type</label>
       <select name="device_type">
         {% for t in device_types %}
-          <option value="{{ t }}" {{ 'selected' if registry_row.device_type == t }}>{{ t|capitalize }}</option>
+          <option value="{{ t }}" {{ 'selected' if registry_row.device_type == t }}>{{ type_label(t) }}</option>
         {% endfor %}
       </select>
     </div>

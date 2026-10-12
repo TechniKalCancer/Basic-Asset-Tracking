@@ -80,13 +80,15 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
 
 
 def _create_ticket(category_id, subject, description, person=None, requester_name=None,
-                    requester_email=None, asset_tag=None, site_id=None, priority='normal'):
+                    requester_email=None, asset_tag=None, site_id=None, priority='normal', waive_fee_by=None):
     """Shared ticket-creation logic used by both the public submission page and
     the admin-initiated New Ticket form. Does not commit — caller's responsibility.
     A category with a default_price seeds one initial itemized TicketCharge at
     creation time (correctable/removable later, more can be added as the
     ticket progresses) — no charge fields shown on either creation form,
-    matching report_problem_page's "not the submitter's decision" reasoning."""
+    matching report_problem_page's "not the submitter's decision" reasoning.
+    waive_fee_by (a tech's name) adds that charge already waived, so the
+    ticket still shows what the fee would have been."""
     category = db.session.get(TicketCategory, category_id)
     default_price = category.default_price if category else None
     ticket = Ticket(
@@ -102,7 +104,11 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     from foxdesk.services.sla import apply_sla
     apply_sla(ticket)
     if default_price:
-        db.session.add(TicketCharge(ticket_id=ticket.id, description=category.name, amount=default_price))
+        charge = TicketCharge(ticket_id=ticket.id, description=category.name, amount=default_price)
+        if waive_fee_by:
+            charge.waived_at, charge.waived_by = utcnow(), waive_fee_by[:160]
+            charge.waive_reason = 'Waived when the ticket was opened'
+        db.session.add(charge)
     _log_activity('ticket_add', f'Opened ticket #{ticket.id}: {subject}', site_id=site_id, ticket_id=ticket.id)
     return ticket
 

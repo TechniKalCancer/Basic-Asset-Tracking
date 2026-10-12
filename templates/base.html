@@ -395,6 +395,9 @@
           {% if can('tickets') %}
           <a href="/admin/tickets" class="nav-tab {{ 'active' if active_section == 'tickets' }}">{{ icon('ticket') }}Tickets {% if nav_open_tickets_count %}<span class="nav-tab-badge">{{ nav_open_tickets_count }}</span>{% endif %}</a>
           {% endif %}
+          {% if can('devices') and (feature('incidents') or feature('tickets')) %}
+          <a href="/admin/payments" class="nav-tab {{ 'active' if active_section == 'payments' }}">{{ icon('billing') }}Payments</a>
+          {% endif %}
           {% if can('admin') or can('manage_users') or is_super_admin() %}
           <a href="/admin/settings" class="nav-tab {{ 'active' if active_section == 'admin' }}">{{ icon('settings') }}Admin</a>
           {% endif %}
@@ -429,7 +432,7 @@
       {% endif %}
     </div>
 
-    {% if session.get('admin_logged_in') and active_section in ['devices', 'people', 'loaners', 'tickets', 'repairs', 'admin'] %}
+    {% if session.get('admin_logged_in') and active_section in ['devices', 'people', 'loaners', 'tickets', 'repairs', 'payments', 'admin'] %}
     <div class="nav-sub">
       {% if active_section == 'devices' and can('devices') %}
         <a href="/admin/registry">Registry</a>
@@ -443,7 +446,6 @@
         <a href="/admin/assign_from_google">Assign from Google</a>{% endif %}
         {% if feature('spot_check') %}<a href="/admin/spot_check">Spot Check</a>{% endif %}
         {% if feature('equipment') %}<a href="/admin/equipment">Equipment</a>{% endif %}
-        {% if feature('incidents') %}<a href="/admin/fees">Billing</a>{% endif %}
         <div class="row-menu nav-dropdown">
           <button type="button">Tools ▾</button>
           <div class="row-menu-items">
@@ -498,6 +500,11 @@
         <a href="/admin/repairs">Repairs</a>
         {% if feature('parts') %}<a href="/admin/parts">Parts {% if nav_parts_low_count %}<span class="nav-tab-badge">{{ nav_parts_low_count }}</span>{% endif %}</a>{% endif %}
         <a href="/admin/repair_categories">Repair Categories</a>
+      {% elif active_section == 'payments' and can('devices') %}
+        <a href="/admin/payments">Dashboard</a>
+        <a href="/admin/payments/charges">Charges</a>
+        {% if feature('incidents') %}<a href="/admin/fees">By person</a>{% endif %}
+        {% if is_super_admin() %}<a href="/admin/portal">Online payments</a>{% endif %}
       {% elif active_section == 'tickets' and can('tickets') %}
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>

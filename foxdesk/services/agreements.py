@@ -69,7 +69,7 @@ def status(agreement, signatures):
     missing = [] if 'paper' in by_role else [r for r in needed_roles(agreement) if r not in by_role]
     plan = next((s for s in by_role.values() if s.plan_choice), None)
     unpaid = bool(plan and plan.plan_choice == 'enrolled' and plan.plan_amount and plan.plan_amount > 0
-                  and not plan.plan_paid_at)
+                  and not plan.plan_paid_at and not plan.plan_waived_at)
     return dict(complete=not missing, missing=missing, signatures=by_role, plan=plan, plan_unpaid=unpaid)
 
 

@@ -147,7 +147,7 @@
   {% if repair.ticket %}
   {% set ticket = repair.ticket %}
   {% set total = ticket.charges|sum(attribute='amount') %}
-  {% set unpaid_total = ticket.charges|selectattr('paid_at', 'none')|sum(attribute='amount') %}
+  {% set unpaid_total = ticket.charges|selectattr('is_owed')|sum(attribute='amount') %}
   <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
     <h2 style="margin:0;">{{ icon('billing') }}Billing</h2>
     {% if ticket.charges %}
@@ -172,12 +172,14 @@
         <td>
           {% if c.paid_at %}
             <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+          {% elif c.waived_at %}
+            <span class="badge badge-neutral" style="font-size:.7rem;" title="{{ 'Waived by ' ~ c.waived_by if c.waived_by }}{{ ': ' ~ c.waive_reason if c.waive_reason }}">Waived</span>
           {% else %}
             <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
           {% endif %}
         </td>
         <td style="text-align:right;white-space:nowrap;">
-          {% if not c.paid_at %}
+          {% if c.is_owed %}
           <form method="POST" action="/admin/ticket_charges/{{ c.id }}/mark_paid" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
@@ -186,6 +188,19 @@
           <div class="row-menu" style="display:inline-block;">
             <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>
             <div class="row-menu-items" style="min-width:260px;">
+              {% if c.is_owed %}
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/waive" style="padding:.4rem;border-bottom:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Waive it — why?</label>
+                <input name="reason" placeholder="e.g. Covered by the protection plan" required style="margin-bottom:.6rem;" />
+                <button type="submit" class="btn btn-ghost" style="width:100%;">Waive</button>
+              </form>
+              {% elif c.waived_at %}
+              <form method="POST" action="/admin/ticket_charges/{{ c.id }}/unwaive" style="padding:.4rem;border-bottom:1px solid var(--border);">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-ghost" style="width:100%;">Undo waive</button>
+              </form>
+              {% endif %}
               <form method="POST" action="/admin/ticket_charges/{{ c.id }}/edit" style="padding:.4rem;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.8rem;">Description</label>

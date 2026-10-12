@@ -45,12 +45,14 @@
           <td>
             {% if charge.paid %}
               <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+            {% elif charge.waived %}
+              <span class="badge badge-neutral" style="font-size:.7rem;">Waived</span>
             {% else %}
               <span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>
             {% endif %}
           </td>
           <td style="text-align:right;white-space:nowrap;">
-            {% if not charge.paid %}
+            {% if not charge.paid and not charge.waived %}
             <form method="POST" action="{{ charge.mark_paid_url }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Mark Paid</button>

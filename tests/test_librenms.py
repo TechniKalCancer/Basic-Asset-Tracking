@@ -111,3 +111,30 @@ def test_site_rules_are_checked(client, make, monkeypatch):
     assert b'starts with http' in r.data
     assert client.post('/admin/sync_schedule/librenms', data={'enabled': 'on', 'interval_hours': '6'}).status_code == 302
     assert A.SyncSchedule.query.filter_by(sync_type='librenms').one().enabled
+
+
+def test_real_world_quirks(client, make, monkeypatch):
+    """What Fox Creek's LibreNMS actually reports: object-id models, Aerohive
+    locations that only name the school, school initials, ping-only hosts,
+    iDRAC cards, and firewalls on an address no rule covers."""
+    middle, high = make.site('Fox Creek Middle School'), make.site('Fox Creek High School')
+    devices = [
+        {'device_id': 11, 'sysName': 'fcms-mdf-sw1', 'ip': '10.16.100.21', 'hardware': 'registration.68.2.5', 'os': 'ironware',
+         'type': 'network', 'status': 1, 'serial': 'FNS1111', 'location': 'FCMS MDF'},
+        {'device_id': 12, 'sysName': 'fcms-ap-1', 'ip': '10.16.30.5', 'hardware': 'AP4000-WW', 'os': 'hiveos-wireless',
+         'type': 'wireless', 'status': 1, 'serial': 'AH1', 'location': 'Fox Creek Middle School|Fox Creek Middle|FCMS'},
+        {'device_id': 13, 'sysName': 'fcms-dns1', 'ip': '10.16.100.113', 'os': 'ping', 'type': '', 'status': 1},
+        {'device_id': 14, 'sysName': 'idrac-gv09482', 'ip': '10.16.100.111', 'os': 'drac', 'type': 'management', 'status': 1},
+        {'device_id': 15, 'sysName': 'fortigate-400f-fc01', 'ip': '10.255.255.15', 'hardware': 'FortiGate 400F',
+         'os': 'fortigate', 'type': 'firewall', 'status': 1, 'location': 'Fox Creek High School'},
+    ]
+    connect(client, monkeypatch, fake=FakeLibreNMS(devices), site_rules='10.16.0.0/16 = Fox Creek Middle School')
+    r = client.post('/admin/librenms/sync', follow_redirects=True)
+    assert b'3 added' in r.data and b'2 skipped' in r.data, 'ping-only hosts and iDRAC cards are skipped'
+    sw = A.AssetRegistry.query.filter_by(asset_tag='fcms-mdf-sw1').one()
+    assert sw.device_model_id is None and sw.description is None, 'an object id isn\'t a model name'
+    assert (sw.site_id, sw.location.name, sw.location.kind) == (middle.id, 'MDF', 'closet'), '"FCMS MDF" → MDF at the middle school'
+    ap = A.AssetRegistry.query.filter_by(asset_tag='fcms-ap-1').one()
+    assert ap.location_id is None and ap.device_model.full_name == 'Extreme Networks AP4000-WW'
+    fw = A.AssetRegistry.query.filter_by(asset_tag='fortigate-400f-fc01').one()
+    assert fw.site_id == high.id, 'school from the location name when no address rule matches'

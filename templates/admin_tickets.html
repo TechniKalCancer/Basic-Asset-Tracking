@@ -87,7 +87,7 @@
         <td style="color:var(--muted);">{{ t.assigned_to.username if t.assigned_to else '—' }}{% if t.team %}<div style="font-size:.75rem;">{{ t.team.name }}</div>{% endif %}</td>
         <td style="white-space:nowrap;">
           {% if t.charges %}
-            {% set unpaid_count = t.charges|selectattr('paid_at', 'none')|list|length %}
+            {% set unpaid_count = t.charges|selectattr('is_owed')|list|length %}
             ${{ '%.2f'|format(t.charges|sum(attribute='amount')) }}
             {% if unpaid_count == 0 %}
               <span class="badge badge-green" style="font-size:.7rem;">Paid</span>

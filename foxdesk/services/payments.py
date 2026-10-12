@@ -81,7 +81,7 @@ def check_key():
 
 
 def unpaid_fee(incident):
-    return bool(incident.fee_charged and incident.fee_amount and Decimal(incident.fee_amount) > 0 and not incident.paid_at)
+    return incident.is_owed
 
 
 def start_checkout(incident, payer_email, base_url):
@@ -108,7 +108,8 @@ def start_checkout(incident, payer_email, base_url):
 
 
 def unpaid_plan(sig):
-    return bool(sig.plan_choice == 'enrolled' and sig.plan_amount and Decimal(sig.plan_amount) > 0 and not sig.plan_paid_at)
+    return bool(sig.plan_choice == 'enrolled' and sig.plan_amount and Decimal(sig.plan_amount) > 0 and not sig.plan_paid_at
+                and not sig.plan_waived_at)
 
 
 def start_plan_checkout(sig, payer_email, base_url):
@@ -156,7 +157,7 @@ def confirm(session_id):
     if matches:
         payment.status, payment.paid_at = 'paid', utcnow()
         if incident and not incident.paid_at:
-            incident.paid_at = payment.paid_at
+            incident.paid_at, incident.paid_method = payment.paid_at, 'online'
             _log_activity('fee_paid', f'Damage fee for {incident.asset_tag} ({incident.person_name or "unknown"}) '
                                       f'paid online: ${payment.amount:.2f} (Stripe {session_id[-8:]}).')
         if sig is not None:

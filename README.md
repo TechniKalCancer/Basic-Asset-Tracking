@@ -750,6 +750,22 @@ Incidents can now carry a dollar amount, not just a "fee charged" checkbox:
   but the delete/graduate still goes through (matches how the rest of the app already handles
   similar situations rather than adding a new hard-stop).
 
+## Payments (the Payments tab)
+
+Every charge in one place — damage fees, ticket charges and protection plans:
+- **Dashboard**: owed now (and by how many people), collected this month and this school year, waived
+  this school year, what's owed by age (0–30, 31–60, 61–90, over 90 days), by type, by school, how
+  payments came in (cash, check, card at the office, online), who owes the most, and what was recently
+  settled.
+- **Charges**: one list to filter (owed / paid / waived, type, school, age, person) and work on in bulk —
+  tick charges and record a payment (with the method and a check number or note), waive them (with a
+  reason that stays on each charge), or reopen a waived one. The selection's total shows as you tick.
+  CSV export. The by-person Billing page is still under Payments → By person.
+- **Waiving**: a waived charge is no longer owed anywhere (ticket and device pages, invoices, the
+  portal, reports, reminders) but stays on record with who waived it and why. On **New Ticket**, a
+  category with a fee shows **Waive the $X fee**; the charge is added already waived. Any single
+  ticket charge can be waived (or un-waived) from its ⋮ menu.
+
 ## Portals and Online Fee Payments (Settings → Portals & payments)
 
 Both portals are off until a district switches them on under Features.

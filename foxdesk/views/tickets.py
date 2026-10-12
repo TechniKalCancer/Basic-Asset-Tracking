@@ -240,9 +240,10 @@ def admin_ticket_new():
             return render_template('admin_ticket_form.html', email_enabled=EMAIL_ENABLED, categories=categories, sites=sites, form=request.form)
 
         try:
-            ticket = _create_ticket(category_id, subject, description, person=person,
-                                     asset_tag=asset_tag, site_id=site_id, priority=priority)
             _, actor_label, _ = _current_actor()
+            ticket = _create_ticket(category_id, subject, description, person=person,
+                                     asset_tag=asset_tag, site_id=site_id, priority=priority,
+                                     waive_fee_by=actor_label if request.form.get('waive_fee') == 'on' else None)
             _save_attachments('ticket', ticket.id, request.files.getlist('photos'), uploaded_by=actor_label)
             db.session.commit()
             emit('ticket.created', ticket)
@@ -508,6 +509,40 @@ def admin_ticket_charge_delete(charge_id):
     db.session.commit()
     flash('Charge deleted.', 'success')
     return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=ticket_id))
+
+
+@app.route('/admin/ticket_charges/<int:charge_id>/waive', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_charge_waive(charge_id):
+    charge = db.get_or_404(TicketCharge, charge_id)
+    if not charge.is_owed:
+        flash('That charge is already settled.', 'info')
+        return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
+    reason = request.form.get('reason', '').strip()[:255]
+    if not reason:
+        flash('Say why it\'s being waived.', 'error')
+        return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
+    _, actor_label, _ = _current_actor()
+    charge.waived_at, charge.waived_by, charge.waive_reason = utcnow(), actor_label[:160], reason
+    charge.ticket.updated_at = utcnow()
+    _log_activity('fee_edit', f'Waived ${charge.amount:.2f} charge on ticket #{charge.ticket_id}: {reason}',
+                  site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
+    db.session.commit()
+    flash('Charge waived.', 'success')
+    return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
+
+
+@app.route('/admin/ticket_charges/<int:charge_id>/unwaive', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_charge_unwaive(charge_id):
+    charge = db.get_or_404(TicketCharge, charge_id)
+    if charge.waived_at:
+        charge.waived_at = charge.waived_by = charge.waive_reason = None
+        _log_activity('fee_edit', f'Undid the waiver on a ${charge.amount:.2f} charge on ticket #{charge.ticket_id}.',
+                      site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
+        db.session.commit()
+        flash('The charge is owed again.', 'success')
+    return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
 
 
 @app.route('/admin/ticket_charges/<int:charge_id>/mark_paid', methods=['POST'])

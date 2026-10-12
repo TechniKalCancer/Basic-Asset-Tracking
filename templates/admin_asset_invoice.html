@@ -58,7 +58,7 @@
         <td class="right">{% if inc.fee_charged and inc.fee_amount %}${{ '%.2f'|format(inc.fee_amount) }}{% else %}—{% endif %}</td>
         <td class="right">
           {% if inc.fee_charged %}
-            {% if inc.paid_at %}<span class="invoice-paid">Paid</span>{% else %}<span class="invoice-unpaid">Unpaid</span>{% endif %}
+            {% if inc.paid_at %}<span class="invoice-paid">Paid</span>{% elif inc.waived_at %}<span class="muted">Waived</span>{% else %}<span class="invoice-unpaid">Unpaid</span>{% endif %}
           {% else %}<span class="muted">No charge</span>{% endif %}
         </td>
       </tr>

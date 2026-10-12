@@ -565,8 +565,26 @@ class Incident(db.Model):
     paid_at     = db.Column(db.DateTime, nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
     guardian_notified_at = db.Column(db.DateTime, nullable=True)  # last damage notice emailed to the student's guardian
+    # How it was settled (see services/billing.py): paid_method is one of
+    # PAYMENT_METHODS; a waived fee is no longer owed but stays on record.
+    paid_method  = db.Column(db.String(20), nullable=True)
+    paid_note    = db.Column(db.String(120), nullable=True)
+    waived_at    = db.Column(db.DateTime, nullable=True)
+    waived_by    = db.Column(db.String(160), nullable=True)
+    waive_reason = db.Column(db.String(255), nullable=True)
 
     repair_category = db.relationship('RepairCategory')
+
+    @property
+    def is_owed(self):
+        return bool(self.fee_charged and self.fee_amount and self.fee_amount > 0 and not self.paid_at and not self.waived_at)
+
+    @property
+    def fee_status(self):
+        """'paid', 'waived', 'owed', or None when no fee was charged."""
+        if not (self.fee_charged and self.fee_amount and self.fee_amount > 0):
+            return None
+        return 'paid' if self.paid_at else ('waived' if self.waived_at else 'owed')
 
 
 class Repair(db.Model):
@@ -733,6 +751,22 @@ class TicketCharge(db.Model):
     amount      = db.Column(db.Numeric(8, 2), nullable=False)
     paid_at     = db.Column(db.DateTime, nullable=True)
     created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
+    paid_method  = db.Column(db.String(20), nullable=True)
+    paid_note    = db.Column(db.String(120), nullable=True)
+    waived_at    = db.Column(db.DateTime, nullable=True)
+    waived_by    = db.Column(db.String(160), nullable=True)
+    waive_reason = db.Column(db.String(255), nullable=True)
+
+    @property
+    def is_owed(self):
+        return not self.paid_at and not self.waived_at
+
+    @property
+    def status(self):
+        return 'paid' if self.paid_at else ('waived' if self.waived_at else 'owed')
+
+
+PAYMENT_METHODS = {'cash': 'Cash', 'check': 'Check', 'card': 'Card at the office', 'online': 'Online', 'other': 'Other'}
 
 
 TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed']
@@ -1419,6 +1453,7 @@ class AgreementSignature(db.Model):
     plan_choice  = db.Column(db.String(10), nullable=True)
     plan_amount  = db.Column(db.Numeric(8, 2), nullable=True)
     plan_paid_at = db.Column(db.DateTime, nullable=True)
+    plan_waived_at = db.Column(db.DateTime, nullable=True)
     recorded_by  = db.Column(db.String(160), nullable=True)
 
     person = db.relationship('Person')

@@ -52,7 +52,7 @@
             {{ h.description }}
             {% if h.fee_charged %}
               <br>Fee: {% if h.fee_amount %}${{ '%.2f'|format(h.fee_amount) }}{% endif %}
-              {% if h.paid_at %}<span class="badge badge-green" style="font-size:.7rem;">Paid</span>{% else %}<span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>{% endif %}
+              {% if h.paid_at %}<span class="badge badge-green" style="font-size:.7rem;">Paid</span>{% elif h.waived_at %}<span class="badge badge-neutral" style="font-size:.7rem;">Waived</span>{% else %}<span class="badge badge-yellow" style="font-size:.7rem;">Unpaid</span>{% endif %}
             {% endif %}
           {% endif %}
         </td>

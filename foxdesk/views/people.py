@@ -391,7 +391,7 @@ def admin_person_history(person_id):
           'ended_at': l.checked_in_at, 'acknowledged_by': l.acknowledged_by} for l in loaner_checkouts] +
         [{'kind': 'incident', 'asset_tag': i.asset_tag, 'timestamp': i.created_at,
           'description': i.description, 'fee_charged': i.fee_charged,
-          'fee_amount': i.fee_amount, 'paid_at': i.paid_at} for i in incidents],
+          'fee_amount': i.fee_amount, 'paid_at': i.paid_at, 'waived_at': i.waived_at} for i in incidents],
         key=lambda row: row['timestamp'], reverse=True,
     )
 

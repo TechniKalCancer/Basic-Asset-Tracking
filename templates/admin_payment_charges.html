@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}Charges{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('billing') }}Charges</h1>
+  <span class="badge badge-blue">{{ rows|length }} · ${{ '{:,.2f}'.format(total) }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/payments/charges/export?{{ request.query_string.decode() }}" class="btn btn-ghost">{{ icon('download') }}Export CSV</a>
+  <a href="/admin/payments" class="btn btn-ghost">← Payments</a>
+</div>
+
+<form method="GET" class="ch-filters">
+  <div class="ch-pills" role="navigation" aria-label="Status">
+    {% for key, label in statuses %}
+    <a href="?status={{ key }}{% for k in ('kind', 'site_id', 'age', 'q', 'sort') if args.get(k) %}&{{ k }}={{ args.get(k)|urlencode }}{% endfor %}"
+       class="{{ 'active' if args.get('status', 'owed') == key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <input type="hidden" name="status" value="{{ args.get('status', 'owed') }}">
+  <select name="kind" onchange="this.form.submit()" aria-label="Type">
+    <option value="">Every type</option>
+    {% for key, label in kinds.items() %}<option value="{{ key }}" {{ 'selected' if args.get('kind') == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  {% if sites|length > 1 %}
+  <select name="site_id" onchange="this.form.submit()" aria-label="School">
+    <option value="">All schools</option>
+    {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if (args.get('site_id')|int) == s.id }}>{{ s.name }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <select name="age" onchange="this.form.submit()" aria-label="Age">
+    <option value="">Any age</option>
+    {% for days, label in ages %}<option value="{{ days }}" {{ 'selected' if (args.get('age')|int) == days }}>Older than {{ days }} days</option>{% endfor %}
+  </select>
+  <select name="sort" onchange="this.form.submit()" aria-label="Sort">
+    {% for key, label in [('newest', 'Newest first'), ('oldest', 'Oldest first'), ('person', 'By person'), ('amount', 'Largest first')] %}
+    <option value="{{ key }}" {{ 'selected' if args.get('sort', 'newest') == key }}>{{ label }}</option>{% endfor %}
+  </select>
+  <input type="search" name="q" value="{{ args.get('q', '') }}" placeholder="Person, description, tag" aria-label="Search charges">
+  <button type="submit" class="btn btn-ghost">Search</button>
+</form>
+
+<form method="POST" action="/admin/payments/charges/bulk?{{ request.query_string.decode() }}" id="chForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card ch-bar" id="chBar">
+    <strong id="chCount">Nothing selected</strong>
+    <select name="action" id="chAction" aria-label="What to do">
+      <option value="paid">Record payment</option>
+      <option value="waive">Waive</option>
+      <option value="reopen">Reopen a waived charge</option>
+    </select>
+    <span class="ch-opt" data-for="paid">
+      <select name="method" aria-label="Paid by">{% for key, label in methods.items() if key != 'online' %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+      <input name="note" placeholder="Check # or note (optional)" maxlength="120" aria-label="Note">
+    </span>
+    <span class="ch-opt" data-for="waive" hidden>
+      <input name="reason" placeholder="Why (kept with each charge)" maxlength="255" aria-label="Reason">
+    </span>
+    <button type="submit" class="btn btn-primary" id="chGo" disabled>Apply</button>
+  </div>
+
+  <div class="card" style="padding:0;overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th style="width:2.2rem;"><input type="checkbox" id="chAll" aria-label="Select every charge shown"></th>
+        <th>Date</th><th>Person</th><th>For</th><th class="num">Amount</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+      {% for c in rows %}
+        <tr>
+          <td><input type="checkbox" name="charge" value="{{ c.key }}" data-amount="{{ c.amount }}" aria-label="Select {{ c.person_name }} {{ c.kind_label }}"></td>
+          <td style="white-space:nowrap;">{{ c.created_at.strftime('%Y-%m-%d') }}<div class="ch-muted">{{ c.age_days }}d</div></td>
+          <td>{{ c.person_name }}</td>
+          <td>{{ c.kind_label }}: {{ c.description|truncate(70) }}
+            {% if c.link_url %}<div><a class="tag-link ch-muted" href="{{ c.link_url }}">{{ c.link_label }}</a></div>{% endif %}</td>
+          <td class="num">${{ '{:,.2f}'.format(c.amount) }}</td>
+          <td>{% if c.status == 'paid' %}<span class="badge badge-green">Paid</span><div class="ch-muted">{{ c.paid_at|ago }}{% if c.method_label %} · {{ c.method_label }}{% endif %}</div>
+              {% elif c.status == 'waived' %}<span class="badge badge-neutral">Waived</span><div class="ch-muted" title="{{ c.waive_reason or '' }}">{{ c.waived_at|ago }}{% if c.waived_by %} · {{ c.waived_by }}{% endif %}</div>
+              {% else %}<span class="badge badge-yellow">Owed</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="ch-muted" style="text-align:center;padding:1.5rem;">No charges match.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+<script>
+(function () {
+  const form = document.getElementById('chForm'), all = document.getElementById('chAll');
+  const boxes = Array.from(form.querySelectorAll('input[name=charge]'));
+  const count = document.getElementById('chCount'), go = document.getElementById('chGo'), action = document.getElementById('chAction');
+  function update() {
+    const picked = boxes.filter(b => b.checked);
+    const sum = picked.reduce((t, b) => t + parseFloat(b.dataset.amount || 0), 0);
+    count.textContent = picked.length ? `${picked.length} selected · $${sum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : 'Nothing selected';
+    go.disabled = !picked.length;
+    all.checked = picked.length && picked.length === boxes.length;
+  }
+  function showOptions() {
+    form.querySelectorAll('.ch-opt').forEach(el => { el.hidden = el.dataset.for !== action.value; });
+  }
+  all.addEventListener('change', () => { boxes.forEach(b => { b.checked = all.checked; }); update(); });
+  boxes.forEach(b => b.addEventListener('change', update));
+  action.addEventListener('change', showOptions);
+  form.addEventListener('submit', (e) => {
+    const n = boxes.filter(b => b.checked).length;
+    const verb = {paid: 'Record payment for', waive: 'Waive', reopen: 'Reopen'}[action.value];
+    if (!confirm(`${verb} ${n} charge${n === 1 ? '' : 's'}?`)) e.preventDefault();
+  });
+  showOptions(); update();
+})();
+</script>
+<style>
+  .ch-muted { color: var(--muted); font-size: .76rem; }
+  .ch-filters { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  .ch-filters select { width: auto; }
+  .ch-filters input[type=search] { flex: 1; min-width: 180px; max-width: 280px; }
+  .ch-pills { display: flex; gap: .4rem; flex-wrap: wrap; margin-right: .3rem; }
+  .ch-pills a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); text-decoration: none; font-size: .85rem; }
+  .ch-pills a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .ch-bar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; position: sticky; top: .5rem; z-index: 5; }
+  .ch-bar select, .ch-bar input { width: auto; }
+  .ch-opt { display: inline-flex; gap: .5rem; flex-wrap: wrap; }
+  .ch-opt[hidden] { display: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+</style>
+{% endblock %}

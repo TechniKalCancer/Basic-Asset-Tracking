@@ -83,7 +83,7 @@ def _summary(start, end, site_id):
     if feature_enabled('incidents'):
         inc = _scoped(Incident.query, Incident, site_id)
         new = inc.filter(Incident.created_at >= start, Incident.created_at < end).all()
-        unpaid = inc.filter(Incident.fee_charged.is_(True), Incident.paid_at.is_(None)).all()
+        unpaid = inc.filter(Incident.fee_charged.is_(True), Incident.paid_at.is_(None), Incident.waived_at.is_(None)).all()
         lines += ['', 'DAMAGE AND FEES',
                   f'  Damage reports: {len(new)}   Fees charged: {_money(sum(i.fee_amount or 0 for i in new if i.fee_charged))}',
                   f'  Unpaid fees (all time): {_money(sum(i.fee_amount or 0 for i in unpaid))} on {len(unpaid)} report(s)']
@@ -159,7 +159,7 @@ def _tickets(start, end, site_id):
 def _damage(start, end, site_id):
     inc = _scoped(Incident.query, Incident, site_id)
     new = inc.filter(Incident.created_at >= start, Incident.created_at < end).order_by(Incident.created_at).all()
-    unpaid = inc.filter(Incident.fee_charged.is_(True), Incident.paid_at.is_(None)).order_by(Incident.created_at).all()
+    unpaid = inc.filter(Incident.fee_charged.is_(True), Incident.paid_at.is_(None), Incident.waived_at.is_(None)).order_by(Incident.created_at).all()
     return ([f'DAMAGE REPORTS ({len(new)})'] + _or_none(
         [f'  {i.created_at:%b %d}  {i.asset_tag}  {i.person_name or "unknown"}: {i.description[:70]}'
          + (f'  fee {_money(i.fee_amount)}' if i.fee_charged else '') for i in new[:100]])

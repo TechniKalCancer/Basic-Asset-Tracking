@@ -12,11 +12,11 @@ def _person_unpaid_fee_total(person_id):
     """Sum of fee_amount across this person's charged-but-unpaid incidents AND
     ticket charges. Used to warn (not block) on delete/graduate."""
     incident_total = db.session.query(db.func.coalesce(db.func.sum(Incident.fee_amount), 0)).filter(
-        Incident.person_id == person_id, Incident.fee_charged.is_(True), Incident.paid_at.is_(None),
+        Incident.person_id == person_id, Incident.fee_charged.is_(True), Incident.paid_at.is_(None), Incident.waived_at.is_(None),
     ).scalar()
     charge_total = db.session.query(db.func.coalesce(db.func.sum(TicketCharge.amount), 0)) \
         .join(Ticket, Ticket.id == TicketCharge.ticket_id) \
-        .filter(Ticket.requester_person_id == person_id, TicketCharge.paid_at.is_(None)).scalar()
+        .filter(Ticket.requester_person_id == person_id, TicketCharge.paid_at.is_(None), TicketCharge.waived_at.is_(None)).scalar()
     return Decimal(incident_total) + Decimal(charge_total)
 
 

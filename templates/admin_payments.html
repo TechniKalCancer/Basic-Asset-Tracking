@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Payments{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('billing') }}Payments</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/payments/charges" class="btn btn-primary">Work on charges</a>
+  <a href="/admin/fees" class="btn btn-ghost">By person</a>
+  {% if is_super_admin() %}<a href="/admin/portal" class="btn btn-ghost">{{ 'Online payments' if online else 'Set up online payments' }}</a>{% endif %}
+</div>
+
+<div class="pm-tiles">
+  <a class="card pm-tile" href="/admin/payments/charges?status=owed"><div class="pm-label">Owed now</div>
+    <div class="pm-value">${{ '{:,.2f}'.format(s.owed_total) }}</div><div class="pm-note">{{ s.owed_count }} charge{{ 's' if s.owed_count != 1 }} · {{ s.people_owing }} {{ 'person' if s.people_owing == 1 else 'people' }}</div></a>
+  <div class="card pm-tile"><div class="pm-label">Collected this month</div><div class="pm-value">${{ '{:,.2f}'.format(s.collected_month) }}</div></div>
+  <a class="card pm-tile" href="/admin/payments/charges?status=paid"><div class="pm-label">Collected this school year</div>
+    <div class="pm-value">${{ '{:,.2f}'.format(s.collected_year) }}</div><div class="pm-note">since {{ s.year_start.strftime('%b %d, %Y') }}</div></a>
+  <a class="card pm-tile" href="/admin/payments/charges?status=waived"><div class="pm-label">Waived this school year</div>
+    <div class="pm-value">${{ '{:,.2f}'.format(s.waived_year) }}</div></a>
+</div>
+
+<div class="pm-grid">
+  <div class="card viz-card">
+    <div class="viz-head"><div><h2>{{ chart.title }}</h2><div class="viz-sub">{{ chart.subtitle }}</div></div>
+      <a href="/admin/payments/charges?status=owed&age=90" class="btn btn-ghost viz-more">Over 90 days →</a></div>
+    <div class="viz" data-chart-id="{{ chart.id }}"><script type="application/json">{{ chart|tojson }}</script></div>
+  </div>
+  <div class="card">
+    <h2 class="pm-h2">By type</h2>
+    <table class="pm-table">
+      <thead><tr><th>Type</th><th class="num">Owed</th><th class="num">Collected this year</th></tr></thead>
+      <tbody>{% for key, k in s.by_kind.items() %}
+        <tr><td><a class="tag-link" href="/admin/payments/charges?kind={{ key }}">{{ k.label }}</a></td>
+          <td class="num">${{ '{:,.2f}'.format(k.owed) }}</td><td class="num">${{ '{:,.2f}'.format(k.collected) }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% if s.by_method %}
+    <h2 class="pm-h2" style="margin-top:1.2rem;">How it was paid this year</h2>
+    <table class="pm-table">
+      <tbody>{% for method, amount in s.by_method %}<tr><td>{{ method }}</td><td class="num">${{ '{:,.2f}'.format(amount) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+
+<div class="pm-grid">
+  <div class="card">
+    <h2 class="pm-h2">Who owes the most</h2>
+    {% if s.top_people %}
+    <table class="pm-table">
+      <thead><tr><th>Person</th><th class="num">Charges</th><th class="num">Owed</th></tr></thead>
+      <tbody>{% for name, p in s.top_people %}
+        <tr><td><a class="tag-link" href="/admin/payments/charges?status=owed&q={{ name|urlencode }}">{{ name }}</a></td>
+          <td class="num">{{ p.count }}</td><td class="num">${{ '{:,.2f}'.format(p.amount) }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}<p class="pm-muted">Nobody owes anything.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2 class="pm-h2">By school</h2>
+    {% if s.by_school %}
+    <table class="pm-table">
+      <thead><tr><th>School</th><th class="num">Owed</th><th class="num">Collected this year</th></tr></thead>
+      <tbody>{% for name, v in s.by_school %}<tr><td>{{ name }}</td><td class="num">${{ '{:,.2f}'.format(v.owed) }}</td><td class="num">${{ '{:,.2f}'.format(v.collected) }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% else %}<p class="pm-muted">No charges yet.</p>{% endif %}
+    <h2 class="pm-h2" style="margin-top:1.2rem;">Recently settled</h2>
+    {% for c in s.recent %}
+    <div class="pm-recent"><span>{{ c.person_name }} · {{ c.kind_label }}</span>
+      <span class="pm-muted">${{ '%.2f'|format(c.amount) }} {{ 'paid' if c.status == 'paid' else 'waived' }} {{ (c.paid_at or c.waived_at)|ago }}{% if c.method_label %} · {{ c.method_label }}{% endif %}</span></div>
+    {% else %}<p class="pm-muted">Nothing yet.</p>{% endfor %}
+  </div>
+</div>
+{% include '_viz.html' %}
+<style>
+  .pm-muted { color: var(--muted); font-size: .82rem; }
+  .pm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 1rem; margin-bottom: 1.2rem; }
+  .pm-tiles .card { margin: 0; }
+  .pm-tile { padding: .9rem 1rem; text-decoration: none; color: inherit; }
+  a.pm-tile:hover, a.pm-tile:focus-visible { border-color: var(--accent); }
+  .pm-label { color: var(--muted); font-size: .8rem; }
+  .pm-value { font-size: 1.6rem; font-weight: 600; margin-top: .2rem; color: var(--text); }
+  .pm-note { color: var(--muted); font-size: .76rem; }
+  .pm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1.2rem; margin-bottom: 1.2rem; align-items: start; }
+  .pm-grid .card { margin: 0; }
+  .pm-h2 { font-size: 1rem; margin: 0 0 .6rem; }
+  .pm-table td.num, .pm-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pm-recent { display: flex; justify-content: space-between; gap: .8rem; padding: .35rem 0; border-top: 1px solid var(--border); font-size: .88rem; flex-wrap: wrap; }
+  .pm-recent:first-of-type { border-top: 0; }
+</style>
+{% endblock %}

@@ -21,12 +21,28 @@
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
-      <select name="category_id" required>
+      <select name="category_id" id="ticketCategory" required>
         <option value="">Choose a category…</option>
         {% for c in categories %}
-        <option value="{{ c.id }}" {{ 'selected' if form and form.category_id == c.id|string }}>{{ c.name }}</option>
+        <option value="{{ c.id }}" data-fee="{{ '%.2f'|format(c.default_price) if c.default_price else '' }}" {{ 'selected' if form and form.category_id == c.id|string }}>{{ c.name }}{% if c.default_price %} (${{ '%.2f'|format(c.default_price) }} fee){% endif %}</option>
         {% endfor %}
       </select>
+      <label id="waiveFeeRow" hidden style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem;font-size:.88rem;cursor:pointer;">
+        <input type="checkbox" name="waive_fee" style="width:auto;" {{ 'checked' if form and form.waive_fee }} />
+        <span>Waive the <strong id="waiveFeeAmount"></strong> fee for this ticket</span>
+      </label>
+      <script>
+        (function () {
+          const pick = document.getElementById('ticketCategory'), row = document.getElementById('waiveFeeRow');
+          function show() {
+            const fee = (pick.options[pick.selectedIndex] || {}).dataset ? pick.options[pick.selectedIndex].dataset.fee : '';
+            row.hidden = !fee;
+            row.style.display = fee ? 'flex' : 'none';
+            document.getElementById('waiveFeeAmount').textContent = fee ? '$' + fee : '';
+          }
+          pick.addEventListener('change', show); show();
+        })();
+      </script>
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Subject</label>

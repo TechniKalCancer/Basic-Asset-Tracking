@@ -36,7 +36,9 @@ TYPE_MAP = {
     'server': 'server', 'appliance': 'server', 'storage': 'storage', 'network': 'switch', 'wireless': 'access_point',
     'firewall': 'firewall', 'loadbalancer': 'router', 'power': 'ups', 'printer': 'printer', 'camera': 'camera',
     'collaboration': 'phone', 'workstation': None, 'environment': None, 'timing': None,
+    'management': None,  # an iDRAC / iLO card: part of a server LibreNMS also lists on its own
 }
+SKIP_OS = {'ping'}  # monitored by ping alone, so LibreNMS can't say what it is
 # Where LibreNMS's type is too broad, its OS says more.
 OS_TYPES = {
     'fortigate': 'firewall', 'pfsense': 'firewall', 'opnsense': 'firewall', 'panos': 'firewall', 'sonicwall': 'firewall',
@@ -52,7 +54,12 @@ OS_VENDORS = {
     'sonicwall': 'sonicwall', 'apc': 'apc', 'eatonups': 'eaton', 'dsm': 'synology', 'qnap': 'qnap', 'idrac': 'dell',
     'dnos': 'dell', 'dell-os10': 'dell', 'powerconnect': 'dell', 'kyocera': 'kyocera', 'xerox': 'xerox',
     'ricoh': 'ricoh', 'brother': 'brother', 'lexmark': 'lexmark', 'netgear': 'netgear', 'tplink': 'tplink',
+    'hiveos-wireless': 'extreme', 'hiveos': 'extreme', 'jetdirect': 'hp', 'drac': 'dell',
 }
+# What LibreNMS shows when it couldn't name the model: an SNMP object id.
+UNNAMED_HARDWARE = re.compile(r'^(registration|enterprises|iso)[.\d]*$|^[\d.]+$', re.IGNORECASE)
+# Default SNMP locations that say nothing about where a device is.
+PLACEHOLDER_LOCATIONS = {'unknown', 'none', 'n/a', 'not set', 'sitting on the dock of the bay', 'corporate data center'}
 CLOSET_TYPES = {'switch', 'firewall', 'router', 'server', 'storage', 'ups'}
 
 
@@ -174,11 +181,61 @@ def check_connection():
 
 def foxdesk_type(device):
     os_name = (device.get('os') or '').lower()
+    if os_name in SKIP_OS:
+        return None
     return OS_TYPES.get(os_name) or TYPE_MAP.get((device.get('type') or '').lower(), None if device.get('type') else 'switch')
 
 
+def hardware(device):
+    """The model name LibreNMS reports, or None when it's only an object id."""
+    text = (device.get('hardware') or '').strip()
+    return None if not text or UNNAMED_HARDWARE.match(text) else text
+
+
+def _site_names(sites):
+    """[(site_id, the lowercase names and initials it goes by)]: 'fox creek
+    middle school', 'fox creek middle', 'fcms'."""
+    out = []
+    for s in sites:
+        words = s.name.strip().lower().split()
+        names = {' '.join(words), ' '.join(w for w in words if w != 'school'), ''.join(w[0] for w in words)}
+        out.append((s.id, {n for n in names if n}))
+    return out
+
+
+def site_from_text(text, site_names):
+    """The school a location string names ('Fox Creek High School',
+    'FCMS MDF'), or None."""
+    for part in re.split(r'[|/,]', (text or '').lower()):
+        part = part.strip()
+        for site_id, names in site_names:
+            if any(part == n or part.startswith(n + ' ') for n in names):
+                return site_id
+    return None
+
+
+def location_parts(text, site_names):
+    """The places in a location string, outermost first, leaving out what
+    only names the school: 'Fox Creek Middle School|Fox Creek Middle|FCMS'
+    -> [], 'FCMS MDF' -> ['MDF'], 'Room 204' -> ['Room 204']."""
+    names = {n for _, ns in site_names for n in ns}
+    parts = []
+    for part in (text or '').split('|'):
+        part = part.strip()
+        low = part.lower()
+        if not part or low in PLACEHOLDER_LOCATIONS or low in names:
+            continue
+        for n in sorted(names, key=len, reverse=True):
+            if low.startswith(n + ' '):
+                part = part[len(n):].strip(' -:')
+                break
+        if part:
+            parts.append(part[:120])
+    return parts
+
+
 def device_vendor(device):
-    for text in (device.get('hardware'), device.get('sysDescr')):
+    for text in (hardware(device), device.get('sysDescr')):
         key = normalize_vendor_name(text)
         if key:
             return key
@@ -230,7 +287,7 @@ def _device_model(vendor_key, hardware, device_type):
     return found
 
 
-def apply_device(device, settings, rules, config):
+def apply_device(device, settings, rules, config, site_names=()):
     """Bring one LibreNMS device into FoxDesk. Returns 'added', 'linked',
     'updated', 'unmatched' or 'skipped'. Does not commit."""
     from foxdesk.services.equipment import find_or_create_location
@@ -265,7 +322,7 @@ def apply_device(device, settings, rules, config):
             return 'unmatched'
         taken = serial and AssetRegistry.query.filter(db.func.upper(AssetRegistry.serial_number) == serial.upper()).first()
         row = AssetRegistry(asset_tag=_unique_tag(name or ip, device_id), serial_number=None if taken else serial,
-                            device_type=ftype, description=(device.get('hardware') or '')[:255] or None)
+                            device_type=ftype, description=(hardware(device) or '')[:255] or None)
         db.session.add(row)
         db.session.flush()
         if not Asset.query.filter_by(asset_tag=row.asset_tag).first():
@@ -282,13 +339,15 @@ def apply_device(device, settings, rules, config):
             db.func.upper(AssetRegistry.serial_number) == serial.upper(), AssetRegistry.id != row.id).first():
         row.serial_number = serial
     if row.device_model_id is None:
-        model = _device_model(device_vendor(device), device.get('hardware'), row.device_type)
+        model = _device_model(device_vendor(device), hardware(device), row.device_type)
         row.device_model_id = model.id if model else None
     if row.site_id is None:
-        row.site_id = site_for_ip(ip, rules)
-    if row.location_id is None and row.site_id and (device.get('location') or '').strip():
-        kind = 'closet' if row.device_type in CLOSET_TYPES else 'room'
-        loc = find_or_create_location(row.site_id, device['location'], kind=kind)
+        row.site_id = site_for_ip(ip, rules) or site_from_text(device.get('location'), site_names)
+    if row.location_id is None and row.site_id:
+        loc = None
+        for i, name in enumerate(location_parts(device.get('location'), site_names)):
+            kind = 'rack' if 'rack' in name.lower() else ('closet' if row.device_type in CLOSET_TYPES and i == 0 else 'room')
+            loc = find_or_create_location(row.site_id, name, kind=kind, parent=loc)
         row.location_id = loc.id if loc else None
     return outcome
 
@@ -299,6 +358,7 @@ def run_librenms_sync():
     settings = librenms_settings()
     config = librenms_config()
     rules, _ = parse_site_rules(settings.site_rules)
+    site_names = _site_names(Site.query.all())
     summary = {'seen': 0, 'added': 0, 'linked': 0, 'updated': 0, 'unmatched': 0, 'skipped': 0, 'failed': 0}
     try:
         devices = _get('devices', config).get('devices') or []
@@ -310,7 +370,7 @@ def run_librenms_sync():
         summary['seen'] += 1
         try:
             with db.session.begin_nested():
-                summary[apply_device(device, settings, rules, config)] += 1
+                summary[apply_device(device, settings, rules, config, site_names)] += 1
         except Exception as e:  # one odd device mustn't stop the rest
             logger.warning('LibreNMS device %s failed: %s', device.get('device_id'), e)
             summary['failed'] += 1

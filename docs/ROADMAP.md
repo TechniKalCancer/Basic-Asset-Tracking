@@ -56,6 +56,8 @@ district only sees what it uses.
 - [x] Equipment (servers, network gear, printers, displays...) with locations, support dates and an E-rate inventory
 - [x] LibreNMS sync for network gear and servers
 - [x] Spot checks: scan devices and ID cards with a phone to confirm the right student has each device
+- [x] Payments tab: dashboard, bulk work on charges (record payment with method, waive, reopen), waive on new tickets
+- [ ] Payments: receipts, a payment ledger with partial payments, family statements, payment plans
 - [ ] Collection-day mode; purchasing; facilities tickets
 
 ## Phase 6 — Ship-ready

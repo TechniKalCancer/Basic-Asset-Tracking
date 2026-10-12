@@ -199,7 +199,7 @@ def admin_fees():
 
     inc_query = Incident.query.filter(Incident.fee_charged.is_(True))
     if status == 'unpaid':
-        inc_query = inc_query.filter(Incident.paid_at.is_(None))
+        inc_query = inc_query.filter(Incident.paid_at.is_(None), Incident.waived_at.is_(None))
     elif status == 'paid':
         inc_query = inc_query.filter(Incident.paid_at.isnot(None))
     if site_ids is not None:
@@ -219,7 +219,7 @@ def admin_fees():
         amount = inc.fee_amount or Decimal('0')
         entry['charges'].append({
             'date': inc.created_at, 'label': f'Incident: {inc.description}', 'amount': amount,
-            'paid': inc.paid_at is not None, 'is_ticket_charge': False,
+            'paid': inc.paid_at is not None, 'waived': inc.waived_at is not None, 'is_ticket_charge': False,
             'mark_paid_url': url_for('admin_incident_mark_paid', incident_id=inc.id),
             'fee_url': url_for('admin_incident_fee', incident_id=inc.id),
             'delete_url': url_for('admin_incident_delete', incident_id=inc.id),
@@ -234,7 +234,7 @@ def admin_fees():
     if _has_permission('tickets'):
         tc_query = _scope_tickets(TicketCharge.query.join(Ticket, Ticket.id == TicketCharge.ticket_id), site_ids)
         if status == 'unpaid':
-            tc_query = tc_query.filter(TicketCharge.paid_at.is_(None))
+            tc_query = tc_query.filter(TicketCharge.paid_at.is_(None), TicketCharge.waived_at.is_(None))
         elif status == 'paid':
             tc_query = tc_query.filter(TicketCharge.paid_at.isnot(None))
         if search:
@@ -249,7 +249,8 @@ def admin_fees():
             amount = tc.amount or Decimal('0')
             entry['charges'].append({
                 'date': tc.created_at, 'label': f'Ticket #{t.id}: {tc.description}', 'amount': amount,
-                'paid': tc.paid_at is not None, 'is_ticket_charge': True, 'description': tc.description,
+                'paid': tc.paid_at is not None, 'waived': tc.waived_at is not None, 'is_ticket_charge': True,
+                'description': tc.description,
                 'mark_paid_url': url_for('admin_ticket_charge_mark_paid', charge_id=tc.id),
                 'fee_url': url_for('admin_ticket_charge_edit', charge_id=tc.id),
                 'delete_url': url_for('admin_ticket_charge_delete', charge_id=tc.id),
@@ -277,7 +278,7 @@ def admin_asset_invoice(asset_tag):
     page in this app — no PDF library involved."""
     registry_row = _scope_registry(AssetRegistry.query, _current_site_ids()).filter_by(asset_tag=asset_tag).first_or_404()
     incidents = Incident.query.filter_by(asset_tag=asset_tag).order_by(Incident.created_at).all()
-    total = sum((inc.fee_amount or Decimal('0')) for inc in incidents if inc.fee_charged)
+    total = sum((inc.fee_amount or Decimal('0')) for inc in incidents if inc.fee_charged and not inc.waived_at)
     return render_template('admin_asset_invoice.html', registry_row=registry_row, incidents=incidents,
                            total=total, branding_settings=db.session.get(BrandingSettings, 1),
                            generated_at=utcnow())

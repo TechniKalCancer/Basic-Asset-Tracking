@@ -637,6 +637,17 @@ class Ticket(db.Model):
     created_at    = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     updated_at    = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
     resolved_at   = db.Column(db.DateTime, nullable=True)
+    # SLA clocks (services/sla.py): due times are set from the ticket's
+    # priority when it's opened or re-prioritized; first_response_at is the
+    # first reply the requester actually received (or the resolution).
+    first_response_at = db.Column(db.DateTime, nullable=True)
+    response_due_at   = db.Column(db.DateTime, nullable=True, index=True)
+    resolve_due_at    = db.Column(db.DateTime, nullable=True, index=True)
+    # A merged ticket is closed and points at the one it was folded into;
+    # replies to its emails follow the pointer. parent_id links several
+    # reports of one problem ("Wi-Fi down in B-wing") under one ticket.
+    merged_into_id = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
+    parent_id      = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True, index=True)
 
     category     = db.relationship('TicketCategory')
     site         = db.relationship('Site')
@@ -647,6 +658,13 @@ class Ticket(db.Model):
                                     cascade='all, delete-orphan')
     charges      = db.relationship('TicketCharge', backref='ticket', order_by='TicketCharge.created_at',
                                     cascade='all, delete-orphan')
+    merged_into  = db.relationship('Ticket', remote_side=[id], foreign_keys=[merged_into_id])
+    parent       = db.relationship('Ticket', remote_side=[id], foreign_keys=[parent_id],
+                                   backref=db.backref('linked', order_by='Ticket.id'))
+
+    @property
+    def is_open(self):
+        return self.status in ('open', 'in_progress')
 
 
 class TicketComment(db.Model):
@@ -1079,12 +1097,15 @@ class PortalLogin(db.Model):
 
 
 class FeePayment(db.Model):
-    """An online payment attempt for a damage fee. provider_ref is the
-    Stripe Checkout Session id; status moves pending -> paid once Stripe
-    confirms the amount, and the incident is marked paid then."""
+    """An online payment attempt for a damage fee (incident_id) or a device
+    protection plan chosen when signing an agreement (signature_id) — one
+    of the two is set. provider_ref is the Stripe Checkout Session id;
+    status moves pending -> paid once Stripe confirms the amount, and the
+    fee or plan is marked paid then."""
     __tablename__ = 'fee_payment'
     id           = db.Column(db.Integer, primary_key=True)
-    incident_id  = db.Column(db.Integer, db.ForeignKey('incident.id'), nullable=False, index=True)
+    incident_id  = db.Column(db.Integer, db.ForeignKey('incident.id'), nullable=True, index=True)
+    signature_id = db.Column(db.Integer, db.ForeignKey('agreement_signature.id'), nullable=True, index=True)
     amount       = db.Column(db.Numeric(8, 2), nullable=False)
     provider     = db.Column(db.String(20), nullable=False, default='stripe')
     provider_ref = db.Column(db.String(255), nullable=False, unique=True)
@@ -1093,7 +1114,8 @@ class FeePayment(db.Model):
     created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
     paid_at      = db.Column(db.DateTime, nullable=True)
 
-    incident = db.relationship('Incident')
+    incident  = db.relationship('Incident')
+    signature = db.relationship('AgreementSignature')
 
 
 class SigninSettings(db.Model):
@@ -1282,3 +1304,83 @@ class Attachment(db.Model):
     @property
     def is_image(self):
         return self.content_type.startswith('image/')
+
+
+class SlaSettings(db.Model):
+    """Response and resolution targets (one row). Targets are in school
+    hours: only time inside the working day on a working weekday counts,
+    and closed_dates (holidays, breaks) don't count at all. targets is
+    {priority: {"response": hours, "resolve": hours}}; a blank target means
+    no clock for that priority. Only tickets opened since started_at get
+    clocks, so turning SLAs on doesn't flag every old ticket as overdue.
+    See services/sla.py."""
+    __tablename__ = 'sla_settings'
+    id           = db.Column(db.Integer, primary_key=True)
+    enabled      = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    work_days    = db.Column(db.String(20), nullable=False, default='0,1,2,3,4')  # Monday = 0
+    day_start    = db.Column(db.String(5), nullable=False, default='07:30')
+    day_end      = db.Column(db.String(5), nullable=False, default='16:00')
+    closed_dates = db.Column(db.Text, nullable=True)  # one per line: 2026-11-26 or 2026-12-21 to 2027-01-01
+    targets      = db.Column(db.JSON, nullable=True)
+    started_at   = db.Column(db.DateTime, nullable=True)  # when SLAs were last turned on; older tickets get no clocks
+    updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class Agreement(db.Model):
+    """A device agreement students and/or their parents sign (in the portal,
+    or on paper recorded by staff), usually once a school year. Once anyone
+    has signed, the text is locked — a change is a new version, so every
+    signature points at exactly the words that person agreed to (see
+    AgreementSignature.body_sha256). site_id limits it to one school.
+    A protection plan can be offered alongside; families choose to enroll
+    or not when they sign."""
+    __tablename__ = 'agreement'
+    id               = db.Column(db.Integer, primary_key=True)
+    title            = db.Column(db.String(160), nullable=False)
+    school_year      = db.Column(db.String(20), nullable=True)
+    body             = db.Column(db.Text, nullable=False)
+    site_id          = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
+    require_student  = db.Column(db.Boolean, nullable=False, default=True)
+    require_guardian = db.Column(db.Boolean, nullable=False, default=True)
+    plan_offered     = db.Column(db.Boolean, nullable=False, default=False)
+    plan_name        = db.Column(db.String(120), nullable=True)
+    plan_price       = db.Column(db.Numeric(8, 2), nullable=True)
+    plan_details     = db.Column(db.Text, nullable=True)
+    is_active        = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    last_reminded_at = db.Column(db.DateTime, nullable=True)
+    created_by       = db.Column(db.String(160), nullable=True)
+    created_at       = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at       = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+    site = db.relationship('Site')
+    signatures = db.relationship('AgreementSignature', backref='agreement', lazy='dynamic',
+                                 cascade='all, delete-orphan')
+
+
+AGREEMENT_SIGNER_ROLES = {'student': 'Student', 'guardian': 'Parent/guardian', 'paper': 'Paper copy (recorded by staff)'}
+
+
+class AgreementSignature(db.Model):
+    """One signature on an Agreement for one student. A paper copy recorded
+    by staff (signer_role 'paper') covers every signature the agreement
+    needs. plan_choice is 'enrolled' or 'declined' when a plan was offered;
+    an enrolled plan with a price counts once plan_paid_at is set."""
+    __tablename__ = 'agreement_signature'
+    id           = db.Column(db.Integer, primary_key=True)
+    agreement_id = db.Column(db.Integer, db.ForeignKey('agreement.id'), nullable=False, index=True)
+    person_id    = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=False, index=True)
+    signer_role  = db.Column(db.String(20), nullable=False)
+    signer_name  = db.Column(db.String(160), nullable=False)
+    signer_email = db.Column(db.String(255), nullable=True)
+    signed_at    = db.Column(db.DateTime, nullable=False, default=utcnow)
+    ip_address   = db.Column(db.String(64), nullable=True)
+    user_agent   = db.Column(db.String(255), nullable=True)
+    body_sha256  = db.Column(db.String(64), nullable=False)
+    plan_choice  = db.Column(db.String(10), nullable=True)
+    plan_amount  = db.Column(db.Numeric(8, 2), nullable=True)
+    plan_paid_at = db.Column(db.DateTime, nullable=True)
+    recorded_by  = db.Column(db.String(160), nullable=True)
+
+    person = db.relationship('Person')
+
+    __table_args__ = (db.UniqueConstraint('agreement_id', 'person_id', 'signer_role', name='uq_agreement_signature_role'),)

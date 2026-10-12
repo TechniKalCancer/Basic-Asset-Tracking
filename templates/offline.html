@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1a1d27" />
+  <title>Offline — {{ app_name }}</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+           background: #0f1117; color: #e2e8f0; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; box-sizing: border-box; }
+    main { max-width: 420px; text-align: center; }
+    img { width: 72px; height: 72px; border-radius: 16px; }
+    h1 { font-size: 1.35rem; margin: 1rem 0 .5rem; }
+    p { color: #94a3b8; line-height: 1.5; margin: 0 0 1.2rem; }
+    button { font: inherit; padding: .6rem 1.2rem; border-radius: 8px; border: 0; background: #4f7ef8; color: #fff; cursor: pointer; }
+    button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/static/pwa/icon-192.png" alt="">
+    <h1>You're offline</h1>
+    <p>{{ app_name }} needs a connection to the school network or the internet. Check Wi-Fi, then try again.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>

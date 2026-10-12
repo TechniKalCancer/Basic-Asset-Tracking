@@ -190,7 +190,9 @@ def _recent_subjects(trigger_key, limit=25):
 
 
 def scheduled_subjects(trigger_key):
-    """(subject, dedupe_key) pairs a scheduled trigger should consider now."""
+    """(subject, dedupe_key) pairs a scheduled trigger should consider now —
+    or (subject, dedupe_key, extra facts) where the subject alone can't say
+    why it's due."""
     today = date.today()
     if trigger_key == 'repair.overdue':
         return [(r, f'repair:{r.id}') for r in Repair.query.filter(Repair.returned_at.is_(None))]
@@ -213,6 +215,15 @@ def scheduled_subjects(trigger_key):
         restocked = dict(db.session.query(PartMovement.part_id, db.func.max(PartMovement.id))
                          .filter(PartMovement.change > 0).group_by(PartMovement.part_id).all())
         return [(p, f'part:{p.id}:{restocked.get(p.id, 0)}') for p in low]
+    if trigger_key == 'ticket.sla_breached':
+        from foxdesk.services.sla import breach_kind, overdue_filter
+        out = []
+        for t in Ticket.query.filter(overdue_filter(), Ticket.merged_into_id.is_(None)):
+            kind = breach_kind(t)
+            if kind:
+                due = t.response_due_at if kind == 'response' else t.resolve_due_at
+                out.append((t, f'sla:{t.id}:{kind}:{due:%Y%m%d%H%M}', {'sla_breach': kind}))
+        return out
     if trigger_key == 'signin.flagged':
         from foxdesk.services.reports import _signin_mismatches
         return [(m, f"signin:{m['asset_tag']}:{m['signin_email']}") for m in _signin_mismatches(None, 7)]
@@ -232,8 +243,8 @@ def run_scheduled():
         rules = AutomationRule.query.filter_by(trigger=trigger_key, enabled=True).all()
         if not rules:
             continue
-        for subject, key in scheduled_subjects(trigger_key):
-            ctx = build_context(trigger_key, subject)
+        for subject, key, *extra in scheduled_subjects(trigger_key):
+            ctx = build_context(trigger_key, subject, **(extra[0] if extra else {}))
             for rule in rules:
                 if run_rule(rule, ctx, dedupe_key=key):
                     fired += 1
@@ -245,12 +256,12 @@ def test_rule(rule, limit=25):
     and what each action would do. Changes nothing."""
     spec = TRIGGERS[rule.trigger]
     if spec.get('scheduled'):
-        subjects = [s for s, _ in scheduled_subjects(rule.trigger)][:200]
+        subjects = [(s, extra[0] if extra else {}) for s, _, *extra in scheduled_subjects(rule.trigger)][:200]
     else:
-        subjects = _recent_subjects(rule.trigger, limit)
+        subjects = [(s, {}) for s in _recent_subjects(rule.trigger, limit)]
     out = []
-    for subject in subjects:
-        ctx = build_context(rule.trigger, subject)
+    for subject, extra in subjects:
+        ctx = build_context(rule.trigger, subject, **extra)
         result = run_rule(rule, ctx, dry_run=True)
         if result is not None:
             out.append(dict(label=ctx['label'], **result))

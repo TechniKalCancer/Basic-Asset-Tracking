@@ -328,12 +328,15 @@ def process_message(m, row):
         return record
 
     who = m.get('from_name') or sender
-    ticket = db.session.get(Ticket, ticket_reference(m)) if ticket_reference(m) else None
+    from foxdesk.services.ticket_links import final_ticket
+    original = db.session.get(Ticket, ticket_reference(m)) if ticket_reference(m) else None
+    ticket = final_ticket(original)  # a reply to a merged ticket's email lands on the one it was merged into
     staff = User.query.filter(db.func.lower(User.email) == sender, User.is_active.is_(True)).first()
     person = find_person(email=sender)
-    allowed = ticket is not None and (
-        sender == (ticket.requester_email or '').lower() or staff is not None
-        or (person is not None and person.id == ticket.requester_person_id))
+    allowed = ticket is not None and staff is not None or any(
+        t is not None and (sender == (t.requester_email or '').lower()
+                           or (person is not None and person.id == t.requester_person_id))
+        for t in {original, ticket})
     if allowed:
         text = strip_quoted(m.get('text') or '')[:MAX_TEXT] or '(no message text)'
         db.session.add(TicketComment(ticket_id=ticket.id, body=text, author_label=f'{who} (email)',

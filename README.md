@@ -491,6 +491,19 @@ incident shows a ✉️ *Guardian notified* badge once sent. Wording is editable
   come first. Each tech can set a **signature** added under replies they email.
 - **Someone else is on this ticket**: the ticket page shows who else has it open and whether they're
   writing a reply (a heartbeat every 20 seconds).
+- **SLA targets** (Settings → SLA targets): first-reply and fix times per priority, counted in school
+  hours (working days, school-day hours and closed dates such as holidays, in `APP_TIMEZONE`), so a
+  ticket opened late Friday isn't overdue by Monday morning. Tickets show "Reply by…", "due soon" or
+  "overdue"; the queue gets a **Past SLA** view; the automation trigger *A ticket misses its reply or
+  fix time* fires once per missed clock. The reply clock stops at the first reply emailed to the
+  requester (or the resolution). Clocks only apply to tickets opened while SLAs are on.
+- **Merge and link** (on a ticket): merge a duplicate into the ticket that stays (comments, charges,
+  files and parts move over, the duplicate closes, its requester can be told, and email replies to the
+  duplicate land on the kept ticket); or link several reports of one problem under a main ticket and
+  resolve them all at once with one note emailed to every requester.
+- **Help desk reports** (Tickets → Reports): tickets opened and resolved, open backlog by week, median
+  first reply and time to fix (school hours), and how often SLA targets were met — overall and by tech,
+  category and school, for the last 30/90 days, the school year or 12 months. CSV export per ticket.
 
 ## Ticket Email Notifications
 
@@ -696,6 +709,28 @@ Both portals are off until a district switches them on under Features.
   FoxDesk. Try it with an `sk_test_` key first. When paying online is off, families see your note
   ("Pay at the front office").
 - Families at home can only reach the portal if FoxDesk has a public `https://` address (`APP_URL`).
+
+## Device Agreements (People → Device Agreements)
+
+- Write (paste) the agreement students and/or parents sign, usually once a school year, for every
+  school or one school. Families sign in the portal: they read the full text, type their name and
+  check "I agree"; FoxDesk records the name, email, time, IP address and a SHA-256 of the exact text.
+  Once anyone has signed, the text is locked; changing it makes a new version that everyone signs.
+- Staff can record a signed **paper copy**, which covers every signature the agreement needs.
+- The agreement page shows who has signed, partly signed or not signed (filter by school, class and
+  name; CSV export), and emails reminders with a sign-in link to everyone still missing (at most once
+  a day). The device page warns when the holder's agreement isn't signed, and the automation field
+  *Person's device agreements are signed* lets a rule remind the family when a device is handed out.
+- **Protection plan** (optional): families choose to enroll when they sign. A priced plan is paid
+  online through Stripe (when paying online is on) or marked paid at the office; paying turns on the
+  student's protection plan.
+
+## Install as an App
+
+FoxDesk can be installed to a phone, tablet or Chromebook home screen (Chrome: ⋮ → Install / Add to
+Home screen; Safari: Share → Add to Home Screen). It opens full screen with shortcuts to devices,
+check in and tickets. The service worker caches only static files and an offline page, never pages
+with district data. Browsers only offer installing over `https://` (or on localhost).
 
 ## Self-Service: Report a Problem
 

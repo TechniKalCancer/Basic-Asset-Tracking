@@ -46,6 +46,7 @@ from foxdesk.services.helpdesk import (
     _run_pending_device_action,
 )
 from foxdesk.services.attachments import _attachments_for, _save_attachments
+from foxdesk.services.sla import apply_sla, mark_responded, overdue_filter, sla_on
 
 
 @app.route('/submit_ticket', methods=['GET', 'POST'])
@@ -128,7 +129,8 @@ def admin_tickets():
     me = _current_user()
 
     query = _scope_tickets(Ticket.query, site_ids)
-    queue_counts = _queue_counts(_scope_tickets(Ticket.query, site_ids), me)
+    queues = _queues()
+    queue_counts = _queue_counts(_scope_tickets(Ticket.query, site_ids), me, queues)
     if view in queue_counts:
         query = _queue_filter(query, view, me)
     if status_filter and status_filter in TICKET_STATUSES:
@@ -164,6 +166,7 @@ def admin_tickets():
     order_exprs = [(c.desc() if sort_dir == 'desc' else c.asc()).nullslast() for c in sort_cols]
     query = query.order_by(*order_exprs, Ticket.created_at.desc())
 
+    query = query.options(db.selectinload(Ticket.linked))  # the list shows how many reports each one has linked
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     categories = TicketCategory.query.order_by(TicketCategory.name).all()
     assignees = _ticket_assignees(site_ids)
@@ -171,12 +174,18 @@ def admin_tickets():
                            statuses=TICKET_STATUSES, status_filter=status_filter, search=search,
                            category_filter=category_filter, assignee_filter=assignee_filter,
                            sort=sort, sort_dir=sort_dir, view=view, queue_counts=queue_counts,
-                           queues=QUEUES, teams=Team.query.order_by(Team.name).all(), team_filter=team_filter)
+                           queues=queues, teams=Team.query.order_by(Team.name).all(), team_filter=team_filter,
+                           show_sla=sla_on())
 
 
 STALE_DAYS = 3
 QUEUES = [('', 'All open'), ('mine', 'Mine'), ('my_teams', 'My teams'), ('unassigned', 'Unassigned'),
           ('stale', f'No update in {STALE_DAYS}+ days')]
+SLA_QUEUE = ('overdue', 'Past SLA')
+
+
+def _queues():
+    return QUEUES[:1] + [SLA_QUEUE] + QUEUES[1:] if sla_on() else QUEUES
 
 
 def _queue_filter(query, view, me):
@@ -191,11 +200,13 @@ def _queue_filter(query, view, me):
         return query.filter(Ticket.assigned_to_user_id.is_(None), Ticket.team_id.is_(None))
     if view == 'stale':
         return query.filter(Ticket.updated_at < utcnow() - timedelta(days=STALE_DAYS))
+    if view == 'overdue':
+        return query.filter(overdue_filter())
     return query
 
 
-def _queue_counts(base, me):
-    return {key: _queue_filter(base, key, me).count() for key, _ in QUEUES if key}
+def _queue_counts(base, me, queues=QUEUES):
+    return {key: _queue_filter(base, key, me).count() for key, _ in queues if key}
 
 
 @app.route('/admin/tickets/new', methods=['GET', 'POST'])
@@ -362,6 +373,8 @@ def admin_ticket_comment(ticket_id):
     db.session.add(TicketComment(ticket_id=ticket.id, body=body, author_label=actor_label,
                                  emailed_to_requester=send_reply))
     ticket.updated_at = utcnow()
+    if send_reply:
+        mark_responded(ticket)
     _log_activity('ticket_comment', f'{"Replied to requester on" if send_reply else "Commented on"} ticket #{ticket.id}.',
                    site_id=ticket.site_id, ticket_id=ticket.id)
     db.session.commit()
@@ -384,9 +397,15 @@ def admin_ticket_status(ticket_id):
     old_status, old_priority = ticket.status, ticket.priority
     if status and status in TICKET_STATUSES:
         ticket.status = status
-        ticket.resolved_at = utcnow() if status in ('resolved', 'closed') else None
+        if status in ('resolved', 'closed'):
+            ticket.resolved_at = ticket.resolved_at or utcnow()
+            mark_responded(ticket)
+        else:
+            ticket.resolved_at = None
     if priority and priority in TICKET_PRIORITIES:
         ticket.priority = priority
+        if priority != old_priority:
+            apply_sla(ticket)
     ticket.updated_at = utcnow()
     changes = []
     if old_status != ticket.status:

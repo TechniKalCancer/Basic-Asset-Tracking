@@ -99,6 +99,8 @@ def _create_ticket(category_id, subject, description, person=None, requester_nam
     )
     db.session.add(ticket)
     db.session.flush()  # assigns ticket.id, needed so the log entry (and any charge) can link back to it
+    from foxdesk.services.sla import apply_sla
+    apply_sla(ticket)
     if default_price:
         db.session.add(TicketCharge(ticket_id=ticket.id, description=category.name, amount=default_price))
     _log_activity('ticket_add', f'Opened ticket #{ticket.id}: {subject}', site_id=site_id, ticket_id=ticket.id)

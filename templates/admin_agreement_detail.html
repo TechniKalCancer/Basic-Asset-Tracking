@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block title %}{{ agreement.title }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('document') }}{{ agreement.title }}</h1>
+  {% if agreement.school_year %}<span class="badge badge-blue">{{ agreement.school_year }}</span>{% endif %}
+  <span class="badge {{ 'badge-green' if agreement.is_active else 'badge-neutral' }}">{{ 'Open for signing' if agreement.is_active else 'Closed' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  {% if can('admin') %}<a href="/admin/agreements/{{ agreement.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>{% endif %}
+  <a href="/admin/agreements/{{ agreement.id }}/export?show={{ show }}&q={{ q|urlencode }}{% if site_id %}&site_id={{ site_id }}{% endif %}{% if grad_year %}&grad_year={{ grad_year }}{% endif %}" class="btn btn-ghost">{{ icon('download') }}Export CSV</a>
+  <a href="/admin/agreements" class="btn btn-ghost">← All agreements</a>
+</div>
+<p class="ad-muted" style="margin:0 0 1rem;">
+  Signed by {{ needed|map('replace', 'guardian', 'a parent')|map('replace', 'student', 'the student')|join(' and ') }}{% if agreement.site %}, for {{ agreement.site.name }} students{% endif %}.
+  {% if agreement.plan_offered %}Offers {{ agreement.plan_name or 'a protection plan' }}{% if agreement.plan_price %} (${{ '%.2f'|format(agreement.plan_price) }}){% endif %}.{% endif %}
+</p>
+
+<div class="ad-tiles">
+  <a class="card ad-tile" href="?show=complete"><div class="ad-label">Signed</div><div class="ad-value">{{ '{:,}'.format(counts.complete) }}</div><div class="ad-note">of {{ '{:,}'.format(counts.students) }} students</div></a>
+  <a class="card ad-tile" href="?show=partial"><div class="ad-label">Partly signed</div><div class="ad-value">{{ '{:,}'.format(counts.partial) }}</div><div class="ad-note">waiting on one more signature</div></a>
+  <a class="card ad-tile" href="?show=unsigned"><div class="ad-label">Not signed</div><div class="ad-value">{{ '{:,}'.format(counts.unsigned) }}</div></a>
+  {% if agreement.plan_offered %}
+  <a class="card ad-tile" href="?show=plan_unpaid"><div class="ad-label">Plan not paid</div><div class="ad-value">{{ '{:,}'.format(counts.plan_unpaid) }}</div><div class="ad-note">{{ counts.enrolled }} enrolled</div></a>
+  {% endif %}
+</div>
+
+{% if agreement.is_active and can('admin') %}
+<div class="card ad-remind">
+  <div style="flex:1;min-width:240px;">
+    <strong>Remind families who haven't signed</strong>
+    <div class="ad-muted">
+      {% if not portals_on %}Turn on the My stuff or parent portal (Settings → Features) so families can sign online.
+      {% elif not email_enabled %}Email isn't set up, so reminders can't be sent.
+      {% elif remind_wait %}Reminders went out recently; you can send again {{ sla_when(remind_wait) }}.
+      {% else %}{{ reminder_count }} address(es) still need to sign online: one email each with a sign-in link.{% endif %}
+    </div>
+  </div>
+  <form method="POST" action="/admin/agreements/{{ agreement.id }}/remind"
+        onsubmit="return confirm('Email {{ reminder_count }} reminder(s) now?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {{ 'disabled' if not (portals_on and email_enabled and reminder_count and not remind_wait) }}>Send reminders</button>
+  </form>
+</div>
+{% endif %}
+
+<details class="card" style="margin-bottom:1rem;">
+  <summary style="cursor:pointer;font-weight:600;">Agreement text</summary>
+  <div class="ad-body">{{ agreement.body }}</div>
+  {% if agreement.plan_offered and agreement.plan_details %}<p class="ad-muted" style="margin-top:.8rem;"><strong>{{ agreement.plan_name }}:</strong> {{ agreement.plan_details }}</p>{% endif %}
+</details>
+
+<form method="GET" class="ad-filters">
+  <div class="ad-pills" role="navigation" aria-label="Show">
+    {% for key, label in filters %}{% if key != 'plan_unpaid' or agreement.plan_offered %}
+    <a href="?show={{ key }}{% if site_id %}&site_id={{ site_id }}{% endif %}{% if grad_year %}&grad_year={{ grad_year }}{% endif %}" class="{{ 'active' if show == key }}">{{ label }}</a>
+    {% endif %}{% endfor %}
+  </div>
+  <input type="hidden" name="show" value="{{ show }}">
+  {% if sites|length > 1 and not agreement.site_id %}
+  <select name="site_id" onchange="this.form.submit()" aria-label="School">
+    <option value="">All schools</option>
+    {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if site_id == s.id }}>{{ s.name }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  {% if grad_years %}
+  <select name="grad_year" onchange="this.form.submit()" aria-label="Graduation year">
+    <option value="">All classes</option>
+    {% for y in grad_years %}<option value="{{ y }}" {{ 'selected' if grad_year == y }}>Class of {{ y }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <input type="search" name="q" value="{{ q }}" placeholder="Search students…" aria-label="Search students">
+  <button type="submit" class="btn btn-ghost">Search</button>
+</form>
+
+<div class="card" style="padding:0;overflow-x:visible;">
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Student</th><th>Status</th><th>Signatures</th>{% if agreement.plan_offered %}<th>Plan</th>{% endif %}<th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      {% set p = r.person %}
+      <tr>
+        <td><a href="/admin/people/{{ p.id }}/history" class="tag-link">{{ p.full_name }}</a>
+          <div class="ad-muted">{{ p.site.name if p.site else '' }}{% if p.grad_year %} · {{ p.grad_year }}{% endif %}</div></td>
+        <td>{% if r.complete %}<span class="badge badge-green">Signed</span>
+            {% elif r.signatures %}<span class="badge badge-yellow">Needs {{ r.missing|map('replace', 'guardian', 'parent')|join(' + ') }}</span>
+            {% else %}<span class="badge badge-neutral">Not signed</span>{% endif %}</td>
+        <td class="ad-sigs">{% for role, s in r.signatures.items() %}<div>{{ s.signer_name }} <span class="ad-muted">({{ roles[role] }}, {{ s.signed_at.strftime('%b %d') }})</span></div>{% else %}<span class="ad-muted">—</span>{% endfor %}</td>
+        {% if agreement.plan_offered %}
+        <td>{% if r.plan %}{% if r.plan.plan_choice == 'enrolled' %}
+              {% if r.plan_unpaid %}<span class="badge badge-yellow">Enrolled, not paid</span>{% else %}<span class="badge badge-green">Enrolled</span>{% endif %}
+            {% else %}<span class="ad-muted">Declined</span>{% endif %}{% else %}<span class="ad-muted">—</span>{% endif %}</td>
+        {% endif %}
+        <td style="text-align:right;white-space:nowrap;">
+          {% if r.plan_unpaid %}
+          <form method="POST" action="/admin/agreement_signatures/{{ r.plan.id }}/plan_paid" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-small">Mark paid</button>
+          </form>
+          {% endif %}
+          {% if not r.complete and agreement.is_active %}
+          <div class="row-menu" style="display:inline-block;">
+            <button type="button" class="btn-small" aria-label="Record a paper copy for {{ p.full_name }}">Paper copy ▾</button>
+            <div class="row-menu-items" style="min-width:270px;">
+              <form method="POST" action="/admin/agreements/{{ agreement.id }}/paper/{{ p.id }}" style="padding:.5rem;text-align:left;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label class="ad-field">Signed by <input name="signer_name" value="{{ p.guardian_name or p.full_name }}" required></label>
+                {% if agreement.plan_offered %}
+                <fieldset class="ad-field" style="border:0;padding:0;margin:0;">
+                  <legend>{{ agreement.plan_name or 'Protection plan' }}</legend>
+                  <label class="ad-check"><input type="radio" name="plan_choice" value="enrolled" required> Enrolled</label>
+                  <label class="ad-check"><input type="radio" name="plan_choice" value="declined"> Declined</label>
+                  {% if agreement.plan_price %}<label class="ad-check"><input type="checkbox" name="plan_paid"> Paid at the office</label>{% endif %}
+                </fieldset>
+                {% endif %}
+                <button type="submit" class="btn btn-primary" style="width:100%;margin-top:.5rem;">Record signed paper copy</button>
+              </form>
+            </div>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="ad-muted" style="text-align:center;padding:1.5rem;">Nobody matches.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% if pages > 1 %}
+<div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;align-items:center;">
+  {% set base = '?show=' ~ show ~ '&q=' ~ (q|urlencode) ~ ('&site_id=' ~ site_id if site_id else '') ~ ('&grad_year=' ~ grad_year if grad_year else '') %}
+  {% if page > 1 %}<a href="{{ base }}&page={{ page - 1 }}" class="btn btn-ghost">‹ Prev</a>{% endif %}
+  <span class="ad-muted">Page {{ page }} of {{ pages }} · {{ total_rows }} students</span>
+  {% if page < pages %}<a href="{{ base }}&page={{ page + 1 }}" class="btn btn-ghost">Next ›</a>{% endif %}
+</div>
+{% endif %}
+<style>
+  .ad-muted { color: var(--muted); font-size: .82rem; }
+  .ad-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .ad-tiles .card { margin: 0; }
+  .ad-tile { padding: .9rem 1rem; text-decoration: none; color: inherit; }
+  .ad-tile:hover, .ad-tile:focus-visible { border-color: var(--accent); }
+  .ad-label { color: var(--muted); font-size: .8rem; }
+  .ad-value { font-size: 1.6rem; font-weight: 600; color: var(--text); margin-top: .2rem; }
+  .ad-note { color: var(--muted); font-size: .74rem; }
+  .ad-remind { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  .ad-body { white-space: pre-wrap; margin-top: .8rem; line-height: 1.55; max-width: 80ch; }
+  .ad-filters { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  .ad-filters input[type=search] { max-width: 260px; }
+  .ad-pills { display: flex; gap: .4rem; flex-wrap: wrap; margin-right: .4rem; }
+  .ad-pills a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); text-decoration: none; font-size: .85rem; }
+  .ad-pills a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .ad-sigs div { font-size: .85rem; }
+  .ad-field { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .8rem; margin-bottom: .5rem; }
+  .ad-field legend { margin-bottom: .3rem; }
+  .ad-check { display: flex; align-items: center; gap: .4rem; color: var(--text); font-size: .85rem; cursor: pointer; }
+  .ad-check input { width: auto; }
+  .btn-small { padding: .25rem .6rem; font-size: .8rem; }
+</style>
+{% endblock %}

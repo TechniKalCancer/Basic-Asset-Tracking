@@ -45,9 +45,14 @@ district only sees what it uses.
 - [x] My stuff portal (students/staff) and parent portal; sign in with Google or an emailed link
 - [x] Pay damage fees online (Stripe Checkout)
 - [x] QR codes on labels; refresh forecast from Chromebook auto-update expiration
-- [ ] SLAs, custom fields per category, merge/link/tags, satisfaction survey, time tracking
-- [ ] Knowledge base with ticket deflection; help desk reports
-- [ ] Digital device agreements; rooms/carts/locations; collection-day mode; purchasing; facilities tickets
+- [x] SLA targets in school hours, Past SLA queue, missed-SLA automation trigger
+- [x] Merge duplicate tickets; link related reports and resolve them together
+- [x] Help desk reports (reply/fix times, SLA met, backlog) by tech, category and school
+- [x] Digital device agreements with paper copies, reminders and an optional protection plan (paid online)
+- [x] Installable app (manifest, service worker, offline page)
+- [ ] Custom fields per category, tags, satisfaction survey, time tracking
+- [ ] Knowledge base with ticket deflection
+- [ ] Rooms/carts/locations; collection-day mode; purchasing; facilities tickets
 
 ## Phase 6 — Ship-ready
 - [ ] Privacy: policy page, data retention/purge schedule, SDPC NDPA template

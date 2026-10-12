@@ -57,6 +57,9 @@ FEATURES = OrderedDict([
     ('online_payments', dict(group='Self-service', label='Pay fees online', requires=('incidents',),
                              configured=lambda: _payments_configured(),
                              desc='Families pay damage fees by card in the portal (Stripe); fees are marked paid automatically.')),
+    ('agreements', dict(group='Self-service', label='Device agreements',
+                        desc='Students and parents sign the device agreement in the portal, or you record a paper copy; '
+                             'see who hasn\'t signed, send reminders, and offer a protection plan.')),
     ('help', dict(group='Self-service', label='Help page',
                   desc='An FAQ and how-to guides you can edit.')),
     ('reminders', dict(group='Notifications', label='Overdue reminders',
@@ -151,6 +154,9 @@ MODULE_FEATURES = {
     'foxdesk.views.warranty': 'dell_warranty',
     'foxdesk.views.signin_settings': 'google_signin',
     'foxdesk.views.rules': 'automations',
+    'foxdesk.views.agreements': 'agreements',
+    'foxdesk.views.sla': 'tickets',
+    'foxdesk.views.helpdesk_reports': 'tickets',
 }
 
 

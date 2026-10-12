@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Device agreements{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('document') }}Device agreements</h1>
+  <span class="spacer" style="flex:1;"></span>
+  {% if can('admin') %}<a href="/admin/agreements/new" class="btn btn-primary">+ New agreement</a>{% endif %}
+</div>
+<p class="ag-muted" style="max-width:76ch;margin:0 0 1.2rem;">
+  The agreement students and parents sign before taking a device home, usually once a school year. Families sign in
+  the {{ 'portal' if feature('portal') or feature('parent_portal') else 'portal (turn it on under Settings → Features)' }};
+  a signed paper copy can be recorded here instead. You can offer a protection plan alongside it.
+</p>
+
+{% for a in agreements %}
+{% set c = summaries.get(a.id) %}
+<div class="card ag-item">
+  <div class="ag-head">
+    <a class="ag-title" href="/admin/agreements/{{ a.id }}">{{ a.title }}</a>
+    {% if a.school_year %}<span class="badge badge-blue">{{ a.school_year }}</span>{% endif %}
+    <span class="badge {{ 'badge-green' if a.is_active else 'badge-neutral' }}">{{ 'Open for signing' if a.is_active else 'Closed' }}</span>
+    {% if a.site %}<span class="ag-muted">{{ a.site.name }} only</span>{% endif %}
+  </div>
+  {% if c and c.students %}
+  {% set pct = (c.complete * 100 / c.students)|round|int %}
+  <div class="ag-meter" role="img" aria-label="{{ c.complete }} of {{ c.students }} students signed">
+    <div class="ag-fill" style="width:{{ pct }}%;"></div>
+  </div>
+  <div class="ag-muted">{{ '{:,}'.format(c.complete) }} of {{ '{:,}'.format(c.students) }} students signed ({{ pct }}%)
+    {% if c.partial %} · {{ c.partial }} partly signed{% endif %}
+    {% if a.plan_offered %} · {{ c.enrolled }} enrolled in the plan{% if c.plan_unpaid %}, {{ c.plan_unpaid }} not paid{% endif %}{% endif %}</div>
+  {% elif a.is_active %}
+  <div class="ag-muted">No active students it applies to.</div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card ag-muted">No agreements yet.{% if can('admin') %} <a href="/admin/agreements/new">Add your device agreement</a> to start collecting signatures.{% endif %}</div>
+{% endfor %}
+<style>
+  .ag-muted { color: var(--muted); font-size: .85rem; }
+  .ag-item { margin-bottom: 1rem; }
+  .ag-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .ag-title { font-weight: 600; font-size: 1.05rem; color: var(--text); text-decoration: none; }
+  .ag-title:hover, .ag-title:focus-visible { text-decoration: underline; }
+  .ag-meter { height: 8px; border-radius: 4px; background: var(--surface2); overflow: hidden; margin-bottom: .4rem; max-width: 520px; }
+  .ag-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+</style>
+{% endblock %}

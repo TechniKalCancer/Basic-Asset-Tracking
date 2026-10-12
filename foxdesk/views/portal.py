@@ -8,9 +8,14 @@ from flask import abort, flash, redirect, render_template, request, session, url
 
 from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, EMAIL_ENABLED, app, db
-from foxdesk.models import AssetRegistry, Incident, Ticket, TicketCategory, TicketComment
+from foxdesk.models import Agreement, AgreementSignature, AssetRegistry, Incident, Person, Ticket, TicketCategory, TicketComment
+from foxdesk.services.agreements import (
+    AgreementError, agreements_for, applies_to, plan_role, role_for_viewer, sign, status_for,
+)
 from foxdesk.services.features import feature_enabled
-from foxdesk.services.payments import PaymentError, confirm, start_checkout, unpaid_fee
+from foxdesk.services.payments import (
+    PaymentError, confirm, start_checkout, start_plan_checkout, unpaid_fee, unpaid_plan,
+)
 from foxdesk.services.portal import (
     LINK_MINUTES, damage_for, devices_for, fees_for, make_link_token, may_pay, may_see_ticket, redeem_link_token,
     sign_in, sign_out, tickets_for, viewer,
@@ -57,7 +62,21 @@ def portal_home():
                            devices=devices_for(person) if person else [],
                            tickets=tickets_for(person, v['email']) if person else [],
                            fees=fees_for(person) if person else [], children=children,
-                           payments=_payments_on(), unpaid=unpaid_fee, payment_note=_payment_note())
+                           payments=_payments_on(), unpaid=unpaid_fee, payment_note=_payment_note(),
+                           agreements=_agreement_status(v))
+
+
+def _agreement_status(v):
+    """[dict(pid, person, agreement, st, role, todo)] for everyone the visitor
+    can see; role is the signature this visitor gives (or None), todo is
+    True when they have something to do (sign, or pay for the plan)."""
+    out = []
+    for p in ([v['person']] if v['person'] else []) + list(v['children']):
+        for a in agreements_for(p):
+            st, role = status_for(a, p), role_for_viewer(v, a, p)
+            out.append(dict(pid=p.id, person=p, agreement=a, st=st, role=role,
+                            todo=bool((role and role in st['missing']) or st['plan_unpaid'])))
+    return out
 
 
 def _payment_note():
@@ -201,6 +220,11 @@ def portal_ticket(ticket_id):
     ticket = db.get_or_404(Ticket, ticket_id)
     if not may_see_ticket(v, ticket):
         abort(404)
+    if ticket.merged_into_id:
+        from foxdesk.services.ticket_links import final_ticket
+        kept = final_ticket(ticket)
+        if kept and may_see_ticket(v, kept):
+            return redirect(url_for('portal_ticket', ticket_id=kept.id))
     if request.method == 'POST':
         body = request.form.get('body', '').strip()
         if body:
@@ -248,6 +272,65 @@ def portal_paid():
     elif payment:
         flash('We haven\'t seen that payment go through yet. If you finished paying, it will show here shortly.', 'info')
     return redirect(url_for('portal_home'))
+
+
+# ─── device agreements ────────────────────────────────────────────────────────
+
+def _sees(v, person):
+    return bool(person and ((v['person'] and v['person'].id == person.id) or any(c.id == person.id for c in v['children'])))
+
+
+@app.route('/my/agreements/<int:agreement_id>/<int:person_id>', methods=['GET', 'POST'])
+def portal_agreement(agreement_id, person_id):
+    v = _require_viewer()
+    if not v:
+        return redirect(url_for('portal_home'))
+    agreement, person = db.session.get(Agreement, agreement_id), db.session.get(Person, person_id)
+    if not (feature_enabled('agreements') and agreement and _sees(v, person) and applies_to(agreement, person)):
+        abort(404)
+    role = role_for_viewer(v, agreement, person)
+    st = status_for(agreement, person)
+    form = {}
+    if request.method == 'POST':
+        form = request.form
+        if not role or role not in st['missing']:
+            flash('There\'s nothing for you to sign here.', 'info')
+            return redirect(url_for('portal_agreement', agreement_id=agreement.id, person_id=person.id))
+        if request.form.get('agree') != 'on':
+            flash('Check the box to say you\'ve read and agree to it.', 'error')
+        else:
+            try:
+                sig = sign(agreement, person, role, request.form.get('signer_name'), signer_email=v['email'],
+                           plan_choice=request.form.get('plan_choice'), ip_address=request.remote_addr,
+                           user_agent=request.user_agent.string)
+                db.session.commit()
+            except AgreementError as e:
+                db.session.rollback()
+                flash(str(e), 'error')
+            else:
+                if unpaid_plan(sig):
+                    flash('Signed — thank you. Your plan isn\'t paid yet; you can pay below.', 'success')
+                    return redirect(url_for('portal_agreement', agreement_id=agreement.id, person_id=person.id))
+                flash(f'Signed — thank you. {agreement.title} for {person.first_name} is recorded.', 'success')
+                return redirect(url_for('portal_home'))
+    return render_template('portal_agreement.html', v=v, agreement=agreement, person=person, role=role, st=st,
+                           chooses_plan=agreement.plan_offered and role == plan_role(agreement), form=form,
+                           payments=_payments_on(), payment_note=_payment_note())
+
+
+@app.route('/my/agreements/pay/<int:sig_id>', methods=['POST'])
+def portal_agreement_pay(sig_id):
+    v = _require_viewer()
+    if not v:
+        return redirect(url_for('portal_home'))
+    sig = db.session.get(AgreementSignature, sig_id)
+    if not (sig and _sees(v, sig.person) and _payments_on()):
+        abort(404)
+    try:
+        return redirect(start_plan_checkout(sig, v['email'], _base_url()), code=303)
+    except PaymentError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('portal_agreement', agreement_id=sig.agreement_id, person_id=sig.person_id))
 
 
 # ─── QR codes on device labels ────────────────────────────────────────────────

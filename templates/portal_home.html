@@ -8,6 +8,22 @@
     {% if person and feature('tickets') %}<a href="/my/report" class="btn btn-primary">Report a problem</a>{% endif %}
   </div>
 
+  {% set todo = agreements|selectattr('todo')|list %}
+  {% if todo %}
+  <div class="card pa-todo">
+    <h2 style="margin-top:0;">Needs your attention</h2>
+    <div class="p-list">
+      {% for item in todo %}
+      <div class="p-row">
+        <div class="grow"><strong>{{ item.agreement.title }}</strong> <span class="p-muted">for {{ item.person.full_name }}</span>
+          <div class="p-muted">{% if item.role and item.role in item.st.missing %}Needs your signature{% else %}{{ item.agreement.plan_name or 'Protection plan' }} not paid yet{% endif %}</div></div>
+        <a href="/my/agreements/{{ item.agreement.id }}/{{ item.pid }}" class="btn btn-primary btn-small">{{ 'Read and sign' if item.role and item.role in item.st.missing else 'Pay' }}</a>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if person %}
   <div class="card">
     <h2 style="margin-top:0;">Your devices</h2>
@@ -20,6 +36,10 @@
       </div>
       {% else %}<p class="p-muted" style="margin:0;">No devices checked out to you.</p>{% endfor %}
     </div>
+    {% for item in agreements|selectattr('pid', 'equalto', person.id) %}
+    <p class="p-muted" style="margin:.8rem 0 0;"><a class="tag-link" href="/my/agreements/{{ item.agreement.id }}/{{ item.pid }}">{{ item.agreement.title }}</a>:
+      {{ 'signed' if item.st.complete else 'not signed yet' }}</p>
+    {% endfor %}
   </div>
 
   {% if feature('tickets') %}
@@ -55,6 +75,10 @@
         {% if kind == 'loaner' %}<span class="badge badge-yellow">Loaner{% if due %}, due {{ due.strftime('%b %d') }}{% endif %}</span>{% endif %}</div></div>
       {% else %}<p class="p-muted" style="margin:0;">No devices checked out.</p>{% endfor %}
     </div>
+    {% for item in agreements|selectattr('pid', 'equalto', c.person.id) %}
+    <p class="p-muted" style="margin:.8rem 0 0;"><a class="tag-link" href="/my/agreements/{{ item.agreement.id }}/{{ item.pid }}">{{ item.agreement.title }}</a>:
+      {{ 'signed' if item.st.complete else 'not signed yet' }}</p>
+    {% endfor %}
     {% if c.damage %}
     <h3 class="p-muted" style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .4rem;">Damage reports and fees</h3>
     {% with items=c.damage %}{% include '_portal_fees.html' %}{% endwith %}
@@ -62,6 +86,7 @@
   </div>
   {% endfor %}
 
+  <style>.pa-todo { border-left: 3px solid var(--warning); }</style>
   {% if not person and not children %}<div class="card p-muted">Nothing to show for {{ v.email }}.</div>{% endif %}
 </div>
 {% endblock %}

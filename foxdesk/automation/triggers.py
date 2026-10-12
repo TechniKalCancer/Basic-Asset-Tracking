@@ -85,6 +85,8 @@ FIELDS = {
     'ticket.assignee':      ('Ticket assigned to', 'choice', _staff_users),
     'ticket.team':          ('Ticket team', 'choice', _teams),
     'ticket.requester_role': ('Requester role', 'choice', ROLES),
+    'ticket.sla_breach':    ('Missed SLA clock', 'choice', _plain(['response', 'resolve'],
+                                                               {'response': 'Reply time', 'resolve': 'Fix time'})),
 
     'device.type':          ('Device type', 'choice', _plain(DEVICE_TYPES)),
     'device.model':         ('Device model', 'choice', _device_models),
@@ -107,6 +109,7 @@ FIELDS = {
     'person.incident_count': ('Damage reports for this person (all time)', 'number', None),
     'person.has_protection_plan': ('Person has the protection plan', 'bool', None),
     'person.has_guardian_email': ('Person has a parent/guardian email', 'bool', None),
+    'person.agreement_signed': ('Person\'s device agreements are signed', 'bool', None),
 
     'incident.category':    ('Damage type', 'choice', _repair_categories),
     'incident.fee_amount':  ('Fee amount', 'number', None),
@@ -147,7 +150,7 @@ DEVICE_FIELDS = ['device.type', 'device.model', 'device.site', 'device.status', 
                  'device.org_unit', 'device.warranty_days_left', 'device.aue_days_left', 'holder.role', 'holder.grad_year',
                  'holder.has_protection_plan']
 PERSON_FIELDS = ['person.role', 'person.site', 'person.grad_year', 'person.device_count', 'person.incident_count',
-                 'person.has_protection_plan', 'person.has_guardian_email']
+                 'person.has_protection_plan', 'person.has_guardian_email', 'person.agreement_signed']
 TICKET_FIELDS = ['ticket.category', 'ticket.priority', 'ticket.status', 'ticket.site', 'ticket.subject',
                  'ticket.description', 'ticket.has_device', 'ticket.assignee', 'ticket.team', 'ticket.requester_role']
 
@@ -160,6 +163,11 @@ TRIGGERS = {
                                   fields=TICKET_FIELDS + DEVICE_FIELDS + PERSON_FIELDS),
     'ticket.status_changed': dict(label='A ticket\'s status changes', group='Tickets', subject='ticket', feature='tickets',
                                   fields=TICKET_FIELDS + ['ticket.old_status'] + DEVICE_FIELDS),
+    'ticket.sla_breached':   dict(label='A ticket misses its reply or fix time (checked every 15 min)', group='Tickets',
+                                  subject='ticket', feature='tickets', scheduled=True,
+                                  fields=['ticket.sla_breach'] + TICKET_FIELDS + DEVICE_FIELDS,
+                                  hint='Uses the targets under Settings → SLA targets. Runs once per ticket for each '
+                                       'missed clock.'),
     'incident.created':      dict(label='Damage is reported', group='Devices', subject='incident', feature='incidents',
                                   fields=['incident.category', 'incident.fee_amount', 'incident.fee_charged',
                                           'incident.description'] + DEVICE_FIELDS + PERSON_FIELDS),
@@ -276,11 +284,13 @@ def _person_facts(person):
         return {}
     device_count = Asset.query.filter_by(assigned_to_id=person.id).count()
     incident_count = Incident.query.filter_by(person_id=person.id).count()
+    from foxdesk.services.agreements import agreements_complete
     return {
         'person.role': person.role, 'person.site': person.site_id, 'person.grad_year': person.grad_year,
         'person.device_count': device_count, 'person.incident_count': incident_count,
         'person.has_protection_plan': bool(person.insurance_opted_in),
         'person.has_guardian_email': bool(person.guardian_email),
+        'person.agreement_signed': agreements_complete(person),
     }
 
 
@@ -339,6 +349,7 @@ def build_context(trigger_key, subject, **extra):
             'ticket.description': t.description, 'ticket.has_device': bool(t.asset_tag),
             'ticket.assignee': t.assigned_to_user_id, 'ticket.team': t.team_id,
             'ticket.requester_role': t.requester.role if t.requester else None,
+            'ticket.sla_breach': extra.get('sla_breach'),
         })
     elif kind == 'incident':
         i = subject
@@ -421,6 +432,7 @@ def placeholders(ctx):
         'part_name': ctx['part'].name if ctx.get('part') else '',
         'part_on_hand': str(ctx['part'].quantity_on_hand) if ctx.get('part') else '',
         'part_reorder_level': str(ctx['part'].reorder_level) if ctx.get('part') else '',
+        'sla_missed': {'response': 'reply', 'resolve': 'fix'}.get(f.get('ticket.sla_breach'), ''),
     }
 
 
@@ -429,4 +441,4 @@ PLACEHOLDER_NAMES = ['ticket_id', 'ticket_subject', 'ticket_priority', 'ticket_s
                      'holder_email', 'person_name', 'person_email', 'person_first_name', 'guardian_name',
                      'incident_description', 'fee_amount', 'incident_count', 'repair_days_out', 'loaner_days_overdue',
                      'signin_account', 'signin_flag', 'warranty_days_left', 'part_name', 'part_on_hand',
-                     'part_reorder_level', 'period', 'today']
+                     'part_reorder_level', 'sla_missed', 'period', 'today']

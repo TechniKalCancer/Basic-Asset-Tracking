@@ -69,7 +69,9 @@
       {% for p in payments %}
       <tr>
         <td style="white-space:nowrap;">{{ p.created_at|ago }}</td>
-        <td>{{ p.incident.asset_tag if p.incident else '—' }} <span class="pp-muted">{{ p.incident.person_name if p.incident else '' }}</span></td>
+        <td>{% if p.incident %}{{ p.incident.asset_tag }} <span class="pp-muted">{{ p.incident.person_name or '' }}</span>
+            {% elif p.signature %}{{ p.signature.agreement.plan_name or 'Protection plan' }} <span class="pp-muted">{{ p.signature.person.full_name }}</span>
+            {% else %}—{% endif %}</td>
         <td class="num">${{ '%.2f'|format(p.amount) }}</td>
         <td class="pp-muted">{{ p.payer_email or '—' }}</td>
         <td><span class="badge {{ {'paid': 'badge-green', 'pending': 'badge-blue', 'expired': 'badge-yellow', 'review': 'badge-red'}.get(p.status, 'badge-blue') }}">{{ 'needs a look' if p.status == 'review' else p.status }}</span></td>

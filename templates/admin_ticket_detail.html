@@ -8,12 +8,26 @@
   <h1 style="margin:0;">{{ icon('ticket') }}#{{ ticket.id }} — {{ ticket.subject }}</h1>
   <span class="badge {{ status_badge.get(ticket.status, 'badge-blue') }}">{{ ticket.status|replace('_', ' ')|capitalize }}</span>
   <span class="badge {{ priority_badge.get(ticket.priority, 'badge-blue') }}">{{ ticket.priority|capitalize }}</span>
+  {% set sla = sla_badge(ticket) %}{% if sla %}<span class="badge {{ sla.css }}" title="{{ sla.title }}">{{ sla.text }}</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/tickets/{{ ticket.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
   <a href="/admin/tickets" class="btn btn-ghost">← Back</a>
 </div>
 
 <div id="presence" class="presence" role="status" aria-live="polite" hidden></div>
+
+{% if ticket.merged_into_id %}
+<div class="tl-note">Merged into <a class="tag-link" href="/admin/tickets/{{ ticket.merged_into_id }}">#{{ ticket.merged_into_id }}{% if ticket.merged_into %}: {{ ticket.merged_into.subject }}{% endif %}</a>. Its comments, charges and files moved there, and email replies to this ticket land there too.</div>
+{% elif ticket.parent %}
+<div class="tl-note" style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
+  <span>Part of <a class="tag-link" href="/admin/tickets/{{ ticket.parent.id }}">#{{ ticket.parent.id }}: {{ ticket.parent.subject }}</a>
+    <span class="badge {{ status_badge.get(ticket.parent.status, 'badge-blue') }}" style="font-size:.68rem;">{{ ticket.parent.status|replace('_', ' ')|capitalize }}</span></span>
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/unlink" style="margin-left:auto;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost btn-small">Unlink</button>
+  </form>
+</div>
+{% endif %}
 
 <div class="card" style="margin-bottom:1.5rem;">
   <table style="width:100%;">
@@ -30,6 +44,12 @@
       </td>
     </tr>
     <tr><td style="color:var(--muted);">Opened</td><td>{{ ticket.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% if ticket.response_due_at or ticket.first_response_at %}
+    <tr><td style="color:var(--muted);">First reply</td><td>{% if ticket.first_response_at %}{{ ticket.first_response_at.strftime('%Y-%m-%d %H:%M') }}{% if ticket.response_due_at %} <span class="badge {{ 'badge-green' if ticket.first_response_at <= ticket.response_due_at else 'badge-red' }}" style="font-size:.68rem;">{{ 'on time' if ticket.first_response_at <= ticket.response_due_at else 'late' }}</span>{% endif %}{% else %}Not yet{% if ticket.response_due_at %} — due {{ sla_when(ticket.response_due_at) }}{% endif %}{% endif %}</td></tr>
+    {% endif %}
+    {% if ticket.resolve_due_at and ticket.is_open %}
+    <tr><td style="color:var(--muted);">Fix due</td><td>{{ sla_when(ticket.resolve_due_at) }}</td></tr>
+    {% endif %}
     <tr><td style="color:var(--muted);">Last Updated</td><td>{{ ticket.updated_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
     {% if ticket.resolved_at %}
     <tr><td style="color:var(--muted);">Resolved</td><td>{{ ticket.resolved_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
@@ -122,6 +142,78 @@
     </form>
   </div>
 </div>
+
+{% if ticket.linked %}
+<div class="card" style="margin-bottom:1.5rem;">
+  <h2 style="margin-top:0;">Linked tickets <span class="badge badge-blue">{{ ticket.linked|length }}</span></h2>
+  <p class="tl-muted" style="margin:-.3rem 0 .8rem;">Other reports of this same problem. Resolve them all at once when it's fixed.</p>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>#</th><th>Subject</th><th>Requester</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for t in ticket.linked %}
+      <tr>
+        <td><a class="tag-link" href="/admin/tickets/{{ t.id }}">#{{ t.id }}</a></td>
+        <td>{{ t.subject }}</td>
+        <td class="tl-muted">{{ t.requester_name or '—' }}</td>
+        <td><span class="badge {{ status_badge.get(t.status, 'badge-blue') }}" style="font-size:.7rem;">{{ t.status|replace('_', ' ')|capitalize }}</span></td>
+        <td style="text-align:right;">
+          <form method="POST" action="/admin/tickets/{{ t.id }}/unlink" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-small">Unlink</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% set still_open = ticket.linked|selectattr('is_open')|list %}
+  {% if still_open %}
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/resolve_linked" class="tl-resolve">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="resolveMsg" class="tl-label">Note for everyone (optional)</label>
+    <textarea id="resolveMsg" name="message" rows="3" placeholder="e.g. The B-wing access point was replaced this morning; Wi-Fi is back."></textarea>
+    {% if email_enabled %}<label class="tl-check"><input type="checkbox" name="email_requesters" checked> Email the note to each requester</label>{% endif %}
+    {% if ticket.is_open %}<label class="tl-check"><input type="checkbox" name="include_main" checked> Resolve this ticket too</label>{% endif %}
+    <button type="submit" class="btn btn-primary">Resolve {{ still_open|length }} linked ticket{{ 's' if still_open|length != 1 }}</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if not ticket.merged_into_id %}
+<details class="card tl-tools" style="margin-bottom:1.5rem;">
+  <summary>Merge or link with another ticket</summary>
+  <div class="tl-grid">
+    <form method="POST" action="/admin/tickets/{{ ticket.id }}/merge"
+          onsubmit="return confirm('Merge these tickets? The duplicate is closed and everything on it moves over. This can\'t be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3>Merge a duplicate</h3>
+      <p class="tl-muted">The same request twice. Comments, charges and files move to the ticket that stays.</p>
+      <label class="tl-label" for="mergeDir">Which one stays</label>
+      <select id="mergeDir" name="direction">
+        <option value="into">Merge this ticket into ticket #…</option>
+        <option value="from">Merge ticket #… into this one</option>
+      </select>
+      <label class="tl-label" for="mergeOther">Other ticket number</label>
+      <input id="mergeOther" name="other" inputmode="numeric" placeholder="e.g. 1234" required>
+      {% if email_enabled %}<label class="tl-check"><input type="checkbox" name="notify" checked> Tell the duplicate's requester it was combined</label>{% endif %}
+      <button type="submit" class="btn btn-primary">Merge</button>
+    </form>
+    {% if not ticket.linked %}
+    <form method="POST" action="/admin/tickets/{{ ticket.id }}/link">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3>Link to the main ticket</h3>
+      <p class="tl-muted">The same problem reported by someone else. Both stay open; resolving the main ticket can resolve this one too.</p>
+      <label class="tl-label" for="linkMain">Main ticket number</label>
+      <input id="linkMain" name="main" inputmode="numeric" placeholder="e.g. 1230" required>
+      <button type="submit" class="btn btn-primary">Link</button>
+    </form>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
 
 {% if ticket.repair %}
 {% set repair = ticket.repair %}
@@ -388,6 +480,20 @@
   .presence { margin: -.4rem 0 1rem; padding: .55rem .9rem; border-left: 3px solid var(--warning); background: var(--surface2);
               border-radius: 4px; font-size: .88rem; }
   .canned-row { display: flex; gap: .6rem; align-items: center; margin-bottom: .5rem; flex-wrap: wrap; }
+  .tl-note { margin: -.4rem 0 1rem; padding: .6rem .9rem; border-left: 3px solid var(--accent); background: var(--surface2);
+             border-radius: 4px; font-size: .9rem; }
+  .tl-muted { color: var(--muted); font-size: .85rem; }
+  .tl-label { display: block; color: var(--muted); font-size: .82rem; margin: .7rem 0 .3rem; }
+  .tl-check { display: flex; align-items: center; gap: .45rem; font-size: .85rem; color: var(--muted); margin: .6rem 0; cursor: pointer; }
+  .tl-check input { width: auto; }
+  .tl-resolve { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+  .tl-resolve textarea { width: 100%; resize: vertical; }
+  .tl-tools summary { cursor: pointer; font-weight: 600; }
+  .tl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 1.5rem; margin-top: 1rem; }
+  .tl-grid h3 { margin: 0 0 .3rem; font-size: .98rem; }
+  .tl-grid p { margin: 0; }
+  .tl-grid button { margin-top: .8rem; }
+  .btn-small { padding: .25rem .6rem; font-size: .8rem; }
   .canned-row select { width: auto; min-width: 220px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
 </style>

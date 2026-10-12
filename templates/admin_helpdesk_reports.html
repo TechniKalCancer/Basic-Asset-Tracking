@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Help desk reports{% endblock %}
+{% block content %}
+{% set t = report.totals %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.8rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('dashboard') }}Help desk reports</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/helpdesk_reports/export?range={{ range_key }}" class="btn btn-ghost">{{ icon('download') }}Export CSV</a>
+  {% if is_super_admin() %}<a href="/admin/sla" class="btn btn-ghost">SLA targets</a>{% endif %}
+  <a href="/admin/tickets" class="btn btn-ghost">← Tickets</a>
+</div>
+
+<div class="hr-ranges" role="navigation" aria-label="Time range">
+  {% for key, label in ranges %}
+  <a href="?range={{ key }}" class="{{ 'active' if key == range_key }}" {{ 'aria-current="page"'|safe if key == range_key }}>{{ label }}</a>
+  {% endfor %}
+  <span class="hr-muted">Since {{ report.since.strftime('%b %d, %Y') }} · times are school hours</span>
+</div>
+
+<div class="hr-tiles">
+  <div class="card hr-tile"><div class="hr-label">Tickets opened</div><div class="hr-value">{{ '{:,}'.format(t.opened) }}</div></div>
+  <div class="card hr-tile"><div class="hr-label">Tickets resolved</div><div class="hr-value">{{ '{:,}'.format(t.resolved) }}</div></div>
+  <div class="card hr-tile"><div class="hr-label">Open right now</div><div class="hr-value">{{ '{:,}'.format(t.open_now) }}</div></div>
+  <div class="card hr-tile"><div class="hr-label">Median first reply</div><div class="hr-value">{{ t.reply }}</div></div>
+  <div class="card hr-tile"><div class="hr-label">Median time to fix</div><div class="hr-value">{{ t.fix }}</div></div>
+  {% set reply_pct, reply_n = report.reply_sla %}{% set fix_pct, fix_n = report.fix_sla %}
+  <div class="card hr-tile"><div class="hr-label">Replies on time</div>
+    <div class="hr-value">{{ '%d%%'|format(reply_pct) if reply_pct is not none else '—' }}</div>
+    <div class="hr-note">{{ 'of %d with a target'|format(reply_n) if reply_n else ('No SLA targets yet' if not report.sla_enabled else 'None due yet') }}</div></div>
+  <div class="card hr-tile"><div class="hr-label">Fixed on time</div>
+    <div class="hr-value">{{ '%d%%'|format(fix_pct) if fix_pct is not none else '—' }}</div>
+    <div class="hr-note">{{ 'of %d with a target'|format(fix_n) if fix_n else ('No SLA targets yet' if not report.sla_enabled else 'None due yet') }}</div></div>
+</div>
+
+<div class="viz-grid">
+  {% for chart in report.charts %}
+  <div class="card viz-card">
+    <div class="viz-head"><div><h2>{{ chart.title }}</h2><div class="viz-sub">{{ chart.subtitle }}</div></div></div>
+    <div class="viz" data-chart-id="{{ chart.id }}"><script type="application/json">{{ chart|tojson }}</script></div>
+  </div>
+  {% endfor %}
+</div>
+{% include '_viz.html' %}
+
+{% for title, rows, first in [('By tech', report.by_tech, 'Assigned to'), ('By category', report.by_category, 'Category'), ('By school', report.by_school, 'School')] %}
+<h2 class="hr-h2">{{ title }}</h2>
+<div class="card" style="padding:0;overflow-x:auto;margin-bottom:1.5rem;">
+  <table class="hr-table">
+    <thead><tr><th>{{ first }}</th><th class="num">Opened</th><th class="num">Resolved</th><th class="num">Open now</th>
+      <th class="num">Median first reply</th><th class="num">Median time to fix</th><th class="num">Fixed on time</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td>{{ r.label }}</td><td class="num">{{ r.opened }}</td><td class="num">{{ r.resolved }}</td><td class="num">{{ r.open_now }}</td>
+        <td class="num">{{ r.reply }}</td><td class="num">{{ r.fix }}</td>
+        <td class="num">{{ r.sla }}{% if r.judged %} <span class="hr-muted">of {{ r.judged }}</span>{% endif %}</td></tr>
+    {% else %}
+      <tr><td colspan="7" class="hr-muted" style="text-align:center;padding:1.2rem;">No tickets in this range.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+<style>
+  .hr-muted { color: var(--muted); font-size: .82rem; }
+  .hr-ranges { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: 1.2rem; }
+  .hr-ranges a { padding: .35rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
+                 text-decoration: none; font-size: .85rem; }
+  .hr-ranges a.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .hr-ranges a:hover, .hr-ranges a:focus-visible { border-color: var(--accent); }
+  .hr-ranges .hr-muted { margin-left: .4rem; }
+  .hr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .hr-tiles .card { margin: 0; }
+  .hr-tile { padding: .9rem 1rem; }
+  .hr-label { color: var(--muted); font-size: .8rem; }
+  .hr-value { font-size: 1.6rem; font-weight: 600; margin-top: .2rem; color: var(--text); }
+  .hr-note { color: var(--muted); font-size: .74rem; margin-top: .1rem; }
+  .hr-h2 { font-size: 1.05rem; margin: 0 0 .6rem; }
+  .hr-table td.num, .hr-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+</style>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends 'portal_base.html' %}
+{% block title %}{{ agreement.title }}{% endblock %}
+{% block content %}
+{% set mine = st.signatures.get(role) if role else None %}
+<div class="p-wrap">
+  <p style="margin:0 0 .6rem;"><a href="/my" class="tag-link">← Back</a></p>
+  <h1 style="margin:0 0 .3rem;font-size:1.45rem;">{{ agreement.title }}</h1>
+  <p class="p-muted" style="margin:0 0 1rem;">For {{ person.full_name }}{% if agreement.school_year %} · {{ agreement.school_year }}{% endif %}</p>
+
+  {% if st.complete %}
+  <div class="card pa-done">Signed and complete.</div>
+  {% elif mine %}
+  <div class="card pa-done">You signed this on {{ mine.signed_at.strftime('%B %d, %Y') }}.
+    {% if st.missing %}It still needs {{ st.missing|map('replace', 'guardian', 'a parent')|map('replace', 'student', person.first_name)|join(' and ') }} to sign.{% endif %}</div>
+  {% endif %}
+
+  {% if st.plan_unpaid %}
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1.05rem;">{{ agreement.plan_name or 'Protection plan' }}: ${{ '%.2f'|format(st.plan.plan_amount) }} due</h2>
+    {% if payments %}
+    <form method="POST" action="/my/agreements/pay/{{ st.plan.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">Pay ${{ '%.2f'|format(st.plan.plan_amount) }} by card</button>
+    </form>
+    {% else %}<p class="p-muted" style="margin:0;">{{ payment_note }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="pa-body">{{ agreement.body }}</div>
+  </div>
+
+  {% if role and role in st.missing %}
+  <form method="POST" class="card pa-sign">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h2 style="margin-top:0;font-size:1.1rem;">Sign as {{ 'the student' if role == 'student' else person.first_name ~ "'s parent or guardian" }}</h2>
+    {% if chooses_plan %}
+    <fieldset>
+      <legend>{{ agreement.plan_name or 'Device protection plan' }}{% if agreement.plan_price %} — ${{ '%.2f'|format(agreement.plan_price) }}{% endif %}</legend>
+      {% if agreement.plan_details %}<p class="p-muted" style="margin:.2rem 0 .6rem;">{{ agreement.plan_details }}</p>{% endif %}
+      <label class="pa-check"><input type="radio" name="plan_choice" value="enrolled" {{ 'checked' if form.get('plan_choice') == 'enrolled' }} required> Yes, enroll {{ person.first_name }}</label>
+      <label class="pa-check"><input type="radio" name="plan_choice" value="declined" {{ 'checked' if form.get('plan_choice') == 'declined' }}> No thanks</label>
+    </fieldset>
+    {% endif %}
+    <label for="signerName" class="pa-label">Type your full name to sign</label>
+    <input id="signerName" name="signer_name" value="{{ form.get('signer_name', '') }}" autocomplete="name" required minlength="3" maxlength="160">
+    <label class="pa-check" style="margin-top:.8rem;"><input type="checkbox" name="agree" required> I have read this agreement and agree to it.</label>
+    <p class="p-muted" style="margin:.6rem 0;">Signing records your name, your email ({{ v.email }}), and the date and time.</p>
+    <button type="submit" class="btn btn-primary">Sign</button>
+  </form>
+  {% endif %}
+</div>
+<style>
+  .pa-body { white-space: pre-wrap; line-height: 1.6; }
+  .pa-done { border-left: 3px solid var(--success); }
+  .pa-sign fieldset { border: 0; padding: 0; margin: 0 0 1rem; }
+  .pa-sign legend { font-weight: 600; margin-bottom: .3rem; }
+  .pa-label { display: block; color: var(--muted); font-size: .85rem; margin-bottom: .3rem; }
+  .pa-check { display: flex; align-items: center; gap: .5rem; cursor: pointer; margin: .3rem 0; }
+  .pa-check input { width: auto; }
+</style>
+{% endblock %}

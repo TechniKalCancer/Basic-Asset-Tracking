@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% block title %}SLA targets{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('schedule') }}SLA targets</h1>
+  <span class="badge {{ 'badge-green' if row.enabled else 'badge-yellow' }}">{{ 'On' if row.enabled else 'Off' }}</span>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/helpdesk_reports" class="btn btn-ghost">Help desk reports</a>
+  <a href="/admin/settings" class="btn btn-ghost">← Settings</a>
+</div>
+<p class="sl-muted" style="max-width:76ch;margin:0 0 1.2rem;">
+  How quickly each ticket should get its first reply and be fixed, by priority. Time only counts during the school
+  day, so a ticket opened late Friday isn't overdue by Monday morning. Tickets show when a reply or fix is due soon or
+  overdue, the queue gets a <strong>Past SLA</strong> view, and an automation can act when a ticket misses its time.
+  The reply clock stops at the first reply emailed to the requester (or when the ticket is resolved).
+  Clocks apply to tickets opened while SLAs are on{% if row.enabled and row.started_at %} (since {{ row.started_at.strftime('%b %d, %Y') }}){% endif %}.
+</p>
+
+<form method="POST" class="card sl-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label class="sl-check sl-wide"><input type="checkbox" name="enabled" {{ 'checked' if row.enabled }}> Use SLA targets</label>
+
+  <fieldset class="sl-wide">
+    <legend>Targets, in school hours (leave blank for none)</legend>
+    <div style="overflow-x:auto;">
+    <table class="sl-table">
+      <thead><tr><th>Priority</th><th>First reply within</th><th>Fixed within</th><th>A ticket opened now is due</th></tr></thead>
+      <tbody>
+      {% for p, due in preview %}
+        {% set t = (row.targets or {}).get(p) or {} %}
+        <tr>
+          <th scope="row">{{ p|capitalize }}</th>
+          <td><label class="sr-only" for="{{ p }}_response">{{ p|capitalize }} first reply hours</label>
+            <input id="{{ p }}_response" name="{{ p }}_response" inputmode="decimal" value="{{ t.response if t.response is not none else '' }}" placeholder="—"> h</td>
+          <td><label class="sr-only" for="{{ p }}_resolve">{{ p|capitalize }} fix hours</label>
+            <input id="{{ p }}_resolve" name="{{ p }}_resolve" inputmode="decimal" value="{{ t.resolve if t.resolve is not none else '' }}" placeholder="—"> h</td>
+          <td class="sl-muted">reply {{ due[0] }} · fix {{ due[1] }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>School days</legend>
+    <div class="sl-days">
+      {% for name in weekdays %}
+      <label class="sl-check"><input type="checkbox" name="work_days" value="{{ loop.index0 }}" {{ 'checked' if loop.index0 in work_days }}> {{ name[:3] }}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>School hours ({{ timezone }})</legend>
+    <div class="sl-hours">
+      <label>Start <input type="time" name="day_start" value="{{ row.day_start }}" required></label>
+      <label>End <input type="time" name="day_end" value="{{ row.day_end }}" required></label>
+    </div>
+  </fieldset>
+  <label class="sl-wide">Closed dates — holidays and breaks don't count
+    <textarea name="closed_dates" rows="6" placeholder="2026-11-26 to 2026-11-27  # Thanksgiving&#10;2026-12-21 to 2027-01-01  # Winter break&#10;2027-01-18">{{ row.closed_dates or '' }}</textarea>
+    <span class="sl-help">One date or range per line. Anything after # is a note.</span>
+  </label>
+  <div class="sl-wide"><button type="submit" class="btn btn-primary">Save</button>
+    <span class="sl-help" style="margin-left:.6rem;">Saving updates the due times on every open ticket.</span></div>
+</form>
+<style>
+  .sl-muted { color: var(--muted); font-size: .88rem; }
+  .sl-help { color: var(--muted); font-size: .78rem; }
+  .sl-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 1.2rem; }
+  .sl-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .sl-form legend { color: var(--muted); font-size: .85rem; margin-bottom: .5rem; }
+  .sl-form > label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .sl-wide { grid-column: 1 / -1; }
+  .sl-check { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: .4rem; color: var(--text) !important; cursor: pointer; }
+  .sl-check input { width: auto; }
+  .sl-days { display: flex; flex-wrap: wrap; gap: .4rem 1rem; }
+  .sl-hours { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .sl-hours label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .sl-table th, .sl-table td { white-space: nowrap; }
+  .sl-table input { width: 5.5rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

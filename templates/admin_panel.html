@@ -210,43 +210,7 @@
   </div>
   {% endfor %}
 </div>
-<style>
-  /* Dashboard chart tokens — the app is dark-only, so these are the dark
-     steps of the reference categorical palette, validated against --surface. */
-  .viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
-  .viz-grid .card { margin-bottom: 0; }
-  .viz-card { --viz-series-1: #3987e5; --viz-series-2: #d95926; overflow: visible !important; }
-  .viz-head { display: flex; align-items: flex-start; gap: .8rem; margin-bottom: .8rem; }
-  .viz-head h2 { margin: 0; font-size: 1rem; }
-  .viz-sub { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
-  .viz-more { margin-left: auto; padding: .25rem .65rem; font-size: .78rem; min-height: 0 !important; white-space: nowrap; }
-  .viz { position: relative; width: 100%; }
-  .viz-svg { display: block; overflow: visible; }
-  .viz-svg .viz-gridline { stroke: var(--border); stroke-width: 1; }
-  .viz-svg .viz-axis { stroke: #3d4366; stroke-width: 1; }
-  .viz-svg .viz-tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-  .viz-svg .viz-label { fill: var(--text); font-size: 12.5px; }
-  .viz-svg .viz-value { fill: var(--text); font-size: 12px; font-weight: 600; }
-  .viz-svg .viz-hit { fill: transparent; cursor: default; outline: none; }
-  .viz-svg .viz-mark.viz-hover path { filter: brightness(1.25); }
-  .viz-svg .viz-hit:focus-visible { stroke: var(--text); stroke-width: 1; }
-  .viz-legend { display: flex; gap: 1rem; font-size: .8rem; color: var(--muted); margin-bottom: .5rem; }
-  .viz-legend > span { display: inline-flex; align-items: center; gap: .4rem; }
-  .viz-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-  .viz-empty { color: var(--muted); font-size: .88rem; padding: 2rem 0; text-align: center; }
-  .viz-table { margin-top: .6rem; font-size: .8rem; }
-  .viz-table summary { color: var(--muted); cursor: pointer; }
-  .viz-table table { margin-top: .4rem; }
-  .viz-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .viz-tooltip {
-    display: none; position: fixed; z-index: 2000; pointer-events: none; max-width: 260px;
-    background: #0b0d13; border: 1px solid var(--border); border-radius: 8px; padding: .45rem .65rem;
-    font-size: .8rem; color: var(--muted); box-shadow: 0 6px 18px rgba(0,0,0,.4);
-  }
-  .viz-tooltip strong { display: block; color: var(--text); font-size: .95rem; }
-  .viz-tooltip-detail { margin-top: .15rem; font-size: .75rem; }
-</style>
-<script src="/static/js/charts.js"></script>
+{% include '_viz.html' %}
 {% endif %}
 
 {% if person_schedule or kace_schedule %}

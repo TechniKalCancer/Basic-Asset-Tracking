@@ -13,10 +13,11 @@
 
 <div class="queue-tabs" role="navigation" aria-label="Queues">
   {% for key, label in queues %}
-  <a href="?view={{ key }}" class="{{ 'active' if view == key }}" {{ 'aria-current="page"'|safe if view == key }}>{{ label }}{% if key %} <span class="badge {{ 'badge-yellow' if key in ('unassigned', 'stale') and queue_counts[key] else 'badge-blue' }}">{{ queue_counts[key] }}</span>{% endif %}</a>
+  <a href="?view={{ key }}" class="{{ 'active' if view == key }}" {{ 'aria-current="page"'|safe if view == key }}>{{ label }}{% if key %} <span class="badge {{ 'badge-red' if key == 'overdue' and queue_counts[key] else ('badge-yellow' if key in ('unassigned', 'stale') and queue_counts[key] else 'badge-blue') }}">{{ queue_counts[key] }}</span>{% endif %}</a>
   {% endfor %}
   {% if is_super_admin() or can('admin') %}<a href="/admin/teams" class="queue-manage">Teams</a>{% endif %}
   <a href="/admin/canned_replies" class="queue-manage">Saved replies</a>
+  <a href="/admin/helpdesk_reports" class="queue-manage">Reports</a>
 </div>
 
 <form method="GET" style="display:flex;gap:.8rem;flex-wrap:wrap;margin-bottom:1.5rem;">
@@ -74,9 +75,13 @@
       {% for t in pagination.items %}
       <tr>
         <td><a href="/admin/tickets/{{ t.id }}" style="text-decoration:none;">#{{ t.id }}</a></td>
-        <td><a href="/admin/tickets/{{ t.id }}" style="text-decoration:none;">{{ t.subject }}</a></td>
+        <td><a href="/admin/tickets/{{ t.id }}" style="text-decoration:none;">{{ t.subject }}</a>
+          {% if t.merged_into_id %}<div class="t-sub">Merged into #{{ t.merged_into_id }}</div>
+          {% elif t.parent_id %}<div class="t-sub">Part of <a href="/admin/tickets/{{ t.parent_id }}">#{{ t.parent_id }}</a></div>
+          {% elif t.linked %}<div class="t-sub">{{ t.linked|length }} linked report{{ 's' if t.linked|length != 1 }}</div>{% endif %}</td>
         <td style="color:var(--muted);">{{ t.category.name if t.category else '—' }}</td>
-        <td><span class="badge {{ status_badge.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span></td>
+        <td><span class="badge {{ status_badge.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span>
+          {% if show_sla %}{% set sla = sla_badge(t) %}{% if sla and t.is_open %}<div style="margin-top:.25rem;"><span class="badge {{ sla.css }}" style="font-size:.68rem;" title="{{ sla.title }}">{{ sla.text }}</span></div>{% endif %}{% endif %}</td>
         <td><span class="badge {{ priority_badge.get(t.priority, 'badge-blue') }}">{{ t.priority|capitalize }}</span></td>
         <td style="color:var(--muted);">{{ t.requester_name or '—' }}</td>
         <td style="color:var(--muted);">{{ t.assigned_to.username if t.assigned_to else '—' }}{% if t.team %}<div style="font-size:.75rem;">{{ t.team.name }}</div>{% endif %}</td>
@@ -121,5 +126,6 @@
   .queue-tabs a:hover, .queue-tabs a:focus-visible { border-color: var(--accent); }
   .queue-tabs a.queue-manage { border-style: dashed; margin-left: auto; }
   .queue-tabs a.queue-manage + a.queue-manage { margin-left: 0; }
+  .t-sub { font-size: .75rem; color: var(--muted); margin-top: .15rem; }
 </style>
 {% endblock %}

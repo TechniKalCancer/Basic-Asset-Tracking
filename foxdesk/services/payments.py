@@ -1,9 +1,10 @@
-"""Online damage-fee payments through Stripe Checkout.
+"""Online payments through Stripe Checkout: damage fees, and protection
+plans chosen when signing a device agreement.
 
 A parent or student clicks Pay, FoxDesk creates a Checkout Session for
-exactly the fee on record and sends them to Stripe's payment page. A fee is
+exactly the amount on record and sends them to Stripe's payment page. It's
 only marked paid after FoxDesk asks Stripe itself and Stripe confirms the
-session is paid, for the same amount, for the same damage report — on the
+session is paid, for the same amount, for the same fee or plan — on the
 return from Stripe, and again from a background check every 15 minutes for
 anyone who paid and closed the tab. No webhook (and so no public endpoint)
 is needed. Card details never touch FoxDesk.
@@ -15,7 +16,7 @@ import requests
 
 from foxdesk.clock import utcnow
 from foxdesk.core import db, logger
-from foxdesk.models import FeePayment, Incident, PortalSettings
+from foxdesk.models import AgreementSignature, FeePayment, Incident, PortalSettings
 from foxdesk.services.secrets import decrypt_secret, encrypt_secret
 
 STRIPE = 'https://api.stripe.com/v1'
@@ -106,6 +107,40 @@ def start_checkout(incident, payer_email, base_url):
     return session['url']
 
 
+def unpaid_plan(sig):
+    return bool(sig.plan_choice == 'enrolled' and sig.plan_amount and Decimal(sig.plan_amount) > 0 and not sig.plan_paid_at)
+
+
+def start_plan_checkout(sig, payer_email, base_url):
+    """A Stripe Checkout URL for a protection plan picked when signing. Commits."""
+    if not unpaid_plan(sig):
+        raise PaymentError('That plan is already paid.')
+    name = sig.agreement.plan_name or 'Device protection plan'
+    session = _stripe('POST', '/checkout/sessions', data={
+        'mode': 'payment',
+        'success_url': f'{base_url}/my/paid?session_id={{CHECKOUT_SESSION_ID}}',
+        'cancel_url': f'{base_url}/my',
+        'customer_email': payer_email or None,
+        'client_reference_id': f'plan-{sig.id}',
+        'metadata[signature_id]': str(sig.id),
+        'line_items[0][quantity]': 1,
+        'line_items[0][price_data][currency]': CURRENCY,
+        'line_items[0][price_data][unit_amount]': cents(sig.plan_amount),
+        'line_items[0][price_data][product_data][name]': f'{name} ({sig.person.full_name})'[:200],
+    })
+    db.session.add(FeePayment(signature_id=sig.id, amount=Decimal(sig.plan_amount), provider='stripe',
+                              provider_ref=session['id'], status='pending', payer_email=payer_email))
+    db.session.commit()
+    return session['url']
+
+
+def _for_this_payment(payment, metadata):
+    """Stripe's record names the same fee or plan this payment was for."""
+    if payment.incident_id:
+        return str(metadata.get('incident_id')) == str(payment.incident_id)
+    return bool(payment.signature_id) and str(metadata.get('signature_id')) == str(payment.signature_id)
+
+
 def confirm(session_id):
     """Ask Stripe about one checkout session and settle it. Returns the
     FeePayment (None if it isn't ours). Commits."""
@@ -114,20 +149,25 @@ def confirm(session_id):
     if payment is None or payment.status == 'paid':
         return payment
     data = _stripe('GET', f'/checkout/sessions/{session_id}')
-    incident = db.session.get(Incident, payment.incident_id)
+    incident = db.session.get(Incident, payment.incident_id) if payment.incident_id else None
+    sig = db.session.get(AgreementSignature, payment.signature_id) if payment.signature_id else None
     matches = (data.get('payment_status') == 'paid' and data.get('amount_total') == cents(payment.amount)
-               and str((data.get('metadata') or {}).get('incident_id')) == str(payment.incident_id))
+               and _for_this_payment(payment, data.get('metadata') or {}))
     if matches:
         payment.status, payment.paid_at = 'paid', utcnow()
         if incident and not incident.paid_at:
             incident.paid_at = payment.paid_at
             _log_activity('fee_paid', f'Damage fee for {incident.asset_tag} ({incident.person_name or "unknown"}) '
                                       f'paid online: ${payment.amount:.2f} (Stripe {session_id[-8:]}).')
+        if sig is not None:
+            from foxdesk.services.agreements import mark_plan_paid
+            mark_plan_paid(sig, f'online (Stripe {session_id[-8:]})')
     elif data.get('status') == 'expired':
         payment.status = 'expired'
     elif data.get('payment_status') == 'paid':
         payment.status = 'review'  # paid, but not what FoxDesk asked for — leave it to a person
-        logger.warning('Stripe session %s paid but did not match fee %s', session_id, payment.incident_id)
+        logger.warning('Stripe session %s paid but did not match fee %s / plan %s', session_id, payment.incident_id,
+                       payment.signature_id)
     db.session.commit()
     return payment
 

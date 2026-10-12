@@ -81,6 +81,10 @@
     {{ registry_row.description or 'No description on file.' }}
     {% if asset and asset.assigned_to %}
       <br>Currently assigned to <strong style="color:var(--text);">{{ asset.assigned_to.full_name }}</strong>.
+      {% for a in unsigned_agreements(asset.assigned_to) %}
+      <br><span class="badge badge-yellow" style="margin-top:.4rem;">{{ icon('warning') }}{{ a.title }} not signed</span>
+      <a href="/admin/agreements/{{ a.id }}?q={{ asset.assigned_to.full_name|urlencode }}" class="tag-link" style="font-size:.8rem;">record it</a>
+      {% endfor %}
     {% endif %}
   </p>
 

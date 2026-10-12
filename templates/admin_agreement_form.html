@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit' if agreement else 'New' }} device agreement{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('document') }}{{ 'Edit device agreement' if agreement else 'New device agreement' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="{{ '/admin/agreements/%d'|format(agreement.id) if agreement else '/admin/agreements' }}" class="btn btn-ghost">← Back</a>
+</div>
+
+{% if locked %}
+<div class="af-note">
+  {{ agreement.signatures.count() }} signature(s) are on this text, so the text, who signs, the plan price and the school are locked.
+  To change them, make a new version: this one closes and everyone signs the new one.
+  <form method="POST" action="/admin/agreements/{{ agreement.id }}/new_version" style="margin-top:.6rem;"
+        onsubmit="return confirm('Close this agreement and start a new version? Everyone will need to sign the new one.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-ghost">Make a new version</button>
+  </form>
+</div>
+{% endif %}
+
+<form method="POST" class="card af-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Title <input name="title" value="{{ values.title or '' }}" required maxlength="160"></label>
+  <label>School year <input name="school_year" value="{{ values.school_year or '' }}" placeholder="2026-27" maxlength="20"></label>
+  <label>Applies to
+    <select name="site_id" {{ 'disabled' if locked }}>
+      <option value="">Students at every school</option>
+      {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if values.site_id == s.id }}>{{ s.name }} students only</option>{% endfor %}
+    </select>
+  </label>
+  <fieldset>
+    <legend>Who signs</legend>
+    <label class="af-check"><input type="checkbox" name="require_student" {{ 'checked' if values.require_student }} {{ 'disabled' if locked }}> The student</label>
+    <label class="af-check"><input type="checkbox" name="require_guardian" {{ 'checked' if values.require_guardian }} {{ 'disabled' if locked }}> A parent or guardian (the guardian email on file)</label>
+  </fieldset>
+  <label class="af-wide">Agreement text
+    <textarea name="body" rows="16" {{ 'readonly' if locked }} placeholder="Paste your district's device agreement here.">{{ values.body or '' }}</textarea>
+    <span class="af-help">Shown in full before signing. Blank lines start new paragraphs.</span>
+  </label>
+
+  <fieldset class="af-wide">
+    <legend>Protection plan (optional)</legend>
+    <label class="af-check"><input type="checkbox" name="plan_offered" id="planOffered" {{ 'checked' if values.plan_offered }} {{ 'disabled' if locked }}> Offer a protection plan when families sign</label>
+    <div class="af-plan" id="planFields">
+      <label>Plan name <input name="plan_name" value="{{ values.plan_name or '' }}" placeholder="Device protection plan" maxlength="120"></label>
+      <label>Price <input name="plan_price" value="{{ values.plan_price if values.plan_price is not none else '' }}" placeholder="25.00" inputmode="decimal" {{ 'readonly' if locked }}></label>
+      <label class="af-wide">What it covers <textarea name="plan_details" rows="3" placeholder="Covers one accidental damage repair this school year; a second is billed at half price.">{{ values.plan_details or '' }}</textarea></label>
+      <span class="af-help af-wide">Families choose to enroll or not when they sign; a priced plan is paid online (if payments are on) or at the office, and paying marks the student as having the plan.</span>
+    </div>
+  </fieldset>
+  <div class="af-wide"><button type="submit" class="btn btn-primary">{{ 'Save' if agreement else 'Open for signing' }}</button></div>
+</form>
+{% if agreement and can('admin') %}
+<form method="POST" action="/admin/agreements/{{ agreement.id }}/active" style="margin-top:-.5rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-ghost">{{ 'Close for signing' if agreement.is_active else 'Open for signing again' }}</button>
+</form>
+{% endif %}
+<script>
+(function () {
+  const box = document.getElementById('planOffered'), fields = document.getElementById('planFields');
+  function show() { fields.hidden = !box.checked; }
+  box.addEventListener('change', show); show();
+})();
+</script>
+<style>
+  .af-note { margin: 0 0 1rem; padding: .7rem .9rem; border-left: 3px solid var(--warning); background: var(--surface2); border-radius: 4px; font-size: .9rem; max-width: 80ch; }
+  .af-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 1rem 1.2rem; }
+  .af-form label { display: flex; flex-direction: column; gap: .3rem; color: var(--muted); font-size: .85rem; }
+  .af-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .af-form legend { color: var(--muted); font-size: .85rem; margin-bottom: .4rem; }
+  .af-wide { grid-column: 1 / -1; }
+  .af-check { flex-direction: row !important; align-items: center; gap: .45rem !important; color: var(--text) !important; cursor: pointer; margin-bottom: .3rem; }
+  .af-check input { width: auto; }
+  .af-plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: .8rem 1rem; margin-top: .6rem; }
+  .af-plan[hidden] { display: none; }
+  .af-help { color: var(--muted); font-size: .76rem; }
+  .af-form textarea { width: 100%; resize: vertical; }
+</style>
+{% endblock %}

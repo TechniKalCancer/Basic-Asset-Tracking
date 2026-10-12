@@ -88,6 +88,7 @@ def fresh_db():
         A.db.session.remove()
         A.db.engine.dispose()
     shutil.copy(TEMPLATE_PATH, DB_PATH)
+    A._link_requests.clear()  # the portal's per-IP sign-in link limit lives in memory, not the database
     with A.app.app_context():
         yield A.db
         A.db.session.remove()

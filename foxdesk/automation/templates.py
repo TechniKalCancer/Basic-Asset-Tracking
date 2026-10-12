@@ -63,6 +63,15 @@ TEMPLATES = [
                             actions=[_a('post_webhook', url='',
                                         message='Urgent ticket #{ticket_id}: {ticket_subject} — {requester_name} '
                                                 '({device_site})')])),
+    dict(key='sla_missed_email', group='Help desk',
+         name='A ticket misses its SLA → tell the team',
+         description='When a ticket goes past its reply or fix time, email your tech team (or your lead) once.',
+         build=lambda: dict(trigger='ticket.sla_breached', conditions=[],
+                            actions=[_a('send_email', to='address', address='',
+                                        subject='Ticket #{ticket_id} missed its {sla_missed} time',
+                                        body='Ticket #{ticket_id} ({ticket_priority}): {ticket_subject}\n'
+                                             'Requester: {requester_name}\n\nIt has gone past its {sla_missed} '
+                                             'time and still needs attention.')])),
     dict(key='assign_by_school', group='Help desk',
          name='Assign each school\'s tickets to its tech',
          description='Tickets from one school go straight to that school\'s tech. Make one rule per school.',
@@ -133,6 +142,17 @@ TEMPLATES = [
                                         body='Dear {guardian_name},\n\n{person_name} has been issued device {asset_tag} '
                                              '({device_model}). Please review the district\'s device agreement with '
                                              'your student.\n\nThank you.')])),
+    dict(key='unsigned_agreement_email', group='People',
+         name='Device handed out, agreement not signed → remind the family',
+         description='When a student gets a device but their device agreement isn\'t signed, email the parent/guardian.',
+         build=lambda: dict(trigger='device.assigned',
+                            conditions=[_c('person.role', 'eq', 'student'), _c('device.is_loaner', 'false'),
+                                        _c('person.agreement_signed', 'false')],
+                            actions=[_a('send_email', to='guardian', address='',
+                                        subject='Please sign {person_first_name}\'s device agreement',
+                                        body='Dear {guardian_name},\n\n{person_name} has been issued device '
+                                             '{asset_tag}. Please sign this year\'s device agreement in the parent '
+                                             'portal.\n\nThank you.')])),
     dict(key='lost_turned_up', group='Devices',
          name='A lost device turns up → urgent ticket',
          description='If the Google sign-in check sees a device marked lost or retired being used, open an urgent ticket.',

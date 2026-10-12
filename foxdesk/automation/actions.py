@@ -111,7 +111,12 @@ def _set_ticket_field(field, choices_label):
         old = getattr(t, field)
         setattr(t, field, value)
         if field == 'status' and value in ('resolved', 'closed'):
+            from foxdesk.services.sla import mark_responded
             t.resolved_at = t.resolved_at or utcnow()
+            mark_responded(t)
+        if field == 'priority' and value != old:
+            from foxdesk.services.sla import apply_sla
+            apply_sla(t)
         return 'ok', f'{choices_label}: {old} → {value}'
     return run
 
@@ -126,6 +131,8 @@ def _add_ticket_comment(ctx, p, dry_run):
         return 'ok', f'Would add a {"reply" if email_it else "comment"}: "{body[:80]}"'
     db.session.add(TicketComment(ticket_id=t.id, body=body, author_label='Automation', emailed_to_requester=email_it))
     if email_it:
+        from foxdesk.services.sla import mark_responded
+        mark_responded(t)
         from foxdesk.services.helpdesk import _notify_ticket_requester
         _notify_ticket_requester(t, 'ticket_reply', {'tech_name': 'FoxDesk', 'reply_body': body}, force=True)
     return 'ok', 'Comment added' + (' and emailed' if email_it else '')

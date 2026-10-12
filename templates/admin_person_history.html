@@ -9,6 +9,21 @@
   <a href="/admin/people" class="btn btn-ghost">← Back</a>
 </div>
 
+{% set agreement_list = agreement_rows(person) %}
+{% if agreement_list %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2 style="margin:0 0 .5rem;font-size:1rem;">{{ icon('document') }}Device agreements</h2>
+  {% for a, st in agreement_list %}
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;padding:.3rem 0;">
+    <a href="/admin/agreements/{{ a.id }}?q={{ person.full_name|urlencode }}" class="tag-link">{{ a.title }}</a>
+    {% if st.complete %}<span class="badge badge-green">Signed</span>{% else %}<span class="badge badge-yellow">Needs {{ st.missing|map('replace', 'guardian', 'parent')|join(' + ') }}</span>{% endif %}
+    {% for role, s in st.signatures.items() %}<span style="color:var(--muted);font-size:.82rem;">{{ s.signer_name }} · {{ s.signed_at.strftime('%Y-%m-%d') }}</span>{% endfor %}
+    {% if st.plan %}<span style="color:var(--muted);font-size:.82rem;">Plan {{ st.plan.plan_choice }}{% if st.plan_unpaid %}, not paid{% endif %}</span>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
     <thead>

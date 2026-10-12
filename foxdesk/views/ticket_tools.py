@@ -185,3 +185,128 @@ def _session_key():
     import secrets
     session['presence_key'] = secrets.token_hex(8)
     return session['presence_key']
+
+
+# ─── merging and linking ──────────────────────────────────────────────────────
+
+def _scoped_ticket(number):
+    """A ticket the current user can see, from '123' or '#123', or None."""
+    digits = str(number or '').strip().lstrip('#').strip()
+    if not digits.isdigit():
+        return None
+    return _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=int(digits)).first()
+
+
+def _reply_with_signature(body):
+    me = _current_user()
+    return f'{body}\n\n-- \n{me.signature}' if me and me.signature else body
+
+
+@app.route('/admin/tickets/<int:ticket_id>/merge', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_merge(ticket_id):
+    from foxdesk.core import EMAIL_ENABLED
+    from foxdesk.services.helpdesk import _notify_ticket_requester
+    from foxdesk.services.ticket_links import LinkError, final_ticket, merge_tickets
+    this = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
+    other = _scoped_ticket(request.form.get('other'))
+    if other is None:
+        flash('Enter the number of a ticket you can see.', 'error')
+        return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+    if request.form.get('direction') == 'from':
+        duplicate, keep = other, this
+    else:
+        duplicate, keep = this, final_ticket(other)
+    _, actor_label, _ = _current_actor()
+    try:
+        summary = merge_tickets(duplicate, keep, actor_label)
+        db.session.commit()
+    except LinkError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+        return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+    told = ''
+    if request.form.get('notify') == 'on' and EMAIL_ENABLED and duplicate.requester_email:
+        body = (f'Thanks for letting us know. We\'re already working on this as ticket #{keep.id} '
+                f'("{keep.subject}"), so we\'ve combined your request #{duplicate.id} with it. '
+                f'A reply to this email still reaches us.')
+        _notify_ticket_requester(duplicate, 'ticket_reply', {'tech_name': actor_label, 'reply_body': _reply_with_signature(body)},
+                                 force=True)
+        told = f' {duplicate.requester_email} was told.'
+    flash(summary + told, 'success')
+    return redirect(url_for('admin_ticket_detail', ticket_id=keep.id))
+
+
+@app.route('/admin/tickets/<int:ticket_id>/link', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_link(ticket_id):
+    from foxdesk.services.ticket_links import LinkError, final_ticket, link_ticket
+    this = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
+    main = _scoped_ticket(request.form.get('main'))
+    if main is None:
+        flash('Enter the number of a ticket you can see.', 'error')
+        return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+    try:
+        main = link_ticket(this, final_ticket(main))
+        db.session.commit()
+    except LinkError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+        return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+    flash(f'Ticket #{this.id} is now linked under #{main.id}.', 'success')
+    return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+
+
+@app.route('/admin/tickets/<int:ticket_id>/unlink', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_unlink(ticket_id):
+    from foxdesk.services.ticket_links import unlink_ticket
+    this = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
+    if this.parent_id:
+        unlink_ticket(this)
+        db.session.commit()
+        flash(f'Ticket #{this.id} is no longer linked.', 'success')
+    return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=ticket_id))
+
+
+@app.route('/admin/tickets/<int:ticket_id>/resolve_linked', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_resolve_linked(ticket_id):
+    """Resolve every open ticket linked under this one with one note, and
+    optionally this ticket too."""
+    from foxdesk.automation.engine import emit
+    from foxdesk.core import EMAIL_ENABLED
+    from foxdesk.services.helpdesk import _notify_ticket_requester
+    from foxdesk.services.sla import mark_responded
+    from foxdesk.services.ticket_links import resolve_linked
+    main = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
+    message = request.form.get('message', '').strip()
+    email_them = request.form.get('email_requesters') == 'on' and EMAIL_ENABLED
+    _, actor_label, _ = _current_actor()
+    resolved, to_email = resolve_linked(main, message, email_them, actor_label)
+    main_emailed = False
+    if request.form.get('include_main') == 'on' and main.is_open:
+        resolved.append((main, main.status))
+        main_emailed = bool(email_them and message and main.requester_email)
+        if message:
+            from foxdesk.models import TicketComment
+            db.session.add(TicketComment(ticket_id=main.id, body=message, author_label=actor_label,
+                                         emailed_to_requester=main_emailed))
+        main.status, main.resolved_at, main.updated_at = 'resolved', utcnow(), utcnow()
+        mark_responded(main)
+        _log_activity('ticket_status', f'Ticket #{main.id} resolved with its linked tickets.', site_id=main.site_id, ticket_id=main.id)
+        if main_emailed:
+            to_email.append(main)
+    db.session.commit()
+    for t in to_email:
+        _notify_ticket_requester(t, 'ticket_reply', {'tech_name': actor_label, 'reply_body': _reply_with_signature(message)},
+                                 force=True)
+    for t, old_status in resolved:
+        if t not in to_email:
+            _notify_ticket_requester(t, 'ticket_resolved')
+        emit('ticket.status_changed', t, old_status=old_status)
+    if not resolved:
+        flash('Nothing to resolve — the linked tickets are already closed.', 'info')
+    else:
+        flash(f'Resolved {len(resolved)} ticket(s)' + (f'; {len(to_email)} requester(s) emailed.' if to_email else '.'), 'success')
+    return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))

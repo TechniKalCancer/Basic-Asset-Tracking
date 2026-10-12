@@ -6,6 +6,11 @@
   <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>{% block title %}FoxDesk{% endblock %}</title>
   {% if branding.favicon_url %}<link rel="icon" href="{{ branding.favicon_url }}">{% endif %}
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#1a1d27">
+  <link rel="apple-touch-icon" href="/static/pwa/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="{{ branding.app_name or 'FoxDesk' }}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -210,6 +215,7 @@
     .badge-red     { background: #7f1d1d55; color: var(--danger);  }
     .badge-blue    { background: #1e3a8a55; color: var(--accent);  }
     .badge-purple  { background: #581c8755; color: #c084fc;        }
+    .badge-neutral { background: var(--surface2); color: var(--muted); }
 
     /* Asset tag/serial links in tables — plain <a><code> has no explicit
        color, so it falls back to the browser's default link color, which
@@ -479,6 +485,7 @@
         <a href="/admin/people/import">Import People CSV</a>
         <a href="/admin/people/graduate">Graduate Students</a>
         <a href="/admin/accounts/review">Accounts to Review {% if nav_accounts_review_count %}<span class="nav-tab-badge">{{ nav_accounts_review_count }}</span>{% endif %}</a>
+        {% if feature('agreements') %}<a href="/admin/agreements">Device Agreements</a>{% endif %}
         {% if feature('active_directory') %}<a href="/admin/directory/people">Disabled in AD</a>{% endif %}
       {% elif active_section == 'loaners' %}
         {% if can('loaner_checkinout') %}<a href="/loaner_checkinout">Check In / Out</a>{% endif %}
@@ -491,6 +498,8 @@
         <a href="/admin/tickets">Queue</a>
         <a href="/admin/tickets/new">New Ticket</a>
         <a href="/admin/ticket_categories">Categories</a>
+        <a href="/admin/helpdesk_reports">Reports</a>
+        {% if is_super_admin() %}<a href="/admin/sla">SLA Targets</a>{% endif %}
         {% if is_super_admin() and feature('automations') %}<a href="/admin/rules">Automations</a>{% endif %}
       {% elif active_section == 'admin' %}
         <a href="/admin/settings">All Settings</a>
@@ -747,6 +756,12 @@ if (isAdmin) {
   checkSession();
   setInterval(checkSession, 15000);
 }
+</script>
+<script>
+  // Installable app: the service worker only caches static files (see foxdesk/views/pwa.py).
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
 </script>
 </body>
 </html>

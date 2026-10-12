@@ -87,7 +87,7 @@
             buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, false,
                 window.PRINT_LABEL_IS_LOANER, window.PRINT_LABEL_LOANER_LABEL).print(printerName);
         } catch (e) {
-            alert('Print failed: ' + (e.message || e));
+            alert('Print failed: ' + dymoErrorText(e));
             return;
         }
 
@@ -98,7 +98,7 @@
                     buildAssetLabel(window.PRINT_LABEL_ASSET_TAG, window.PRINT_LABEL_PERSON_NAME, true,
                         window.PRINT_LABEL_IS_LOANER, window.PRINT_LABEL_LOANER_LABEL).print(printerName);
                 } catch (e) {
-                    alert('Charger label print failed: ' + (e.message || e));
+                    alert('Charger label print failed: ' + dymoErrorText(e));
                 }
             }, 800);
         }

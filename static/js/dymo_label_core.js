@@ -117,3 +117,19 @@ function buildAssetLabel(assetTag, personName, isCharger, isLoaner, loanerLabel)
     }
     return label;
 }
+
+/**
+ * A print error as something a person can act on. DYMO Connect 1.6.1 (and
+ * likely nearby versions) rejects valid labels with "Invalid label file:
+ * Sch_UndeclaredElement"; 1.6.3.9 prints the same label fine.
+ * @param {*} e - the error thrown by print()
+ * @returns {string}
+ */
+function dymoErrorText(e) {
+    var text = String((e && e.message) || e || 'Unknown error');
+    if (/Sch_Undeclared|Invalid label file/i.test(text)) {
+        return text + ' — this computer\'s DYMO Connect needs updating. Open DYMO Connect and install the update ' +
+            '(or download the latest from dymo.com), then try again.';
+    }
+    return text;
+}

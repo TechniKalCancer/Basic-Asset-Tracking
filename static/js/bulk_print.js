@@ -98,7 +98,7 @@
                 }, 500);
             }
         } catch (e) {
-            progressEl.textContent += ' (failed: ' + (e.message || e) + ')';
+            progressEl.textContent += ' (failed: ' + dymoErrorText(e) + ')';
         }
         setTimeout(function () { printQueue(rows, printerName, includeCharger, index + 1); }, includeCharger ? 1300 : 800);
     }

@@ -229,7 +229,7 @@ def _data_quality_checks(site_ids):
     add('multiple_devices', 'People with more than one primary device',
         'More than one Chromebook/laptop/iPad (loaners excluded) — often an old device never checked back in.',
         'warning', ['Name', 'Email', 'Role', 'Devices'], multi_people,
-        lambda p: {'cells': [p.full_name, p.email, p.role, multi[p.id]], 'link': url_for('admin_person_history', person_id=p.id)})
+        lambda p: {'cells': [p.full_name, p.email, p.role, multi[p.id]], 'link': url_for('admin_person', person_id=p.id)})
 
     with_device = db.session.query(Asset.assigned_to_id) \
         .join(AssetRegistry, AssetRegistry.asset_tag == Asset.asset_tag) \

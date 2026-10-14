@@ -96,7 +96,7 @@ def test_paper_copy_plan_paid_and_staff_pages(client, make):
     assert 'Ana Ruiz' in page and 'Bo Lee' in page
     csv_text = client.get(f'/admin/agreements/{agreement.id}/export').get_data(as_text=True)
     assert 'Maria Ruiz (Paper copy' in csv_text and 'declined' in csv_text
-    assert 'Device agreements' in client.get(f'/admin/people/{kid.id}/history').get_data(as_text=True)
+    assert 'Device agreement' in client.get(f'/admin/people/{kid.id}/history', follow_redirects=True).get_data(as_text=True)
     assert '2 of 2 students signed' in client.get('/admin/agreements').get_data(as_text=True)
 
 

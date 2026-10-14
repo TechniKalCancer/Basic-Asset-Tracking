@@ -65,8 +65,14 @@
     <input type="checkbox" name="insurance" value="1" style="width:auto;" {{ 'checked' if insurance_filter == '1' }} onchange="this.form.submit()" />
     Insured only
   </label>
+  {% if agreement_columns %}
+  <select name="unsigned" onchange="this.form.submit()" aria-label="Agreements">
+    <option value="">Any agreement status</option>
+    {% for a in agreement_columns %}<option value="{{ a.id }}" {{ 'selected' if unsigned == a.id }}>{{ agreement_short_name(a) }} not signed</option>{% endfor %}
+  </select>
+  {% endif %}
   <button type="submit" class="btn btn-ghost">Search</button>
-  {% if search or insurance_filter %}<a href="/admin/people?show={{ show }}" class="btn btn-ghost">Clear</a>{% endif %}
+  {% if search or insurance_filter or unsigned %}<a href="/admin/people?show={{ show }}" class="btn btn-ghost">Clear</a>{% endif %}
 </form>
 
 <div class="card" style="padding:0;overflow-x:auto;">
@@ -80,6 +86,7 @@
         <th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>
         <th class="sortable">{{ macros.sort_link('department', 'Department') }}</th>
         <th>Assets</th>
+        {% for a in agreement_columns %}<th class="ag-col" title="{{ a.title }}{% if a.school_year %} ({{ a.school_year }}){% endif %}">{{ agreement_short_name(a) }}</th>{% endfor %}
         <th></th>
       </tr>
     </thead>
@@ -87,7 +94,7 @@
       {% for person in pagination.items %}
       <tr>
         <td>
-          {{ person.full_name }}
+          <a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>
           {% if not person.is_active %}<span class="badge badge-yellow" style="font-size:.7rem;">Graduated</span>{% endif %}
           {% if person.insurance_opted_in %}<span class="badge badge-blue" style="font-size:.7rem;" title="Device protection plan">{{ icon('protection-plan') or 'Plan' }}</span>{% endif %}
         </td>
@@ -103,12 +110,13 @@
             0
           {% endif %}
         </td>
+        {% for a in agreement_columns %}<td class="ag-col">{{ macros.agreement_box(a, person, agreement_status.get((a.id, person.id))) }}</td>{% endfor %}
         <td style="text-align:right;white-space:nowrap;">
           <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
           <div class="row-menu">
             <button type="button">⋮</button>
             <div class="row-menu-items">
-              <a href="/admin/people/{{ person.id }}/history">{{ icon('history') }}History</a>
+              <a href="/admin/people/{{ person.id }}">{{ icon('history') }}Devices &amp; history</a>
               {% if not person.is_active %}
               <form method="POST" action="/admin/people/{{ person.id }}/reactivate">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -125,7 +133,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
+      <tr><td colspan="{{ 8 + agreement_columns|length }}" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -144,4 +152,6 @@
   {% endif %}
 </div>
 {% endif %}
+{% if agreement_columns %}<script src="/static/js/agreement_checks.js"></script>
+<style>.ag-col { text-align: center; width: 3.2rem; } .ag-col input { width: auto; transform: scale(1.2); }</style>{% endif %}
 {% endblock %}

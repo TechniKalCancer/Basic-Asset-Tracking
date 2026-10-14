@@ -27,7 +27,7 @@
           {% if (r.raw or {}).get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD {{ r.raw.removed_from_ad }}</span>
           {% else %}<span class="badge badge-yellow" style="font-size:.68rem;">disabled</span>{% endif %}</td>
         <td style="font-size:.8rem;color:var(--muted);">{{ (r.directory_path or '')|short_dn }}</td>
-        <td class="num">{% if held.get(r.person_id) %}<a href="/admin/people/{{ r.person.id }}/history" class="badge badge-red" style="text-decoration:none;">{{ held[r.person_id] }}</a>{% else %}<span style="color:var(--muted);">0</span>{% endif %}</td>
+        <td class="num">{% if held.get(r.person_id) %}<a href="/admin/people/{{ r.person.id }}" class="badge badge-red" style="text-decoration:none;">{{ held[r.person_id] }}</a>{% else %}<span style="color:var(--muted);">0</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -237,6 +237,14 @@ is archived (`is_active = False`) — **not deleted**. Archived people:
 - Can be viewed via `/admin/people?show=inactive` and undone anytime with the **Reactivate**
   button, e.g. if a student was graduated by mistake.
 
+## Person Page (People → a name)
+
+Everything about one student or staff member on one page: what they have now (assigned devices and
+loaners out, with due dates), their **Chromebook history** (every Chromebook they've had, when it went
+out and came back, condition each way, who acknowledged it), every **loaner** (due, returned, late),
+**other devices** (chargers, hotspots, laptops...), their agreements with sign-off boxes, damage reports
+and what's owed, help requests, and spot checks.
+
 ## Assignment History, Condition Notes & Status
 
 - Every assign/unassign is logged to `AssignmentHistory` — who had an asset, from when to
@@ -792,7 +800,11 @@ Both portals are off until a district switches them on under Features.
   school or one school. Families sign in the portal: they read the full text, type their name and
   check "I agree"; FoxDesk records the name, email, time, IP address and a SHA-256 of the exact text.
   Once anyone has signed, the text is locked; changing it makes a new version that everyone signs.
-- Staff can record a signed **paper copy**, which covers every signature the agreement needs.
+- Staff can record a signed **paper copy**, which covers every signature the agreement needs: tick the
+  box in that agreement's column on the **People** list (one column per open agreement, e.g. AUP and
+  CB, with an "AUP not signed" filter) or on the person's page, or tick a stack of students on the
+  agreement page and press **Signed on paper**. Unticking removes a paper copy recorded by mistake;
+  signatures given online can't be removed that way.
 - The agreement page shows who has signed, partly signed or not signed (filter by school, class and
   name; CSV export), and emails reminders with a sign-in link to everyone still missing (at most once
   a day). The device page warns when the holder's agreement isn't signed, and the automation field

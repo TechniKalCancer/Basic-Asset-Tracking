@@ -22,6 +22,8 @@
 <form method="POST" class="card af-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Title <input name="title" value="{{ values.title or '' }}" required maxlength="160"></label>
+  <label>Short name <input name="short_name" value="{{ values.short_name or '' }}" placeholder="AUP" maxlength="20">
+    <span class="af-help">The column heading on the People list.</span></label>
   <label>School year <input name="school_year" value="{{ values.school_year or '' }}" placeholder="2026-27" maxlength="20"></label>
   <label>Applies to
     <select name="site_id" {{ 'disabled' if locked }}>

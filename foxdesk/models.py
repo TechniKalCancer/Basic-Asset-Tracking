@@ -1411,6 +1411,7 @@ class Agreement(db.Model):
     __tablename__ = 'agreement'
     id               = db.Column(db.Integer, primary_key=True)
     title            = db.Column(db.String(160), nullable=False)
+    short_name       = db.Column(db.String(20), nullable=True)  # the People list column ("AUP", "CB"); see services/agreements.short_name
     school_year      = db.Column(db.String(20), nullable=True)
     body             = db.Column(db.Text, nullable=False)
     site_id          = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)

@@ -199,4 +199,68 @@ def agreement_rows(person):
     return [(a, status_for(a, person)) for a in agreements_for(person)]
 
 
-app.jinja_env.globals.update(unsigned_agreements=unsigned_agreements, agreement_rows=agreement_rows)
+def short_name(agreement):
+    """The People list column for an agreement: its short name, else 'AUP'
+    for an acceptable use policy, 'CB' for a Chromebook agreement, else
+    the title's initials."""
+    if agreement.short_name:
+        return agreement.short_name
+    title = (agreement.title or '').lower()
+    if 'acceptable use' in title:
+        return 'AUP'
+    if 'chromebook' in title:
+        return 'CB'
+    words = [w for w in (agreement.title or '').split() if w[:1].isalnum()]
+    return ''.join(w[0].upper() for w in words[:4]) or 'Agreement'
+
+
+def list_columns():
+    """The active agreements shown as checkbox columns on the People list."""
+    return _active() if feature_enabled('agreements') else []
+
+
+def statuses_for(agreements, people):
+    """{(agreement id, person id): status} for a page of people, in one query."""
+    ids = [p.id for p in people]
+    if not agreements or not ids:
+        return {}
+    sigs = defaultdict(list)
+    for s in AgreementSignature.query.filter(AgreementSignature.agreement_id.in_([a.id for a in agreements]),
+                                             AgreementSignature.person_id.in_(ids)):
+        sigs[(s.agreement_id, s.person_id)].append(s)
+    return {(a.id, p.id): status(a, sigs.get((a.id, p.id), [])) for a in agreements for p in people if applies_to(a, p)}
+
+
+def signed_filter(agreement):
+    """SQL condition on Person: this agreement is fully signed for them."""
+    def has(role):
+        return db.exists().where(AgreementSignature.agreement_id == agreement.id,
+                                 AgreementSignature.person_id == Person.id, AgreementSignature.signer_role == role)
+    needed = [has(r) for r in needed_roles(agreement)]
+    return db.or_(has('paper'), db.and_(*needed)) if needed else has('paper')
+
+
+def record_paper(agreement, person, actor, signer_name=None, plan_choice=None):
+    """Mark an agreement signed on paper for one student. Returns the
+    signature, or None if it was already complete. Does not commit."""
+    if status_for(agreement, person)['complete']:
+        return None
+    return sign(agreement, person, 'paper', signer_name or person.guardian_name or person.full_name,
+                plan_choice=plan_choice, recorded_by=actor)
+
+
+def undo_paper(agreement, person, actor):
+    """Remove a paper signature recorded by staff (a mistake). Signatures
+    given in the portal are never removed this way. Returns True if one was
+    removed. Does not commit."""
+    sig = AgreementSignature.query.filter_by(agreement_id=agreement.id, person_id=person.id, signer_role='paper').first()
+    if sig is None or sig.plan_paid_at:
+        return False
+    db.session.delete(sig)
+    _log_activity('agreement_signed', f'Removed the paper copy of "{agreement.title}" for {person.full_name} ({actor}).',
+                  site_id=person.site_id)
+    return True
+
+
+app.jinja_env.globals.update(unsigned_agreements=unsigned_agreements, agreement_rows=agreement_rows,
+                             agreement_short_name=short_name)

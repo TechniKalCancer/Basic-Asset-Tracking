@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% block title %}{{ person.full_name }}{% endblock %}
+{% import '_macros.html' as macros %}
+{% block content %}
+<div class="pp-head">
+  <h1 style="margin:0;">{{ icon('person') }}{{ person.full_name }}</h1>
+  <span class="badge {{ 'badge-green' if person.role == 'student' else 'badge-blue' }}">{{ person.role|capitalize }}</span>
+  {% if person.grad_year %}<span class="badge badge-neutral">Class of {{ person.grad_year }}</span>{% endif %}
+  {% if not person.is_active %}<span class="badge badge-yellow">Graduated / left</span>{% endif %}
+  {% if person.insurance_opted_in %}<span class="badge badge-blue">{{ icon('protection-plan') }}Protection plan</span>{% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
+  <a href="/admin/people" class="btn btn-ghost">← People</a>
+</div>
+<p class="pp-muted pp-facts">
+  {{ person.site.name if person.site else 'No school' }}
+  {% if person.external_id %} · ID {{ person.external_id }}{% endif %}
+  {% if person.email %} · {{ person.email }}{% endif %}
+  {% if person.guardian_name or person.guardian_email %} · Parent/guardian: {{ person.guardian_name or '' }}{% if person.guardian_email %} ({{ person.guardian_email }}){% endif %}{% endif %}
+</p>
+
+<div class="pp-grid">
+  <div class="card">
+    <h2 class="pp-h2">{{ icon('devices') }}Has now <span class="badge badge-blue">{{ current|length }}</span></h2>
+    {% for d in current %}
+    <div class="pp-row">
+      <div class="grow"><a class="tag-link" href="/admin/assets/{{ d.tag|urlencode }}/assign"><code>{{ d.tag }}</code></a>
+        <span class="pp-muted">{{ type_label(d.type) }}{% if d.model %} · {{ d.model }}{% endif %}</span></div>
+      <div class="pp-muted" style="text-align:right;">
+        {% if d.kind == 'loaner' %}<span class="badge badge-yellow">Loaner</span>{% endif %}
+        {% if d.since %}since {{ d.since.strftime('%b %d, %Y') }}{% endif %}
+        {% if d.due %}<div>{% if d.due < today() %}<span class="badge badge-red">Overdue — due {{ d.due.strftime('%b %d') }}</span>{% else %}due {{ d.due.strftime('%b %d') }}{% endif %}</div>{% endif %}
+      </div>
+    </div>
+    {% else %}<p class="pp-muted" style="margin:0;">Nothing checked out.</p>{% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 class="pp-h2">{{ icon('document') }}Agreements</h2>
+    {% for a, st in agreements %}
+    <div class="pp-row">
+      <label class="grow pp-agree">{{ macros.agreement_box(a, person, st, 'agNote' ~ a.id) }}
+        <span><strong>{{ agreement_short_name(a) }}</strong> <span class="pp-muted">{{ a.title }}{% if a.school_year %} ({{ a.school_year }}){% endif %}</span></span></label>
+      <span class="pp-muted" id="agNote{{ a.id }}">{% if st.complete %}Signed{% for r, s in st.signatures.items() %} — {{ s.signer_name }}, {{ s.signed_at.strftime('%b %d, %Y') }}{% endfor %}{% elif st.signatures %}Needs {{ st.missing|join(' and ')|replace('guardian', 'parent') }}{% else %}Not signed{% endif %}</span>
+    </div>
+    {% else %}
+    <p class="pp-muted" style="margin:0;">{% if person.role == 'student' %}No agreements are open for signing.{% else %}Agreements are for students.{% endif %}
+      {% if feature('agreements') %}<a class="tag-link" href="/admin/agreements">Device agreements</a>{% endif %}</p>
+    {% endfor %}
+    {% if owed %}
+    <p style="margin:.9rem 0 0;"><span class="badge badge-red">${{ '%.2f'|format(owed) }} owed</span>
+      <a class="tag-link" href="/admin/payments/charges?status=owed&q={{ person.full_name|urlencode }}" style="font-size:.85rem;">see charges</a></p>
+    {% endif %}
+  </div>
+</div>
+
+<h2 class="pp-section" id="history">{{ icon('history') }}Chromebook history <span class="badge badge-blue">{{ chromebooks|length }}</span></h2>
+{% macro device_table(rows, empty) %}
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Device</th><th>Checked out</th><th>Returned</th><th>Condition</th><th>Acknowledged by</th></tr></thead>
+    <tbody>
+    {% for h in rows %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ h.tag|urlencode }}/assign"><code>{{ h.tag }}</code></a>
+          <div class="pp-muted">{{ type_label(h.type) }}{% if h.model %} · {{ h.model }}{% endif %}</div></td>
+        <td style="white-space:nowrap;">{{ h.out.strftime('%Y-%m-%d') }}</td>
+        <td style="white-space:nowrap;">{% if h.back %}{{ h.back.strftime('%Y-%m-%d') }}<div class="pp-muted">{{ (h.back - h.out).days }} days</div>{% else %}<span class="badge badge-green">Has it</span>{% if h.due %}<div class="pp-muted">due {{ h.due.strftime('%b %d') }}</div>{% endif %}{% endif %}</td>
+        <td class="pp-muted">{% if h.condition_out %}Out: {{ h.condition_out }}{% endif %}{% if h.condition_in %}<div>Back: {{ h.condition_in }}</div>{% endif %}{% if not h.condition_out and not h.condition_in %}—{% endif %}</td>
+        <td class="pp-muted">{{ h.acknowledged_by or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="pp-muted" style="text-align:center;padding:1.1rem;">{{ empty }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+{{ device_table(chromebooks, 'No Chromebooks yet.') }}
+
+<h2 class="pp-section">{{ icon('loaner') }}Loaners <span class="badge badge-blue">{{ loaners|length }}</span></h2>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Loaner</th><th>Checked out</th><th>Due</th><th>Returned</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for l in loaners %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ l.tag|urlencode }}/assign"><code>{{ l.tag }}</code></a>{% if l.model %}<div class="pp-muted">{{ l.model }}</div>{% endif %}</td>
+        <td style="white-space:nowrap;">{{ l.out.strftime('%Y-%m-%d') }}</td>
+        <td style="white-space:nowrap;">{{ l.due.strftime('%Y-%m-%d') if l.due else '—' }}</td>
+        <td style="white-space:nowrap;">{% if l.back %}{{ l.back.strftime('%Y-%m-%d') }}{% if l.late %} <span class="badge badge-yellow">late</span>{% endif %}{% else %}<span class="badge {{ 'badge-red' if l.late else 'badge-green' }}">{{ 'Overdue' if l.late else 'Has it' }}</span>{% endif %}</td>
+        <td class="pp-muted">{{ l.condition or '' }}{% if l.repair_id %}{{ ' · ' if l.condition }}while their own device was <a class="tag-link" href="/admin/repairs">in repair</a>{% endif %}{% if l.acknowledged_by %}<div>Acknowledged by {{ l.acknowledged_by }}</div>{% endif %}{% if not l.condition and not l.repair_id and not l.acknowledged_by %}—{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="pp-muted" style="text-align:center;padding:1.1rem;">No loaners.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="pp-section">{{ icon('devices') }}Other devices <span class="badge badge-blue">{{ other_devices|length }}</span></h2>
+{{ device_table(other_devices, 'No chargers, hotspots or other devices.') }}
+
+<div class="pp-grid" style="margin-top:1.5rem;">
+  <div class="card">
+    <h2 class="pp-h2">{{ icon('repair') }}Damage and fees <span class="badge badge-blue">{{ incidents|length }}</span></h2>
+    {% for i in incidents %}
+    <div class="pp-row">
+      <div class="grow">{{ i.created_at.strftime('%Y-%m-%d') }} · <a class="tag-link" href="/admin/assets/{{ i.asset_tag|urlencode }}/assign">{{ i.asset_tag }}</a>
+        <div class="pp-muted">{{ i.description }}</div></div>
+      <div>{% set fs = i.fee_status %}{% if fs %}${{ '%.2f'|format(i.fee_amount) }}
+        <span class="badge {{ {'paid': 'badge-green', 'waived': 'badge-neutral', 'owed': 'badge-yellow'}[fs] }}">{{ fs|capitalize }}</span>{% else %}<span class="pp-muted">No fee</span>{% endif %}</div>
+    </div>
+    {% else %}<p class="pp-muted" style="margin:0;">No damage reports.</p>{% endfor %}
+  </div>
+  <div class="card">
+    <h2 class="pp-h2">{{ icon('ticket') }}Help requests <span class="badge badge-blue">{{ tickets|length }}</span></h2>
+    {% for t in tickets %}
+    <div class="pp-row">
+      <div class="grow"><a class="tag-link" href="/admin/tickets/{{ t.id }}">#{{ t.id }} {{ t.subject }}</a><div class="pp-muted">{{ t.created_at.strftime('%Y-%m-%d') }}</div></div>
+      <span class="badge {{ {'open': 'badge-blue', 'in_progress': 'badge-yellow', 'resolved': 'badge-green', 'closed': 'badge-neutral'}.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span>
+    </div>
+    {% else %}<p class="pp-muted" style="margin:0;">No help requests.</p>{% endfor %}
+    {% if spot_checks %}
+    <h2 class="pp-h2" style="margin-top:1.2rem;">{{ icon('scan') }}Spot checks</h2>
+    {% for c in spot_checks %}
+    <div class="pp-row">
+      <div class="grow">{{ c.created_at.strftime('%Y-%m-%d') }} · <code>{{ c.asset_tag }}</code>
+        <div class="pp-muted">{% if c.found_person_id == person.id and c.expected_person_id != person.id %}Had {{ c.expected.full_name if c.expected else 'an unassigned device' }}'s device{% elif c.found_person_id != person.id and c.found %}{{ c.found.full_name }} had their device{% else %}{{ c.result_label }}{% endif %}</div></div>
+      <span class="badge {{ 'badge-green' if c.result == 'match' else ('badge-neutral' if c.resolved_at else 'badge-red') }}">{{ 'OK' if c.result == 'match' else ('Resolved' if c.resolved_at else 'Problem') }}</span>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+<script src="/static/js/agreement_checks.js"></script>
+<style>
+  .pp-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  .pp-facts { margin: 0 0 1.2rem; }
+  .pp-muted { color: var(--muted); font-size: .82rem; }
+  .pp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1.2rem; align-items: start; }
+  .pp-grid .card { margin: 0; }
+  .pp-h2 { font-size: 1.02rem; margin: 0 0 .6rem; display: flex; align-items: center; gap: .4rem; }
+  .pp-section { font-size: 1.05rem; margin: 1.6rem 0 .6rem; display: flex; align-items: center; gap: .4rem; }
+  .pp-row { display: flex; gap: .8rem; align-items: center; padding: .55rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .pp-row:first-of-type { border-top: 0; }
+  .pp-row .grow { flex: 1; min-width: 200px; }
+  .pp-agree { display: flex; align-items: center; gap: .55rem; cursor: pointer; }
+  .pp-agree input { width: auto; transform: scale(1.25); }
+</style>
+{% endblock %}

@@ -4,13 +4,14 @@ import csv
 import io
 from datetime import timedelta
 
-from flask import Response, abort, flash, redirect, render_template, request, url_for
+from flask import Response, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, EMAIL_ENABLED, app, db
 from foxdesk.models import AGREEMENT_SIGNER_ROLES, Agreement, AgreementSignature, Person, Site
 from foxdesk.services.agreements import (
-    REMIND_EVERY_HOURS, AgreementError, mark_plan_paid, needed_roles, plan_role, progress, reminder_recipients, sign,
+    REMIND_EVERY_HOURS, AgreementError, mark_plan_paid, needed_roles, plan_role, progress, record_paper, reminder_recipients,
+    short_name, sign, status_for, undo_paper,
 )
 from foxdesk.services.auth import _current_actor, _current_site_ids, _log_activity, require_permission
 from foxdesk.services.features import feature_enabled
@@ -33,6 +34,7 @@ def _form_values(form):
     """(values, problems) from the agreement form."""
     values = dict(
         title=form.get('title', '').strip()[:160], school_year=form.get('school_year', '').strip()[:20] or None,
+        short_name=form.get('short_name', '').strip()[:20] or None,
         body=form.get('body', '').strip(), site_id=form.get('site_id', type=int) or None,
         require_student=form.get('require_student') == 'on', require_guardian=form.get('require_guardian') == 'on',
         plan_offered=form.get('plan_offered') == 'on', plan_name=form.get('plan_name', '').strip()[:120] or None,
@@ -116,7 +118,7 @@ def admin_agreement_edit(agreement_id):
         db.session.commit()
         flash('Saved.', 'success')
         return redirect(url_for('admin_agreement_detail', agreement_id=agreement.id))
-    values = {c: getattr(agreement, c) for c in ('title', 'school_year', 'body', 'site_id', 'require_student',
+    values = {c: getattr(agreement, c) for c in ('title', 'short_name', 'school_year', 'body', 'site_id', 'require_student',
                                                  'require_guardian', 'plan_offered', 'plan_name', 'plan_price', 'plan_details')}
     return render_template('admin_agreement_form.html', agreement=agreement, values=values, sites=_agreement_sites(), locked=locked)
 
@@ -129,7 +131,7 @@ def admin_agreement_new_version(agreement_id):
     old = _agreement_or_404(agreement_id)
     _, actor_label, _ = _current_actor()
     new = Agreement(created_by=actor_label, is_active=True, **{c: getattr(old, c) for c in (
-        'title', 'school_year', 'body', 'site_id', 'require_student', 'require_guardian', 'plan_offered', 'plan_name',
+        'title', 'short_name', 'school_year', 'body', 'site_id', 'require_student', 'require_guardian', 'plan_offered', 'plan_name',
         'plan_price', 'plan_details')})
     old.is_active = False
     db.session.add(new)
@@ -285,3 +287,73 @@ def admin_agreement_remind(agreement_id):
     flash(f'Reminders emailed to {len(recipients)} address(es).', 'success')
     return redirect(url_for('admin_agreement_detail', agreement_id=agreement.id))
 
+
+
+def _scoped_person(person_id):
+    person = db.get_or_404(Person, person_id)
+    site_ids = _current_site_ids()
+    if site_ids is not None and person.site_id not in site_ids:
+        abort(404)
+    return person
+
+
+@app.route('/admin/agreements/<int:agreement_id>/check/<int:person_id>', methods=['POST'])
+@require_permission('people')
+def admin_agreement_check(agreement_id, person_id):
+    """The People list / person page checkbox: tick = signed paper copy on
+    file; untick = remove a paper copy recorded by mistake."""
+    agreement = _agreement_or_404(agreement_id)
+    person = _scoped_person(person_id)
+    _, actor_label, _ = _current_actor()
+    data = request.get_json(silent=True) or request.form
+    wants_json = request.is_json
+    try:
+        if data.get('action') == 'undo':
+            if not undo_paper(agreement, person, actor_label):
+                raise AgreementError('Only a paper copy recorded here can be removed, and not once its plan is paid.')
+        elif agreement.plan_offered and agreement.plan_price:
+            raise AgreementError(f'"{agreement.title}" offers a protection plan, so record it from the agreement page.')
+        else:
+            record_paper(agreement, person, actor_label)
+        db.session.commit()
+    except AgreementError as e:
+        db.session.rollback()
+        if wants_json:
+            return jsonify(error=str(e)), 400
+        flash(str(e), 'error')
+        return redirect(request.referrer or url_for('admin_person', person_id=person.id))
+    st = status_for(agreement, person)
+    if wants_json:
+        sig = next(iter(st['signatures'].values()), None)
+        return jsonify(complete=st['complete'], short_name=short_name(agreement), missing=st['missing'],
+                       signed_by=sig.signer_name if sig else None, signed_at=sig.signed_at.strftime('%b %d, %Y') if sig else None)
+    flash(f'{agreement.title}: {"signed" if st["complete"] else "not signed"} for {person.full_name}.', 'success')
+    return redirect(request.referrer or url_for('admin_person', person_id=person.id))
+
+
+@app.route('/admin/agreements/<int:agreement_id>/paper_bulk', methods=['POST'])
+@require_permission('people')
+def admin_agreement_paper_bulk(agreement_id):
+    """Record signed paper copies for every ticked student at once (the
+    stack collected at the start of the year)."""
+    agreement = _agreement_or_404(agreement_id)
+    site_ids = _current_site_ids()
+    ids = [int(i) for i in request.form.getlist('person_id') if i.isdigit()]
+    people = Person.query.filter(Person.id.in_(ids or [-1]))
+    if site_ids is not None:
+        people = people.filter(Person.site_id.in_(site_ids or [-1]))
+    plan_choice = request.form.get('plan_choice') if agreement.plan_offered else None
+    if agreement.plan_offered and plan_choice not in ('enrolled', 'declined'):
+        flash('Choose whether these families enrolled in the plan.', 'error')
+        return redirect(request.referrer or url_for('admin_agreement_detail', agreement_id=agreement.id))
+    _, actor_label, _ = _current_actor()
+    done = 0
+    for person in people:
+        try:
+            if record_paper(agreement, person, actor_label, plan_choice=plan_choice):
+                done += 1
+        except AgreementError:
+            continue
+    db.session.commit()
+    flash(f'Recorded {done} signed paper cop{"y" if done == 1 else "ies"}.', 'success' if done else 'info')
+    return redirect(request.referrer or url_for('admin_agreement_detail', agreement_id=agreement.id))

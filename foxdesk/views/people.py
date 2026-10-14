@@ -51,6 +51,13 @@ def admin_people():
     insurance_filter = request.args.get('insurance', '').strip()
     if insurance_filter == '1':
         query = query.filter(Person.insurance_opted_in.is_(True))
+    from foxdesk.services.agreements import list_columns, signed_filter, statuses_for
+    agreement_columns = list_columns()
+    unsigned = next((a for a in agreement_columns if str(a.id) == request.args.get('unsigned')), None)
+    if unsigned is not None:  # students this agreement applies to who haven't signed it
+        query = query.filter(Person.role == 'student', db.not_(signed_filter(unsigned)))
+        if unsigned.site_id:
+            query = query.filter(Person.site_id == unsigned.site_id)
 
     sort = request.args.get('sort', 'name').strip()
     sort_dir = request.args.get('dir', 'asc').strip()
@@ -65,13 +72,16 @@ def admin_people():
     query = query.order_by(*order_exprs, Person.last_name, Person.first_name)
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    agreement_status = statuses_for(agreement_columns, pagination.items)
     site_ids = _current_site_ids()
     quick_role = request.args.get('quick_role', 'student').strip()
     quick_role = quick_role if quick_role in ('staff', 'student') else 'student'
     quick_site_id = request.args.get('quick_site_id', type=int)
     return render_template('admin_people.html', pagination=pagination, search=search, show=show,
                            insurance_filter=insurance_filter, sort=sort, sort_dir=sort_dir,
-                           sites=_sites_for_actor(site_ids), quick_role=quick_role, quick_site_id=quick_site_id)
+                           sites=_sites_for_actor(site_ids), quick_role=quick_role, quick_site_id=quick_site_id,
+                           agreement_columns=agreement_columns, agreement_status=agreement_status,
+                           unsigned=unsigned.id if unsigned is not None else None)
 
 
 @app.route('/admin/people/search')
@@ -365,37 +375,67 @@ def admin_person_google_sync(person_id):
     return redirect(url_for('admin_person_edit', person_id=person_id))
 
 
+@app.route('/admin/people/<int:person_id>')
+@require_permission('people')
+def admin_person(person_id):
+    """Everything about one person on one page: what they have now, every
+    device they've had (Chromebooks, loaners, chargers, hotspots...), their
+    device agreements, damage and fees, help requests and spot checks.
+    The reverse of a device page's history ("who's had this device")."""
+    from foxdesk.models import Asset, AssetRegistry, SpotCheck
+    from foxdesk.services.agreements import agreement_rows
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+
+    assignments = AssignmentHistory.query.filter_by(person_id=person.id).order_by(AssignmentHistory.assigned_at.desc()).all()
+    loans = LoanerCheckout.query.filter_by(person_id=person.id).order_by(LoanerCheckout.checked_out_at.desc()).all()
+    tags = {h.asset_tag for h in assignments} | {l.asset_tag for l in loans}
+    registry = {r.asset_tag: r for r in AssetRegistry.query.filter(AssetRegistry.asset_tag.in_(tags))} if tags else {}
+    google_models = dict(db.session.query(Asset.asset_tag, Asset.google_model).filter(Asset.asset_tag.in_(tags))) if tags else {}
+
+    def model_of(tag):
+        row = registry.get(tag)
+        if row and row.device_model:
+            return row.device_model.full_name
+        return google_models.get(tag) or (row.description if row else None)
+
+    def type_of(tag):
+        return registry[tag].device_type if tag in registry else 'other'
+
+    current = [dict(tag=a.asset_tag, model=model_of(a.asset_tag), type=type_of(a.asset_tag), since=None, due=None,
+                    kind='assigned') for a in Asset.query.filter_by(assigned_to_id=person.id).order_by(Asset.asset_tag)]
+    open_assignments = {h.asset_tag: h for h in assignments if h.unassigned_at is None}
+    for c in current:
+        h = open_assignments.get(c['tag'])
+        c['since'], c['due'] = (h.assigned_at, h.due_date) if h else (None, None)
+    current += [dict(tag=l.asset_tag, model=model_of(l.asset_tag), type=type_of(l.asset_tag), since=l.checked_out_at,
+                     due=l.due_date, kind='loaner') for l in loans if l.checked_in_at is None]
+
+    history = [dict(tag=h.asset_tag, model=model_of(h.asset_tag), type=type_of(h.asset_tag), out=h.assigned_at,
+                    back=h.unassigned_at, due=h.due_date, condition_out=h.condition_out, condition_in=h.condition_in,
+                    acknowledged_by=h.acknowledged_by) for h in assignments]
+    chromebooks = [h for h in history if h['type'] == 'chromebook']
+    other_devices = [h for h in history if h['type'] != 'chromebook']
+    loaners = [dict(tag=l.asset_tag, model=model_of(l.asset_tag), out=l.checked_out_at, back=l.checked_in_at, due=l.due_date,
+                    late=bool(l.due_date and ((l.checked_in_at.date() if l.checked_in_at else utcnow().date()) > l.due_date)),
+                    condition=l.condition_notes, acknowledged_by=l.acknowledged_by, repair_id=l.repair_id) for l in loans]
+
+    incidents = Incident.query.filter_by(person_id=person.id).order_by(Incident.created_at.desc()).all()
+    tickets = (Ticket.query.filter(db.or_(Ticket.requester_person_id == person.id,
+                                          db.func.lower(Ticket.requester_email) == (person.email or '').lower()))
+               .order_by(Ticket.created_at.desc()).limit(25).all())
+    spot_checks = (SpotCheck.query.filter(db.or_(SpotCheck.found_person_id == person.id, SpotCheck.expected_person_id == person.id))
+                   .order_by(SpotCheck.created_at.desc()).limit(15).all())
+    return render_template('admin_person.html', person=person, current=current, chromebooks=chromebooks,
+                           other_devices=other_devices, loaners=loaners, incidents=incidents, tickets=tickets,
+                           spot_checks=spot_checks, agreements=agreement_rows(person), owed=_person_unpaid_fee_total(person.id),
+                           assignment_count=len(assignments))
+
+
 @app.route('/admin/people/<int:person_id>/history')
 @require_permission('people')
 def admin_person_history(person_id):
-    """
-    Full chronological history for one person — every AssignmentHistory,
-    LoanerCheckout, and Incident row they're linked to, newest first. The
-    reverse direction of the combined Assignment & Loaner History card on
-    the asset assign page (that page answers "who's had this device";
-    this one answers "what has this person had").
-    """
-    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
-
-    assignments = AssignmentHistory.query.filter_by(person_id=person.id) \
-        .order_by(AssignmentHistory.assigned_at.desc()).all()
-    loaner_checkouts = LoanerCheckout.query.filter_by(person_id=person.id) \
-        .order_by(LoanerCheckout.checked_out_at.desc()).all()
-    incidents = Incident.query.filter_by(person_id=person.id) \
-        .order_by(Incident.created_at.desc()).all()
-
-    combined_history = sorted(
-        [{'kind': 'assign', 'asset_tag': h.asset_tag, 'timestamp': h.assigned_at,
-          'ended_at': h.unassigned_at, 'acknowledged_by': h.acknowledged_by} for h in assignments] +
-        [{'kind': 'loaner', 'asset_tag': l.asset_tag, 'timestamp': l.checked_out_at,
-          'ended_at': l.checked_in_at, 'acknowledged_by': l.acknowledged_by} for l in loaner_checkouts] +
-        [{'kind': 'incident', 'asset_tag': i.asset_tag, 'timestamp': i.created_at,
-          'description': i.description, 'fee_charged': i.fee_charged,
-          'fee_amount': i.fee_amount, 'paid_at': i.paid_at, 'waived_at': i.waived_at} for i in incidents],
-        key=lambda row: row['timestamp'], reverse=True,
-    )
-
-    return render_template('admin_person_history.html', person=person, combined_history=combined_history)
+    """The old History page is now part of the person page."""
+    return redirect(url_for('admin_person', person_id=person_id) + '#history')
 
 
 @app.route('/admin/people/<int:person_id>/delete', methods=['POST'])

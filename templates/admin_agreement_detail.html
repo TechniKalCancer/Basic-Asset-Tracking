@@ -72,15 +72,29 @@
   <button type="submit" class="btn btn-ghost">Search</button>
 </form>
 
+{% if agreement.is_active %}
+<form id="bulkPaper" method="POST" action="/admin/agreements/{{ agreement.id }}/paper_bulk" class="card ad-bulk"
+      onsubmit="return confirm('Record a signed paper copy for ' + document.querySelectorAll('.ad-pick:checked').length + ' student(s)?');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <strong id="adPicked">Tick students whose signed paper copy you have</strong>
+  {% if agreement.plan_offered %}
+  <select name="plan_choice" required aria-label="Protection plan">
+    <option value="">Plan: choose…</option><option value="enrolled">Enrolled</option><option value="declined">Declined</option>
+  </select>
+  {% endif %}
+  <button type="submit" class="btn btn-primary" id="adGo" disabled>Signed on paper</button>
+</form>
+{% endif %}
 <div class="card" style="padding:0;overflow-x:visible;">
   <div style="overflow-x:auto;">
   <table>
-    <thead><tr><th>Student</th><th>Status</th><th>Signatures</th>{% if agreement.plan_offered %}<th>Plan</th>{% endif %}<th></th></tr></thead>
+    <thead><tr>{% if agreement.is_active %}<th style="width:2.2rem;"><input type="checkbox" id="adAll" aria-label="Tick every unsigned student shown" style="width:auto;"></th>{% endif %}<th>Student</th><th>Status</th><th>Signatures</th>{% if agreement.plan_offered %}<th>Plan</th>{% endif %}<th></th></tr></thead>
     <tbody>
     {% for r in rows %}
       {% set p = r.person %}
       <tr>
-        <td><a href="/admin/people/{{ p.id }}/history" class="tag-link">{{ p.full_name }}</a>
+        {% if agreement.is_active %}<td>{% if not r.complete %}<input type="checkbox" class="ad-pick" name="person_id" value="{{ p.id }}" form="bulkPaper" style="width:auto;" aria-label="Tick {{ p.full_name }}">{% endif %}</td>{% endif %}
+        <td><a href="/admin/people/{{ p.id }}" class="tag-link">{{ p.full_name }}</a>
           <div class="ad-muted">{{ p.site.name if p.site else '' }}{% if p.grad_year %} · {{ p.grad_year }}{% endif %}</div></td>
         <td>{% if r.complete %}<span class="badge badge-green">Signed</span>
             {% elif r.signatures %}<span class="badge badge-yellow">Needs {{ r.missing|map('replace', 'guardian', 'parent')|join(' + ') }}</span>
@@ -121,7 +135,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="5" class="ad-muted" style="text-align:center;padding:1.5rem;">Nobody matches.</td></tr>
+      <tr><td colspan="6" class="ad-muted" style="text-align:center;padding:1.5rem;">Nobody matches.</td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -135,6 +149,21 @@
   {% if page < pages %}<a href="{{ base }}&page={{ page + 1 }}" class="btn btn-ghost">Next ›</a>{% endif %}
 </div>
 {% endif %}
+<script>
+(function () {
+  const all = document.getElementById('adAll'), go = document.getElementById('adGo'), label = document.getElementById('adPicked');
+  if (!go) return;
+  const picks = Array.from(document.querySelectorAll('.ad-pick'));
+  function update() {
+    const n = picks.filter(b => b.checked).length;
+    go.disabled = !n;
+    label.textContent = n ? n + ' ticked' : 'Tick students whose signed paper copy you have';
+    if (all) all.checked = n && n === picks.length;
+  }
+  picks.forEach(b => b.addEventListener('change', update));
+  if (all) all.addEventListener('change', () => { picks.forEach(b => { b.checked = all.checked; }); update(); });
+})();
+</script>
 <style>
   .ad-muted { color: var(--muted); font-size: .82rem; }
   .ad-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 1rem; margin-bottom: 1rem; }
@@ -157,5 +186,7 @@
   .ad-check { display: flex; align-items: center; gap: .4rem; color: var(--text); font-size: .85rem; cursor: pointer; }
   .ad-check input { width: auto; }
   .btn-small { padding: .25rem .6rem; font-size: .8rem; }
+  .ad-bulk { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; position: sticky; top: .5rem; z-index: 5; margin-bottom: .8rem; }
+  .ad-bulk select { width: auto; }
 </style>
 {% endblock %}

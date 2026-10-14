@@ -69,11 +69,11 @@
           </div>
         </td>
         <td>
-          {% for p in m.expected %}<a class="tag-link" href="/admin/people/{{ p.id }}/history">{{ p.full_name }}</a>{% if not loop.last %}, {% endif %}
+          {% for p in m.expected %}<a class="tag-link" href="/admin/people/{{ p.id }}">{{ p.full_name }}</a>{% if not loop.last %}, {% endif %}
           {% else %}<span style="color:var(--muted);">Nobody</span>{% endfor %}
         </td>
         <td>
-          {% if m.signer %}<a class="tag-link" href="/admin/people/{{ m.signer.id }}/history">{{ m.signer.full_name }}</a>
+          {% if m.signer %}<a class="tag-link" href="/admin/people/{{ m.signer.id }}">{{ m.signer.full_name }}</a>
             <div style="font-size:.75rem;color:var(--muted);">{{ m.signer.role }}{% if m.signer.grad_year %} · {{ m.signer.grad_year }}{% endif %}{% if not m.signer.is_active %} · inactive{% endif %}</div>
           {% else %}<span style="font-size:.85rem;">{{ m.signin_email }}</span>{% endif %}
         </td>
@@ -87,7 +87,7 @@
             <button type="button">⋮</button>
             <div class="row-menu-items" style="min-width:250px;">
               <a href="/admin/assets/{{ m.asset_tag }}/assign">Open device</a>
-              {% if m.signer %}<a href="/admin/people/{{ m.signer.id }}/history">{{ m.signer.first_name }}'s history</a>{% endif %}
+              {% if m.signer %}<a href="/admin/people/{{ m.signer.id }}">{{ m.signer.first_name }}'s devices</a>{% endif %}
               {% if m.review %}
               <form method="POST" action="/admin/signin_mismatches/review" style="border-top:1px solid var(--border);margin-top:.3rem;padding-top:.3rem;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

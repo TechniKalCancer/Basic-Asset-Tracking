@@ -522,8 +522,9 @@ def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
 
     high   - an active student, the only account on the device lately, with
              no device of their own and not the latest user anywhere else;
-    medium - an active student with no device, but others also signed in,
-             or they're the latest user on more than one unassigned device;
+    medium - an active student with no device, but another student with no
+             device signed in to it too, or they're the latest user on more
+             than one unassigned device;
     low    - staff (often a cart or shared device), someone inactive, or a
              student who already has a device.
 
@@ -549,6 +550,16 @@ def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
         own_devices[a.assigned_to_id].append(a.asset_tag)
     for l in LoanerCheckout.query.filter(LoanerCheckout.checked_in_at.is_(None), LoanerCheckout.person_id.isnot(None)):
         own_devices[l.person_id].append(l.asset_tag)
+    # Who is the latest user of which device right now, assigned or not. Most
+    # students have no device in FoxDesk yet, so "has no device" alone would
+    # make every earlier user a rival; one who is now the latest user on a
+    # different device has moved on to it.
+    latest_on_devices = defaultdict(set)
+    for tag, recent, single in (Asset.query.filter(Asset.google_recent_user.isnot(None), Asset.google_last_activity >= cutoff)
+                                .with_entities(Asset.asset_tag, Asset.google_recent_users, Asset.google_recent_user)):
+        person = resolve((recent or [single])[0])
+        if person:
+            latest_on_devices[person.id].add(tag)
     held_before = defaultdict(set)
     for h in AssignmentHistory.query.filter(AssignmentHistory.asset_tag.in_(tags), AssignmentHistory.person_id.isnot(None)):
         held_before[h.asset_tag].add(h.person_id)
@@ -571,7 +582,8 @@ def _assignment_proposals(site_ids, window_days=SIGNIN_DEFAULT_WINDOW_DAYS):
             if not p or p.id == signer.id:
                 continue
             earlier += 1
-            if p.is_active and p.role == 'student' and not own_devices.get(p.id) and p.full_name not in rivals:
+            if (p.is_active and p.role == 'student' and not own_devices.get(p.id) and p.full_name not in rivals
+                    and not latest_on_devices[p.id] - {registry_row.asset_tag}):
                 rivals.append(p.full_name)
         candidates.append((registry_row, asset, signer, recent[0], rivals, earlier))
     latest_on = defaultdict(int)

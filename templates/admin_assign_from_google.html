@@ -22,13 +22,15 @@
 <div class="afg-bar">
   <div class="afg-tabs" role="navigation" aria-label="How sure">
     {% for key, label in tiers.items() %}
-    <a href="?tier={{ key }}&days={{ window_days }}" class="{{ 'active' if tier == key }}" {{ 'aria-current="page"'|safe if tier == key }}>
+    <a href="?tier={{ key }}&days={{ window_days }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="{{ 'active' if tier == key }}" {{ 'aria-current="page"'|safe if tier == key }}>
       {{ label }} <span class="badge {{ {'high': 'badge-green', 'medium': 'badge-yellow', 'low': 'badge-blue'}[key] }}">{{ counts[key] }}</span>
     </a>
     {% endfor %}
   </div>
-  <form method="GET">
+  <form method="GET" class="afg-filter">
     <input type="hidden" name="tier" value="{{ tier }}">
+    <label for="afgQ" class="sr-only">Find a student or device</label>
+    <input type="search" id="afgQ" name="q" value="{{ q }}" placeholder="Student, email or tag">
     <label for="afgDays" class="sr-only">Online within</label>
     <select id="afgDays" name="days" onchange="this.form.submit()">
       {% for d in window_choices %}<option value="{{ d }}" {{ 'selected' if d == window_days }}>Online in last {{ d }} days</option>{% endfor %}
@@ -37,8 +39,8 @@
 </div>
 
 <p class="afg-sub">
-  {% if tier == 'high' %}One student is clearly using each of these: no one else is competing for it, and they have no device of their own. They're ticked; untick any you're unsure of.
-  {% elif tier == 'medium' %}Probably right, but check: other students without a device use it too, or the same student is the latest user on several devices.
+  {% if tier == 'high' %}One student is clearly using each of these: they have no device of their own, and anyone else who signed in to it has since moved on to another device. They're ticked; untick any you're unsure of.
+  {% elif tier == 'medium' %}Probably right, but check: another student with no device of their own (who isn't using a different one) signed in to it too, or the same student is the latest user on several devices.
   {% else %}Usually not one person's device: a staff account (often a cart or shared device), someone marked inactive, or a student who already has a device.{% endif %}
 </p>
 
@@ -68,7 +70,7 @@
             <div class="afg-meta">{{ r.device_model.full_name if r.device_model else (p.asset.google_model or r.description or '') }}{% if r.site %} · {{ r.site.name }}{% endif %}</div>
           </td>
           <td>
-            <a href="/admin/people/{{ p.person.id }}/edit">{{ p.person.full_name }}</a>
+            <a href="/admin/people/{{ p.person.id }}{{ '#recent' if can('people') else '/edit' }}">{{ p.person.full_name }}</a>
             <div class="afg-meta">{{ p.signin_email }} · {{ p.person.role|capitalize }}{% if p.person.grad_year %} {{ p.person.grad_year }}{% endif %}{% if p.person.site %} · {{ p.person.site.name }}{% endif %}</div>
           </td>
           <td class="afg-why">
@@ -101,13 +103,15 @@
 })();
 </script>
 {% else %}
-<div class="card" style="color:var(--muted);text-align:center;padding:2rem;">Nothing here.</div>
+<div class="card" style="color:var(--muted);text-align:center;padding:2rem;">{% if q %}Nothing here matches "{{ q }}". <a href="?tier={{ tier }}&days={{ window_days }}">Clear the search</a>{% else %}Nothing here.{% endif %}</div>
 {% endif %}
 {% endif %}
 
 <style>
   .afg-bar { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; margin-bottom: .7rem; }
   .afg-bar select { width: auto; }
+  .afg-filter { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .afg-filter input[type=search] { width: 15rem; max-width: 100%; }
   .afg-tabs { display: flex; flex-wrap: wrap; gap: .4rem; flex: 1; }
   .afg-tabs a { padding: .4rem .8rem; border: 1px solid var(--border); border-radius: 99px; color: var(--muted);
                 text-decoration: none; font-size: .85rem; display: inline-flex; align-items: center; gap: .4rem; }

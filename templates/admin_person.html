@@ -32,7 +32,9 @@
         {% if d.due %}<div>{% if d.due < today() %}<span class="badge badge-red">Overdue — due {{ d.due.strftime('%b %d') }}</span>{% else %}due {{ d.due.strftime('%b %d') }}{% endif %}</div>{% endif %}
       </div>
     </div>
-    {% else %}<p class="pp-muted" style="margin:0;">Nothing checked out.</p>{% endfor %}
+    {% else %}<p class="pp-muted" style="margin:0;">Nothing checked out.{% set using = recent|selectattr('assignable')|list %}{% if using %}
+      Google shows them using <a class="tag-link" href="#recent"><code>{{ using[0].tag }}</code></a>, which nobody has —
+      <a class="tag-link" href="#recent">assign it below</a>.{% endif %}</p>{% endfor %}
   </div>
 
   <div class="card">
@@ -58,20 +60,33 @@
 <h2 class="pp-section" id="recent">{{ icon('history') }}Recently signed in to <span class="badge badge-blue">{{ recent|length }}</span></h2>
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>
-    <thead><tr><th>Device</th><th>When</th><th>Theirs?</th></tr></thead>
+    <thead><tr><th>Device</th><th>When</th><th>Assigned</th></tr></thead>
     <tbody>
     {% for d in recent %}
       <tr>
         <td><a class="tag-link" href="/admin/assets/{{ d.tag|urlencode }}/assign"><code>{{ d.tag }}</code></a>{% if d.model %}<div class="pp-muted">{{ d.model }}</div>{% endif %}</td>
         <td>{% if d.latest %}{{ d.when|ago if d.when else '—' }}{% if d.when %}<div class="pp-muted">{{ d.when.strftime('%Y-%m-%d %H:%M') }} UTC — the last one on it</div>{% endif %}
             {% else %}Earlier<div class="pp-muted">{{ d.signins_since }} sign-in{{ 's' if d.signins_since != 1 }} by others since{% if d.device_last_online %}; device last online {{ d.device_last_online|ago }}{% endif %}</div>{% endif %}</td>
-        <td>{% if d.theirs %}<span class="badge badge-green">Assigned to them</span>{% else %}<span class="badge badge-yellow">Not theirs</span>{% endif %}</td>
+        <td>{% if d.theirs %}<span class="badge badge-green">To them</span>
+            {% elif d.holder_id %}<span class="badge badge-yellow">To someone else</span>
+              <div class="pp-muted">{% if d.holder_name %}<a class="tag-link" href="/admin/people/{{ d.holder_id }}">{{ d.holder_name }}</a>{% endif %}</div>
+            {% else %}<span class="badge badge-blue">Nobody</span>
+              {% if d.assignable and not current and person.is_active and can('devices') and feature('signin_check') %}
+              <form method="POST" action="/admin/assign_from_google" style="margin-top:.35rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="pick" value="{{ d.tag }}|{{ person.id }}|{{ d.email }}">
+                <input type="hidden" name="next" value="person">
+                <button type="submit" name="action" value="assign" class="btn btn-primary" style="padding:.25rem .65rem;font-size:.78rem;">Assign to {{ person.first_name }}</button>
+              </form>
+              {% endif %}
+            {% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-<p class="pp-muted" style="margin:.4rem 0 0;">From Google's sign-in list for each Chromebook, refreshed by the device sync.</p>
+<p class="pp-muted" style="margin:.4rem 0 0;">From Google's sign-in list for each Chromebook, refreshed by the device sync.{% if can('devices') and feature('signin_check') %}
+  For the whole school, see <a class="tag-link" href="/admin/assign_from_google">Assign from Google</a>.{% endif %}</p>
 {% endif %}
 
 <h2 class="pp-section" id="history">{{ icon('history') }}Chromebook history <span class="badge badge-blue">{{ chromebooks|length }}</span></h2>

@@ -38,7 +38,12 @@ def test_tiers(make):
     stale = in_use(make, solo.email, days_ago=120)
     lost = in_use(make, solo.email, status='lost')
 
+    mover, newer = make.person('Mo', 'Ver'), make.person('Nia', 'New')
+    moved_on = in_use(make, newer.email, mover.email)     # Mo is now the latest user on another device
+    in_use(make, mover.email, days_ago=2)
+
     p = proposals()
+    assert p[moved_on.asset_tag]['tier'] == 'high', 'an earlier user who now uses another device is no rival'
     assert p[clear.asset_tag]['tier'] == 'high' and p[clear.asset_tag]['person'].id == solo.id
     assert any('moved on' in e for e, _ in p[clear.asset_tag]['evidence'])
     assert p[shared.asset_tag]['tier'] == 'medium' and 'Rae Rival' in p[shared.asset_tag]['evidence'][0][0]
@@ -68,6 +73,9 @@ def test_assign_and_skip(client, make, monkeypatch):
     d1, d2 = in_use(make, ana.email), in_use(make, ben.email)
     body = client.get('/admin/assign_from_google').get_data(as_text=True)
     assert 'Ready to assign' in body and d1.asset_tag in body and 'checked' in body
+    found = client.get('/admin/assign_from_google?q=ben').get_data(as_text=True)
+    assert d2.asset_tag in found and d1.asset_tag not in found
+    assert 'Nothing here matches' in client.get('/admin/assign_from_google?q=zzz').get_data(as_text=True)
 
     r = client.post('/admin/assign_from_google?tier=high', data={'action': 'assign', 'pick': [f'{d1.asset_tag}|{ana.id}|{ana.email}']},
                     follow_redirects=True)

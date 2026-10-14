@@ -246,11 +246,15 @@ out and came back, condition each way, who acknowledged it), every **loaner** (d
 and what's owed, help requests, and spot checks. **Recently signed in to** lists the Chromebooks they
 last used, from Google's sign-in list for each device: the ones where they were the most recent user,
 with when, newest first, then ones someone else has used since ("earlier" — Google gives the order of
-sign-ins but no time for those), each marked as theirs or not.
+sign-ins but no time for those), each showing who has it: them, someone else, or nobody. A device
+nobody has, that they were the last one on, gets an **Assign to them** button when they have nothing
+checked out (the same check as Assign from Google), and "Has now" points to it.
 
-Searching from the top bar opens the person page directly when one person matches; with several, the
-results list shows each one's last-used devices with times. The People list adds the same **Last used**
-column while you're searching.
+Searching from the top bar shows **People** and **Assets** together. People shows each one's last-used
+devices with times; Assets lists devices whose tag, serial or description matches, plus the devices of
+the people found (assigned to them, or the one they signed in to last), with why each is there. A search
+that matches only one device and nobody (a scanned tag) opens that device. The People list adds the
+same **Last used** column while you're searching.
 
 ## Assignment History, Condition Notes & Status
 
@@ -534,16 +538,17 @@ a student's form submission. Wording is editable at Admin → Email.
 Devices → Assign from Google (`/admin/assign_from_google`) lists devices nobody is assigned to but
 someone has been signing in to lately, each with the person behind its latest Google sign-in:
 
-- **Ready to assign**: an active student who is the only current user and has no device of their own
-  (earlier users who have since left or got their own device don't count against it). Pre-ticked.
-- **Check first**: other students without a device use it too (a shared device), or the student is the
-  latest user on several unassigned devices.
+- **Ready to assign**: an active student who is the only current user and has no device of their own.
+  Earlier users don't count against it if they've since left, got their own device, or are now the
+  latest user on a different device (they've moved on to it). Pre-ticked.
+- **Check first**: another student with no device, who isn't using a different one, signed in to it too
+  (a shared device), or the student is the latest user on several unassigned devices.
 - **Probably not theirs**: a staff account (often a cart), someone inactive, or a student who already
   has a device.
 
 Assign the ticked ones (up to 200 a click; logged and run through automations like any assignment) or
 skip them, which keeps that device/person pair from coming back. Loaners and lost/retired/in-repair
-devices are left out.
+devices are left out. The search box finds a student, sign-in email, tag or serial across the list.
 
 ## Data Quality Checks
 

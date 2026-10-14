@@ -98,7 +98,8 @@ ASSIGN_BATCH_LIMIT = 200  # per click, to stay well inside the request timeout
 def admin_assign_from_google():
     """Unassigned devices someone is clearly using, with the person to give
     each one to (the latest Google sign-in). Assign the ones you agree with,
-    or skip them so they don't come back."""
+    or skip them so they don't come back. The person page posts a single
+    pick here with next=person to land back on that person."""
     site_ids = _current_site_ids()
     window_days = _signin_window_days()
     if request.method == 'POST':
@@ -111,7 +112,7 @@ def admin_assign_from_google():
             return redirect(request.full_path)
         skipping = request.form.get('action') == 'skip'
         _, actor_label, _ = _current_actor()
-        done, problems = 0, []
+        done, problems, person_id = 0, [], None
         for pick in picks:
             try:
                 tag, person_id, email = pick.split('|', 2)
@@ -145,16 +146,23 @@ def admin_assign_from_google():
         flash(f'{verb} {done} device{"" if done == 1 else "s"}.'
               + (f' Left alone (already assigned, or the person is no longer active): {", ".join(problems[:10])}'
                  + ('…' if len(problems) > 10 else '') if problems else ''), 'success' if done else 'error')
+        if request.form.get('next') == 'person' and len(picks) == 1 and isinstance(person_id, int):
+            return redirect(url_for('admin_person', person_id=person_id, _anchor='recent'))
         return redirect(request.full_path)
 
     proposals = _assignment_proposals(site_ids, window_days)
+    q = request.args.get('q', '').strip()
+    if q:
+        needle = q.lower()
+        proposals = [p for p in proposals if needle in ' '.join(filter(None, (
+            p['person'].full_name, p['signin_email'], p['registry_row'].asset_tag, p['registry_row'].serial_number))).lower()]
     counts = {t: 0 for t in ASSIGN_TIERS}
     for p in proposals:
         counts[p['tier']] += 1
     tier = request.args.get('tier', 'high')
     tier = tier if tier in ASSIGN_TIERS else 'high'
     return render_template('admin_assign_from_google.html', proposals=[p for p in proposals if p['tier'] == tier],
-                           tier=tier, tiers=ASSIGN_TIERS, counts=counts, window_days=window_days,
+                           tier=tier, tiers=ASSIGN_TIERS, counts=counts, window_days=window_days, q=q,
                            window_choices=SIGNIN_WINDOW_DAYS_CHOICES, batch_limit=ASSIGN_BATCH_LIMIT,
                            has_google_data=Asset.query.filter(Asset.google_last_activity.isnot(None)).first() is not None)
 

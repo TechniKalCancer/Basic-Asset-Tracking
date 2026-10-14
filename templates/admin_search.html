@@ -13,9 +13,10 @@
 <p style="color:var(--muted);">No people or assets matched "{{ q }}".</p>
 {% else %}
 
-{% if people %}
 <div class="card" style="padding:0;overflow:hidden;">
   <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('person') }}People ({{ people|length }})</h2>
+  {% if people %}
+  <div style="overflow-x:auto;">
   <table>
     <thead>
       <tr><th>Name</th><th>Email</th><th>Site</th><th>Assets</th><th>Last used (Google sign-ins)</th><th></th></tr>
@@ -41,41 +42,64 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);padding:0 1.5rem 1.2rem;margin:0;">Nobody matches "{{ q }}".</p>
+  {% endif %}
 </div>
-{% endif %}
 
-{% if assets %}
 <div class="card" style="padding:0;overflow:hidden;">
-  <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('devices') }}Assets ({{ assets|length }})</h2>
+  <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('devices') }}Assets ({{ assets|length }}{{ '+' if assets|length >= asset_limit }})</h2>
+  {% if assets %}
   {% set status_badge = {'available': 'badge-green', 'assigned': 'badge-blue',
                           'repair': 'badge-yellow', 'lost': 'badge-red', 'retired': 'badge-red'} %}
+  <div style="overflow-x:auto;">
   <table>
     <thead>
-      <tr><th>Asset Tag</th><th>Serial</th><th>Description</th><th>Status</th><th>Assigned To</th><th></th></tr>
+      <tr><th>Asset Tag</th><th>Serial</th><th>Description</th><th>Status</th><th>Assigned To</th><th>Why it's here</th><th></th></tr>
     </thead>
     <tbody>
-      {% for row, asset in assets %}
+      {% for a in assets %}
+      {% set row, asset = a.row, a.asset %}
       <tr>
-        <td><a href="/admin/assets/{{ row.asset_tag }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
+        <td><a href="/admin/assets/{{ row.asset_tag|urlencode }}/assign" style="text-decoration:none;"><code>{{ row.asset_tag }}</code></a></td>
         <td>{{ row.serial_number or '—' }}</td>
-        <td style="color:var(--muted);">{{ row.description or '—' }}</td>
+        <td style="color:var(--muted);">{{ row.device_model.full_name if row.device_model else (row.description or (asset.google_model if asset else None) or '—') }}</td>
         <td>
           <span class="badge {{ status_badge.get(asset.status if asset else 'available', 'badge-blue') }}">
             {{ (asset.status if asset else 'available') }}
           </span>
         </td>
         <td style="color:var(--muted);">
-          {% if asset and asset.assigned_to %}{{ asset.assigned_to.full_name }}{% else %}Unassigned{% endif %}
+          {% if asset and asset.assigned_to %}{% if can('people') %}<a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link">{{ asset.assigned_to.full_name }}</a>{% else %}{{ asset.assigned_to.full_name }}{% endif %}{% else %}Unassigned{% endif %}
+        </td>
+        <td class="sr-why">
+          {% for r in a.reasons %}
+            {% if r.kind == 'direct' %}<span class="sr-chip">Tag, serial or description</span>
+            {% elif r.kind == 'assigned' %}<span class="sr-chip sr-good">Assigned to {{ r.person.full_name }}</span>
+            {% else %}<span class="sr-chip sr-warn" title="Their account is the latest Google sign-in on this device">{{ r.person.full_name }} signed in last{% if r.when %}, {{ r.when|ago }}{% endif %}</span>{% endif %}
+          {% endfor %}
         </td>
         <td style="text-align:right;">
-          <a href="/admin/assets/{{ row.asset_tag }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">View</a>
+          <a href="/admin/assets/{{ row.asset_tag|urlencode }}/assign" class="btn btn-ghost" style="padding:.3rem .7rem;">View</a>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);padding:0 1.5rem 1.2rem;margin:0;">No devices match "{{ q }}"{% if people %}, and nobody found has a device assigned or a recent sign-in{% endif %}.</p>
+  {% endif %}
 </div>
-{% endif %}
+
+<style>
+  .sr-why { min-width: 180px; }
+  .sr-chip { display: inline-block; font-size: .74rem; padding: .1rem .5rem; border-radius: 99px; margin: 0 .25rem .25rem 0;
+             background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .sr-good { color: var(--success); border-color: rgba(34, 197, 94, .35); }
+  .sr-warn { color: var(--warning); border-color: rgba(245, 158, 11, .35); }
+</style>
 
 {% endif %}
 {% endblock %}

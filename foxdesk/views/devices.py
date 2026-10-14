@@ -1,6 +1,7 @@
 """Pages: devices."""
 import csv
 import io
+from collections import defaultdict
 from flask import flash, redirect, render_template, request, url_for
 from sqlalchemy.exc import IntegrityError
 from foxdesk.clock import utcnow
@@ -26,7 +27,6 @@ from foxdesk.services.util import (
     resolve_scan,
 )
 from foxdesk.services.auth import (
-    _has_permission,
     _current_site_ids,
     _log_activity,
     login_required,
@@ -863,44 +863,74 @@ def admin_scan_lookup():
     return redirect(url_for('admin_asset_assign', asset_tag=asset_tag))
 
 
+SEARCH_ASSET_LIMIT = 100
+
+
+def _search_assets(q, people, recent, site_ids):
+    """Assets for the search page, each with why it's listed: the tag, serial
+    or description matched, or it belongs to one of the people found —
+    assigned to them, or they're its latest Google sign-in. Direct matches
+    first, then by person. Returns (rows, direct match count)."""
+    like = f'%{q}%'
+    direct = _scope_registry(AssetRegistry.query, site_ids).filter(
+        db.or_(
+            AssetRegistry.asset_tag.ilike(like),
+            AssetRegistry.serial_number.ilike(like),
+            AssetRegistry.description.ilike(like),
+        )
+    ).order_by(AssetRegistry.asset_tag).limit(25).all()
+    reasons = {r.asset_tag: [dict(kind='direct')] for r in direct}
+    order = [r.asset_tag for r in direct]
+
+    def add(tag, why):
+        if tag not in reasons:
+            reasons[tag] = []
+            order.append(tag)
+        reasons[tag].append(why)
+
+    if people:
+        held = Asset.query.filter(Asset.assigned_to_id.in_([p.id for p in people])).with_entities(Asset.asset_tag, Asset.assigned_to_id)
+        held_by = defaultdict(list)
+        for tag, pid in held:
+            held_by[pid].append(tag)
+        for p in people:
+            for tag in sorted(held_by[p.id]):
+                add(tag, dict(kind='assigned', person=p))
+            for d in recent.get(p.id, []):
+                if d['latest'] and not d['theirs']:
+                    add(d['tag'], dict(kind='latest', person=p, when=d['when']))
+    order = order[:SEARCH_ASSET_LIMIT]
+    registry = {r.asset_tag: r for r in _scope_registry(AssetRegistry.query, site_ids).filter(AssetRegistry.asset_tag.in_(order))}
+    live = {a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(order))}
+    rows = [dict(row=registry[t], asset=live.get(t), reasons=reasons[t]) for t in order if t in registry]
+    return rows, len(direct)
+
+
 @app.route('/admin/search')
 @login_required
 def admin_search():
     """
-    Global lookup from the nav bar search box — checks both People and Assets
-    at once. A single unambiguous match jumps straight to that record instead
-    of showing a results page.
+    Global lookup from the nav bar search box — People and Assets together.
+    Assets include the devices of the people found (assigned to them, or
+    the latest one they signed in to), so a name shows the person and their
+    devices side by side. A search that only matches one device (a scanned
+    tag) jumps straight to it.
     """
+    from foxdesk.services.recent_use import recent_devices
     q = request.args.get('q', '').strip()
-    people, assets = [], []
+    people, assets, recent = [], [], {}
     site_ids = _current_site_ids()
 
     if len(q) >= 2:
         people = _scope_people(Person.query, site_ids).filter(_person_search_filter(q)) \
             .order_by(Person.last_name, Person.first_name).limit(25).all()
+        recent = recent_devices(people) if people else {}
+        assets, direct = _search_assets(q, people, recent, site_ids)
+        if direct == 1 and len(assets) == 1 and not people:
+            return redirect(url_for('admin_asset_assign', asset_tag=assets[0]['row'].asset_tag))
 
-        like = f'%{q}%'
-        registry_rows = _scope_registry(AssetRegistry.query, site_ids).filter(
-            db.or_(
-                AssetRegistry.asset_tag.ilike(like),
-                AssetRegistry.serial_number.ilike(like),
-                AssetRegistry.description.ilike(like),
-            )
-        ).order_by(AssetRegistry.asset_tag).limit(25).all()
-        tags = [r.asset_tag for r in registry_rows]
-        assets_by_tag = {a.asset_tag: a for a in Asset.query.filter(Asset.asset_tag.in_(tags))}
-        assets = [(r, assets_by_tag.get(r.asset_tag)) for r in registry_rows]
-
-        if len(people) == 1 and not assets:
-            if _has_permission('people'):
-                return redirect(url_for('admin_person', person_id=people[0].id))
-            return redirect(url_for('admin_registry', person_id=people[0].id))
-        if len(assets) == 1 and not people:
-            return redirect(url_for('admin_asset_assign', asset_tag=assets[0][0].asset_tag))
-
-    from foxdesk.services.recent_use import recent_devices
-    return render_template('admin_search.html', q=q, people=people, assets=assets,
-                           recent=recent_devices(people) if people else {})
+    return render_template('admin_search.html', q=q, people=people, assets=assets, recent=recent,
+                           asset_limit=SEARCH_ASSET_LIMIT)
 
 
 @app.route('/admin/orphans')

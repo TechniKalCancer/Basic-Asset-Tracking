@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Search{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
   <h1 style="margin:0;">{{ icon('search') }}Search Results</h1>
@@ -17,12 +18,13 @@
   <h2 style="padding:1.5rem 1.5rem 0;">{{ icon('person') }}People ({{ people|length }})</h2>
   <table>
     <thead>
-      <tr><th>Name</th><th>Email</th><th>Site</th><th>Assets</th><th></th></tr>
+      <tr><th>Name</th><th>Email</th><th>Site</th><th>Assets</th><th>Last used (Google sign-ins)</th><th></th></tr>
     </thead>
     <tbody>
       {% for person in people %}
       <tr>
-        <td>{{ person.full_name }}</td>
+        <td>{% if can('people') %}<a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>{% else %}{{ person.full_name }}{% endif %}
+          {% if person.grad_year %}<div style="color:var(--muted);font-size:.78rem;">Class of {{ person.grad_year }}</div>{% endif %}</td>
         <td style="color:var(--muted);">{{ person.email }}</td>
         <td style="color:var(--muted);">{{ person.site.name if person.site else '—' }}</td>
         <td style="color:var(--muted);">
@@ -32,7 +34,9 @@
             0
           {% endif %}
         </td>
-        <td style="text-align:right;"><a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a></td>
+        <td>{{ macros.recent_devices(recent.get(person.id, []), person.id, 3) }}</td>
+        <td style="text-align:right;white-space:nowrap;">{% if can('people') %}<a href="/admin/people/{{ person.id }}" class="btn btn-ghost" style="padding:.3rem .7rem;">Open</a>{% endif %}
+          <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a></td>
       </tr>
       {% endfor %}
     </tbody>

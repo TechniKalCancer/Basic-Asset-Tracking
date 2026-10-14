@@ -86,6 +86,7 @@
         <th class="sortable">{{ macros.sort_link('site', 'Site') }}</th>
         <th class="sortable">{{ macros.sort_link('department', 'Department') }}</th>
         <th>Assets</th>
+        {% if search %}<th>Last used</th>{% endif %}
         {% for a in agreement_columns %}<th class="ag-col" title="{{ a.title }}{% if a.school_year %} ({{ a.school_year }}){% endif %}">{{ agreement_short_name(a) }}</th>{% endfor %}
         <th></th>
       </tr>
@@ -110,6 +111,7 @@
             0
           {% endif %}
         </td>
+        {% if search %}<td>{{ macros.recent_devices(recent.get(person.id, []), person.id, 2) }}</td>{% endif %}
         {% for a in agreement_columns %}<td class="ag-col">{{ macros.agreement_box(a, person, agreement_status.get((a.id, person.id))) }}</td>{% endfor %}
         <td style="text-align:right;white-space:nowrap;">
           <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost" style="padding:.3rem .7rem;">Edit</a>
@@ -133,7 +135,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="{{ 8 + agreement_columns|length }}" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
+      <tr><td colspan="{{ 8 + agreement_columns|length + (1 if search else 0) }}" style="text-align:center;color:var(--muted);padding:2rem;">No people found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

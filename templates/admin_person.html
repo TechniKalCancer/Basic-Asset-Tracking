@@ -54,6 +54,26 @@
   </div>
 </div>
 
+{% if recent %}
+<h2 class="pp-section" id="recent">{{ icon('history') }}Recently signed in to <span class="badge badge-blue">{{ recent|length }}</span></h2>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Device</th><th>When</th><th>Theirs?</th></tr></thead>
+    <tbody>
+    {% for d in recent %}
+      <tr>
+        <td><a class="tag-link" href="/admin/assets/{{ d.tag|urlencode }}/assign"><code>{{ d.tag }}</code></a>{% if d.model %}<div class="pp-muted">{{ d.model }}</div>{% endif %}</td>
+        <td>{% if d.latest %}{{ d.when|ago if d.when else '—' }}{% if d.when %}<div class="pp-muted">{{ d.when.strftime('%Y-%m-%d %H:%M') }} UTC — the last one on it</div>{% endif %}
+            {% else %}Earlier<div class="pp-muted">{{ d.signins_since }} sign-in{{ 's' if d.signins_since != 1 }} by others since{% if d.device_last_online %}; device last online {{ d.device_last_online|ago }}{% endif %}</div>{% endif %}</td>
+        <td>{% if d.theirs %}<span class="badge badge-green">Assigned to them</span>{% else %}<span class="badge badge-yellow">Not theirs</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="pp-muted" style="margin:.4rem 0 0;">From Google's sign-in list for each Chromebook, refreshed by the device sync.</p>
+{% endif %}
+
 <h2 class="pp-section" id="history">{{ icon('history') }}Chromebook history <span class="badge badge-blue">{{ chromebooks|length }}</span></h2>
 {% macro device_table(rows, empty) %}
 <div class="card" style="padding:0;overflow-x:auto;">

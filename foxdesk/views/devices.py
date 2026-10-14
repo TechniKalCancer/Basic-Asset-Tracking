@@ -26,6 +26,7 @@ from foxdesk.services.util import (
     resolve_scan,
 )
 from foxdesk.services.auth import (
+    _has_permission,
     _current_site_ids,
     _log_activity,
     login_required,
@@ -891,11 +892,15 @@ def admin_search():
         assets = [(r, assets_by_tag.get(r.asset_tag)) for r in registry_rows]
 
         if len(people) == 1 and not assets:
+            if _has_permission('people'):
+                return redirect(url_for('admin_person', person_id=people[0].id))
             return redirect(url_for('admin_registry', person_id=people[0].id))
         if len(assets) == 1 and not people:
             return redirect(url_for('admin_asset_assign', asset_tag=assets[0][0].asset_tag))
 
-    return render_template('admin_search.html', q=q, people=people, assets=assets)
+    from foxdesk.services.recent_use import recent_devices
+    return render_template('admin_search.html', q=q, people=people, assets=assets,
+                           recent=recent_devices(people) if people else {})
 
 
 @app.route('/admin/orphans')

@@ -73,6 +73,10 @@ def admin_people():
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     agreement_status = statuses_for(agreement_columns, pagination.items)
+    recent = {}
+    if search:  # who last used what, for the people the search found
+        from foxdesk.services.recent_use import recent_devices
+        recent = recent_devices(pagination.items)
     site_ids = _current_site_ids()
     quick_role = request.args.get('quick_role', 'student').strip()
     quick_role = quick_role if quick_role in ('staff', 'student') else 'student'
@@ -80,7 +84,7 @@ def admin_people():
     return render_template('admin_people.html', pagination=pagination, search=search, show=show,
                            insurance_filter=insurance_filter, sort=sort, sort_dir=sort_dir,
                            sites=_sites_for_actor(site_ids), quick_role=quick_role, quick_site_id=quick_site_id,
-                           agreement_columns=agreement_columns, agreement_status=agreement_status,
+                           agreement_columns=agreement_columns, agreement_status=agreement_status, recent=recent,
                            unsigned=unsigned.id if unsigned is not None else None)
 
 
@@ -425,7 +429,9 @@ def admin_person(person_id):
                .order_by(Ticket.created_at.desc()).limit(25).all())
     spot_checks = (SpotCheck.query.filter(db.or_(SpotCheck.found_person_id == person.id, SpotCheck.expected_person_id == person.id))
                    .order_by(SpotCheck.created_at.desc()).limit(15).all())
-    return render_template('admin_person.html', person=person, current=current, chromebooks=chromebooks,
+    from foxdesk.services.recent_use import recent_devices
+    recent = recent_devices([person])[person.id]
+    return render_template('admin_person.html', person=person, current=current, chromebooks=chromebooks, recent=recent,
                            other_devices=other_devices, loaners=loaners, incidents=incidents, tickets=tickets,
                            spot_checks=spot_checks, agreements=agreement_rows(person), owed=_person_unpaid_fee_total(person.id),
                            assignment_count=len(assignments))

@@ -243,7 +243,14 @@ Everything about one student or staff member on one page: what they have now (as
 loaners out, with due dates), their **Chromebook history** (every Chromebook they've had, when it went
 out and came back, condition each way, who acknowledged it), every **loaner** (due, returned, late),
 **other devices** (chargers, hotspots, laptops...), their agreements with sign-off boxes, damage reports
-and what's owed, help requests, and spot checks.
+and what's owed, help requests, and spot checks. **Recently signed in to** lists the Chromebooks they
+last used, from Google's sign-in list for each device: the ones where they were the most recent user,
+with when, newest first, then ones someone else has used since ("earlier" — Google gives the order of
+sign-ins but no time for those), each marked as theirs or not.
+
+Searching from the top bar opens the person page directly when one person matches; with several, the
+results list shows each one's last-used devices with times. The People list adds the same **Last used**
+column while you're searching.
 
 ## Assignment History, Condition Notes & Status
 

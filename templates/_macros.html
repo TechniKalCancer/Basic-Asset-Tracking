@@ -172,3 +172,18 @@ asset_tag puts parts that fit that device's model first. Needs the repairs permi
        title="{% if sig %}Paper copy on file — {{ sig.signer_name }}, {{ sig.signed_at.strftime('%b %d, %Y') }}{% elif st.signatures %}Needs {{ st.missing|join(' and ')|replace('guardian', 'parent') }}; tick if a signed paper copy is on file{% else %}Not signed; tick when a signed paper copy is on file{% endif %}">
 {%- endif -%}
 {%- endmacro %}
+
+{# Devices a person recently signed in to (services/recent_use.recent_devices), newest first. #}
+{% macro recent_devices(devices, person_id, limit=None) -%}
+{%- if devices -%}
+<div class="ru-list">
+  {%- for d in (devices[:limit] if limit else devices) %}
+  <div class="ru-item"><a class="tag-link" href="/admin/assets/{{ d.tag|urlencode }}/assign"><code>{{ d.tag }}</code></a>
+    {%- if d.latest %} <span title="{{ d.when.strftime('%Y-%m-%d %H:%M') ~ ' UTC' if d.when }}">{{ d.when|ago if d.when else 'last user' }}</span>
+    {%- else %} <span style="color:var(--muted);" title="{{ d.signins_since }} sign-in{{ 's' if d.signins_since != 1 }} by others since">earlier</span>{% endif %}
+    {%- if d.theirs %} <span class="badge badge-green" style="font-size:.64rem;">theirs</span>{% endif %}</div>
+  {%- endfor %}
+  {%- if limit and devices|length > limit %}<a class="tag-link" href="/admin/people/{{ person_id }}#recent" style="font-size:.78rem;">+{{ devices|length - limit }} more</a>{% endif %}
+</div>
+{%- else -%}<span style="color:var(--muted);">—</span>{%- endif -%}
+{%- endmacro %}

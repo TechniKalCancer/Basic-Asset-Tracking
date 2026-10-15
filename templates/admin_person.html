@@ -4,14 +4,15 @@
 {% block content %}
 <div class="pp-head">
   <h1 style="margin:0;">{{ icon('person') }}{{ person.full_name }}</h1>
+  {{ person_status(person, 'lg') }}
   <span class="badge {{ 'badge-green' if person.role == 'student' else 'badge-blue' }}">{{ person.role|capitalize }}</span>
   {% if person.grad_year %}<span class="badge badge-neutral">Class of {{ person.grad_year }}</span>{% endif %}
-  {% if not person.is_active %}<span class="badge badge-yellow">Graduated / left</span>{% endif %}
   {% if person.insurance_opted_in %}<span class="badge badge-blue">{{ icon('protection-plan') }}Protection plan</span>{% endif %}
   <span class="spacer" style="flex:1;"></span>
   <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
   <a href="/admin/people" class="btn btn-ghost">← People</a>
 </div>
+{% if not person.is_active %}<p class="pp-inactive">Marked inactive (graduated or left). Their history is kept; use <strong>Reactivate</strong> on People to bring them back.</p>{% endif %}
 <p class="pp-muted pp-facts">
   {{ person.site.name if person.site else 'No school' }}
   {% if person.external_id %} · ID {{ person.external_id }}{% endif %}
@@ -69,7 +70,7 @@
             {% else %}Earlier<div class="pp-muted">{{ d.signins_since }} sign-in{{ 's' if d.signins_since != 1 }} by others since{% if d.device_last_online %}; device last online {{ d.device_last_online|ago }}{% endif %}</div>{% endif %}</td>
         <td>{% if d.theirs %}<span class="badge badge-green">To them</span>
             {% elif d.holder_id %}<span class="badge badge-yellow">To someone else</span>
-              <div class="pp-muted">{% if d.holder_name %}<a class="tag-link" href="/admin/people/{{ d.holder_id }}">{{ d.holder_name }}</a>{% endif %}</div>
+              <div class="pp-muted">{% if d.holder_name %}<a class="tag-link" href="/admin/people/{{ d.holder_id }}">{{ d.holder_name }}</a>{{ person_status(d.holder_id) }}{% endif %}</div>
             {% else %}<span class="badge badge-blue">Nobody</span>
               {% if d.assignable and not current and person.is_active and can('devices') and feature('signin_check') %}
               <form method="POST" action="/admin/assign_from_google" style="margin-top:.35rem;">
@@ -171,6 +172,8 @@
 <script src="/static/js/agreement_checks.js"></script>
 <style>
   .pp-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  .pp-inactive { margin: .4rem 0 .3rem; padding: .55rem .8rem; border-left: 4px solid var(--danger); background: #7f1d1d33;
+                 border-radius: 6px; font-size: .88rem; }
   .pp-facts { margin: 0 0 1.2rem; }
   .pp-muted { color: var(--muted); font-size: .82rem; }
   .pp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1.2rem; align-items: start; }

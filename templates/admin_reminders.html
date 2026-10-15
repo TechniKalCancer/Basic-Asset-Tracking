@@ -39,7 +39,7 @@
       {% for row in overdue %}
       <tr>
         <td><code>{{ row.asset_tag }}</code></td>
-        <td>{{ row.person_name }}</td>
+        <td>{{ row.person_name }}{% if row.person_id %}{{ person_status(row.person_id) }}{% endif %}</td>
         <td style="color:var(--danger);">{{ row.due_date.strftime('%Y-%m-%d') }}</td>
         <td style="color:var(--danger);">{{ (today - row.due_date).days }}</td>
         <td style="color:var(--muted);">

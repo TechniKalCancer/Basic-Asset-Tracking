@@ -45,8 +45,8 @@
       <tr>
         <td><a class="tag-link" href="/admin/assets/{{ c.asset_tag|urlencode }}/assign">{{ c.asset_tag }}</a><div class="sc-muted">{{ c.created_at|ago }} · {{ c.checked_by }}</div></td>
         <td><span class="badge {{ 'badge-red' if c.result == 'wrong_student' else 'badge-yellow' }}">{{ c.result_label }}</span></td>
-        <td>{{ c.found.full_name if c.found else '—' }}</td>
-        <td>{{ c.expected.full_name if c.expected else '—' }}</td>
+        <td>{% if c.found %}{{ c.found.full_name }}{{ person_status(c.found) }}{% else %}—{% endif %}</td>
+        <td>{% if c.expected %}{{ c.expected.full_name }}{{ person_status(c.expected) }}{% else %}—{% endif %}</td>
         <td style="text-align:right;">
           <form method="POST" action="/admin/spot_check/{{ c.id }}/resolve">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

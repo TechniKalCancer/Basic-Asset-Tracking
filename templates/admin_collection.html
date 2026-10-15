@@ -38,7 +38,7 @@
         {% if current_site_ids() is none or current_site_ids()|length > 1 %}
         <td style="color:var(--muted);">{{ row.site.name if row.site else '—' }}</td>
         {% endif %}
-        <td>{{ asset.assigned_to.full_name if asset and asset.assigned_to else '—' }}</td>
+        <td>{% if asset and asset.assigned_to %}{{ asset.assigned_to.full_name }}{{ person_status(asset.assigned_to) }}{% else %}—{% endif %}</td>
       </tr>
       {% else %}
       <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:2rem;">Nothing currently assigned.</td></tr>
@@ -67,7 +67,7 @@
       {% for l in open_loaners %}
       <tr>
         <td><a href="/admin/assets/{{ l.asset_tag }}/assign" class="tag-link"><code>{{ l.asset_tag }}</code></a></td>
-        <td>{{ l.person_name }}</td>
+        <td>{{ l.person_name }}{{ person_status(l.person_id) }}</td>
         <td style="color:var(--muted);">{{ l.checked_out_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:{{ 'var(--danger)' if l.due_date and l.due_date < now else 'var(--muted)' }};">
           {{ l.due_date.strftime('%Y-%m-%d') if l.due_date else '—' }}

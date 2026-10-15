@@ -1,14 +1,14 @@
 """Template globals, filters, navigation and the Settings hub listing."""
 import os
 from datetime import date
-from flask import request, session
+from flask import g, request, session
 from markupsafe import Markup, escape
 from foxdesk.clock import utcnow
-from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app
+from foxdesk.core import GOOGLE_SYNC_ENABLED, KACE_SYNC_ENABLED, app, db
 from foxdesk.integrations.active_directory import short_dn
 from foxdesk.services.features import feature_enabled, feature_switch
 from foxdesk.services.identities import accounts_to_review_query
-from foxdesk.models import Asset, LANDING_PAGES, Site, Ticket
+from foxdesk.models import Asset, LANDING_PAGES, Person, Site, Ticket
 from foxdesk.services.branding import _current_branding
 from foxdesk.services.auth import _current_site_ids, _current_user, _has_permission
 from foxdesk.services.scoping import _scope_tickets
@@ -251,6 +251,42 @@ def _settings_sections():
 app.add_template_filter(short_dn, 'short_dn')
 # Also a global (not just context) so macros imported without context can check permissions.
 app.jinja_env.globals.update(can=_has_permission, today=date.today)
+
+
+# ─── Active / inactive next to a person's name ────────────────────────────────
+def _person_for_status(who):
+    if who is None or hasattr(who, 'is_active'):
+        return who
+    # A person id, from a history row that keeps a name snapshot beside it;
+    # cached per request since a list repeats the same people.
+    cache = g.setdefault('person_status_cache', {})
+    if who not in cache:
+        cache[who] = db.session.get(Person, who)
+    return cache[who]
+
+
+_STATUS_TITLE = {True: 'Active', False: 'Inactive: graduated or left'}
+
+
+def person_status(who, size='sm'):
+    """The active/inactive marker beside a name, for a Person or a person id.
+    Most people are active, so active is a small green dot (named for screen
+    readers and on hover); inactive is a labeled pill with a hollow ring, so
+    it reads without color. size='lg' is the person page's big badge."""
+    person = _person_for_status(who)
+    if person is None:
+        return ''
+    on = bool(person.is_active)
+    state = 'on' if on else 'off'
+    title = _STATUS_TITLE[on]
+    if size == 'lg':
+        return Markup(f'<span class="ps-lg ps-{state}" title="{title}"><span class="ps-dot" aria-hidden="true"></span>'
+                      f'{"Active" if on else "Inactive"}</span>')
+    text = '<span class="ps-sr">Active</span>' if on else 'Inactive'
+    return Markup(f'<span class="ps ps-{state}" title="{title}"><span class="ps-dot" aria-hidden="true"></span>{text}</span>')
+
+
+app.jinja_env.globals.update(person_status=person_status)
 
 
 @app.template_filter('ago')

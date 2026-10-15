@@ -132,7 +132,7 @@
           {% endif %}
         </td>
         <td style="color:var(--muted);">
-          {{ checkout.person_name if checkout else '—' }}
+          {{ checkout.person_name if checkout else '—' }}{% if checkout %}{{ person_status(checkout.person_id) }}{% endif %}
           {% if checkout and checkout.repair_id and checkout.repair %}
           <br><a href="/admin/assets/{{ checkout.repair.asset_tag }}/assign" style="font-size:.75rem;text-decoration:none;">covering <code>{{ checkout.repair.asset_tag }}</code></a>
           {% endif %}

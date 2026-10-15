@@ -70,7 +70,7 @@
             <div class="afg-meta">{{ r.device_model.full_name if r.device_model else (p.asset.google_model or r.description or '') }}{% if r.site %} · {{ r.site.name }}{% endif %}</div>
           </td>
           <td>
-            <a href="/admin/people/{{ p.person.id }}{{ '#recent' if can('people') else '/edit' }}">{{ p.person.full_name }}</a>
+            <a href="/admin/people/{{ p.person.id }}{{ '#recent' if can('people') else '/edit' }}">{{ p.person.full_name }}</a>{{ person_status(p.person) }}
             <div class="afg-meta">{{ p.signin_email }} · {{ p.person.role|capitalize }}{% if p.person.grad_year %} {{ p.person.grad_year }}{% endif %}{% if p.person.site %} · {{ p.person.site.name }}{% endif %}</div>
           </td>
           <td class="afg-why">

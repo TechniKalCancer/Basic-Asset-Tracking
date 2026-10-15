@@ -94,7 +94,7 @@
       {% set p = r.person %}
       <tr>
         {% if agreement.is_active %}<td>{% if not r.complete %}<input type="checkbox" class="ad-pick" name="person_id" value="{{ p.id }}" form="bulkPaper" style="width:auto;" aria-label="Tick {{ p.full_name }}">{% endif %}</td>{% endif %}
-        <td><a href="/admin/people/{{ p.id }}" class="tag-link">{{ p.full_name }}</a>
+        <td><a href="/admin/people/{{ p.id }}" class="tag-link">{{ p.full_name }}</a>{{ person_status(p) }}
           <div class="ad-muted">{{ p.site.name if p.site else '' }}{% if p.grad_year %} · {{ p.grad_year }}{% endif %}</div></td>
         <td>{% if r.complete %}<span class="badge badge-green">Signed</span>
             {% elif r.signatures %}<span class="badge badge-yellow">Needs {{ r.missing|map('replace', 'guardian', 'parent')|join(' + ') }}</span>

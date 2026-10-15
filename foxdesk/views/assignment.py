@@ -85,7 +85,7 @@ def admin_asset_assign(asset_tag):
     # are tracked in a separate table.
     combined_history = sorted(
         [{
-            'kind': 'assign', 'person_name': h.person_name, 'started_at': h.assigned_at,
+            'kind': 'assign', 'person_name': h.person_name, 'person_id': h.person_id, 'started_at': h.assigned_at,
             'ended_at': h.unassigned_at, 'due_date': h.due_date, 'acknowledged_by': h.acknowledged_by,
             'notes': ' '.join(filter(None, [
                 f'Out: {h.condition_out}' if h.condition_out else None,
@@ -93,7 +93,7 @@ def admin_asset_assign(asset_tag):
             ])) or None,
         } for h in history] +
         [{
-            'kind': 'loaner', 'person_name': l.person_name, 'started_at': l.checked_out_at,
+            'kind': 'loaner', 'person_name': l.person_name, 'person_id': l.person_id, 'started_at': l.checked_out_at,
             'ended_at': l.checked_in_at, 'due_date': l.due_date, 'acknowledged_by': l.acknowledged_by,
             'notes': l.condition_notes,
         } for l in loaner_checkouts],

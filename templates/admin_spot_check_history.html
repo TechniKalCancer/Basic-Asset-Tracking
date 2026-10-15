@@ -45,8 +45,8 @@
         <td><a class="tag-link" href="/admin/assets/{{ c.asset_tag|urlencode }}/assign">{{ c.asset_tag }}</a></td>
         <td><span class="badge {{ {'match': 'badge-green', 'wrong_student': 'badge-red'}.get(c.result, 'badge-yellow') }}">{{ c.result_label }}</span>
           {% if c.resolved_at %}<div class="sh-note">resolved by {{ c.resolved_by }}</div>{% endif %}</td>
-        <td>{{ c.found.full_name if c.found else '—' }}</td>
-        <td>{{ c.expected.full_name if c.expected else '—' }}</td>
+        <td>{% if c.found %}{{ c.found.full_name }}{{ person_status(c.found) }}{% else %}—{% endif %}</td>
+        <td>{% if c.expected %}{{ c.expected.full_name }}{{ person_status(c.expected) }}{% else %}—{% endif %}</td>
         <td class="sh-note">{{ c.checked_by }}</td>
         <td style="text-align:right;">
           {% if c.is_problem and not c.resolved_at %}

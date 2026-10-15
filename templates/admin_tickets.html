@@ -83,7 +83,7 @@
         <td><span class="badge {{ status_badge.get(t.status, 'badge-blue') }}">{{ t.status|replace('_', ' ')|capitalize }}</span>
           {% if show_sla %}{% set sla = sla_badge(t) %}{% if sla and t.is_open %}<div style="margin-top:.25rem;"><span class="badge {{ sla.css }}" style="font-size:.68rem;" title="{{ sla.title }}">{{ sla.text }}</span></div>{% endif %}{% endif %}</td>
         <td><span class="badge {{ priority_badge.get(t.priority, 'badge-blue') }}">{{ t.priority|capitalize }}</span></td>
-        <td style="color:var(--muted);">{{ t.requester_name or '—' }}</td>
+        <td style="color:var(--muted);">{{ t.requester_name or '—' }}{% if t.requester_person_id %}{{ person_status(t.requester_person_id) }}{% endif %}</td>
         <td style="color:var(--muted);">{{ t.assigned_to.username if t.assigned_to else '—' }}{% if t.team %}<div style="font-size:.75rem;">{{ t.team.name }}</div>{% endif %}</td>
         <td style="white-space:nowrap;">
           {% if t.charges %}

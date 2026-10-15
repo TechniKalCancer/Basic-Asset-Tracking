@@ -47,7 +47,7 @@
         <td style="white-space:nowrap;color:var(--muted);">{{ a.source_label }}</td>
         <td>
           {% if a.suggested_person %}
-            <a class="tag-link" href="/admin/people/{{ a.suggested_person.id }}/edit">{{ a.suggested_person.full_name }}</a>
+            <a class="tag-link" href="/admin/people/{{ a.suggested_person.id }}/edit">{{ a.suggested_person.full_name }}</a>{{ person_status(a.suggested_person) }}
             <div style="font-size:.75rem;color:var(--muted);">{{ a.suggested_person.email }}{% if a.suggested_person.grad_year %} · {{ a.suggested_person.grad_year }}{% endif %}</div>
           {% else %}<span style="color:var(--muted);">—</span>{% endif %}
         </td>

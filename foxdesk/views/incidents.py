@@ -215,7 +215,8 @@ def admin_fees():
     grand_total = Decimal('0')
     for inc in incidents:
         key = inc.person_name or '(no person on file)'
-        entry = by_person.setdefault(key, {'charges': [], 'subtotal': Decimal('0')})
+        entry = by_person.setdefault(key, {'charges': [], 'subtotal': Decimal('0'), 'person_id': None})
+        entry['person_id'] = entry['person_id'] or inc.person_id
         amount = inc.fee_amount or Decimal('0')
         entry['charges'].append({
             'date': inc.created_at, 'label': f'Incident: {inc.description}', 'amount': amount,
@@ -245,7 +246,8 @@ def admin_fees():
         for tc in charges:
             t = tc.ticket
             key = t.requester_name or '(no person on file)'
-            entry = by_person.setdefault(key, {'charges': [], 'subtotal': Decimal('0')})
+            entry = by_person.setdefault(key, {'charges': [], 'subtotal': Decimal('0'), 'person_id': None})
+            entry['person_id'] = entry['person_id'] or t.requester_person_id
             amount = tc.amount or Decimal('0')
             entry['charges'].append({
                 'date': tc.created_at, 'label': f'Ticket #{t.id}: {tc.description}', 'amount': amount,

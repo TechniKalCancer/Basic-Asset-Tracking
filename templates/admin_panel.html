@@ -157,7 +157,7 @@
     <a class="violator-row" href="/admin/assets/{{ m.asset_tag }}/assign">
       <span class="badge badge-red" style="flex:none;">{{ m.label }}</span>
       <span class="violator-main">
-        <strong>{{ m.signer.full_name if m.signer else m.signin_email }}</strong>
+        <strong>{{ m.signer.full_name if m.signer else m.signin_email }}</strong>{{ person_status(m.signer) }}
         on <code>{{ m.asset_tag }}</code>
         <span class="violator-sub">
           {% if m.expected %}assigned to {{ m.expected|map(attribute='full_name')|join(', ') }}{% elif m.asset.status in ['lost', 'retired'] %}marked {{ m.asset.status }}{% else %}not assigned{% endif %}

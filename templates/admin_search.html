@@ -24,13 +24,13 @@
     <tbody>
       {% for person in people %}
       <tr>
-        <td>{% if can('people') %}<a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>{% else %}{{ person.full_name }}{% endif %}
+        <td>{% if can('people') %}<a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>{% else %}{{ person.full_name }}{% endif %}{{ person_status(person) }}
           {% if person.grad_year %}<div style="color:var(--muted);font-size:.78rem;">Class of {{ person.grad_year }}</div>{% endif %}</td>
         <td style="color:var(--muted);">{{ person.email }}</td>
         <td style="color:var(--muted);">{{ person.site.name if person.site else '—' }}</td>
         <td style="color:var(--muted);">
           {% if person.assets %}
-            <a href="/admin/registry?person_id={{ person.id }}">{{ person.assets|length }}</a>
+            <a href="/admin/registry?person_id={{ person.id }}" class="tag-link">{{ person.assets|length }}</a>
           {% else %}
             0
           {% endif %}
@@ -71,7 +71,7 @@
           </span>
         </td>
         <td style="color:var(--muted);">
-          {% if asset and asset.assigned_to %}{% if can('people') %}<a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link">{{ asset.assigned_to.full_name }}</a>{% else %}{{ asset.assigned_to.full_name }}{% endif %}{% else %}Unassigned{% endif %}
+          {% if asset and asset.assigned_to %}{% if can('people') %}<a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link">{{ asset.assigned_to.full_name }}</a>{% else %}{{ asset.assigned_to.full_name }}{% endif %}{{ person_status(asset.assigned_to) }}{% else %}Unassigned{% endif %}
         </td>
         <td class="sr-why">
           {% for r in a.reasons %}

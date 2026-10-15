@@ -217,6 +217,24 @@
     .badge-purple  { background: #581c8755; color: #c084fc;        }
     .badge-neutral { background: var(--surface2); color: var(--muted); }
     .ru-list { display: flex; flex-direction: column; gap: .15rem; font-size: .84rem; }
+    /* person_status(): active = solid green dot, inactive = red pill with a hollow ring */
+    .ps { display: inline-flex; align-items: center; gap: .3rem; margin-left: .35rem; vertical-align: middle;
+          font-size: .68rem; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .ps .ps-dot, .ps-lg .ps-dot { flex: none; border-radius: 50%; box-sizing: border-box; }
+    .ps .ps-dot { width: .55rem; height: .55rem; }
+    .ps-on { color: var(--success); }
+    .ps-on .ps-dot { background: currentColor; }
+    .ps-off { color: var(--danger); }
+    .ps.ps-off { border: 1px solid currentColor; border-radius: 99px; padding: .14rem .45rem .14rem .35rem; text-transform: uppercase; letter-spacing: .03em; }
+    .ps-off .ps-dot { border: 2px solid currentColor; }
+    .ps-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .ps-lg { display: inline-flex; align-items: center; gap: .6rem; padding: .5rem 1.15rem .5rem .85rem; border-radius: 99px;
+             border: 2px solid currentColor; font-size: 1.2rem; font-weight: 800; line-height: 1; letter-spacing: .02em; }
+    .ps-lg .ps-dot { width: 1.15rem; height: 1.15rem; }
+    .ps-lg.ps-on { background: #14532d55; }
+    .ps-lg.ps-on .ps-dot { box-shadow: 0 0 0 4px rgba(34, 197, 94, .22); }
+    .ps-lg.ps-off { background: #7f1d1d55; text-transform: uppercase; }
+    .ps-lg.ps-off .ps-dot { border-width: 3px; }
     .ru-item { white-space: nowrap; }
 
     /* Asset tag/serial links in tables — plain <a><code> has no explicit

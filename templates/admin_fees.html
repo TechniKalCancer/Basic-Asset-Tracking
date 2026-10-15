@@ -27,7 +27,7 @@
   {% for person_name, data in by_person.items() %}
   <div class="card">
     <h2 style="display:flex;align-items:center;gap:.6rem;">
-      {{ person_name }}
+      {{ person_name }}{% if data.person_id %}{{ person_status(data.person_id) }}{% endif %}
       <span class="badge badge-yellow">${{ '%.2f'|format(data.subtotal) }}</span>
     </h2>
     <div style="overflow-x:auto;">

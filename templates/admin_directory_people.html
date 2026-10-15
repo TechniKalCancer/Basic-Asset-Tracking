@@ -21,7 +21,7 @@
     <tbody>
       {% for r in rows %}
       <tr>
-        <td><a class="tag-link" href="/admin/people/{{ r.person.id }}/edit">{{ r.person.full_name }}</a>
+        <td><a class="tag-link" href="/admin/people/{{ r.person.id }}/edit">{{ r.person.full_name }}</a>{{ person_status(r.person) }}
           <div style="font-size:.78rem;color:var(--muted);">{{ r.person.role|capitalize }}{% if r.person.grad_year %} · {{ r.person.grad_year }}{% endif %}</div></td>
         <td><code>{{ r.username or r.email }}</code>
           {% if (r.raw or {}).get('removed_from_ad') %}<span class="badge badge-red" style="font-size:.68rem;">gone from AD {{ r.raw.removed_from_ad }}</span>

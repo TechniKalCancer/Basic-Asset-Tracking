@@ -69,12 +69,12 @@
           </div>
         </td>
         <td>
-          {% for p in m.expected %}<a class="tag-link" href="/admin/people/{{ p.id }}">{{ p.full_name }}</a>{% if not loop.last %}, {% endif %}
+          {% for p in m.expected %}<a class="tag-link" href="/admin/people/{{ p.id }}">{{ p.full_name }}</a>{{ person_status(p) }}{% if not loop.last %}, {% endif %}
           {% else %}<span style="color:var(--muted);">Nobody</span>{% endfor %}
         </td>
         <td>
-          {% if m.signer %}<a class="tag-link" href="/admin/people/{{ m.signer.id }}">{{ m.signer.full_name }}</a>
-            <div style="font-size:.75rem;color:var(--muted);">{{ m.signer.role }}{% if m.signer.grad_year %} · {{ m.signer.grad_year }}{% endif %}{% if not m.signer.is_active %} · inactive{% endif %}</div>
+          {% if m.signer %}<a class="tag-link" href="/admin/people/{{ m.signer.id }}">{{ m.signer.full_name }}</a>{{ person_status(m.signer) }}
+            <div style="font-size:.75rem;color:var(--muted);">{{ m.signer.role }}{% if m.signer.grad_year %} · {{ m.signer.grad_year }}{% endif %}</div>
           {% else %}<span style="font-size:.85rem;">{{ m.signin_email }}</span>{% endif %}
         </td>
         <td style="white-space:nowrap;color:var(--muted);" title="{{ m.last_activity.strftime('%Y-%m-%d %H:%M') }} UTC">{{ m.last_activity|ago }}</td>

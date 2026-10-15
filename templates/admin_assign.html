@@ -102,7 +102,7 @@
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     {{ registry_row.description or 'No description on file.' }}
     {% if asset and asset.assigned_to %}
-      <br>Currently assigned to <a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link"><strong>{{ asset.assigned_to.full_name }}</strong></a>.
+      <br>Currently assigned to <a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link"><strong>{{ asset.assigned_to.full_name }}</strong></a>{{ person_status(asset.assigned_to) }}.
       {% for a in unsigned_agreements(asset.assigned_to) %}
       <br><span class="badge badge-yellow" style="margin-top:.4rem;">{{ icon('warning') }}{{ a.title }} not signed</span>
       <a href="/admin/agreements/{{ a.id }}?q={{ asset.assigned_to.full_name|urlencode }}" class="tag-link" style="font-size:.8rem;">record it</a>
@@ -186,7 +186,7 @@
       {% for h in combined_history %}
       <tr>
         <td><span class="badge {{ 'badge-blue' if h.kind == 'assign' else 'badge-yellow' }}" style="font-size:.65rem;">{{ 'Assign' if h.kind == 'assign' else 'Loaner' }}</span></td>
-        <td>{{ h.person_name }}</td>
+        <td>{{ h.person_name }}{{ person_status(h.person_id) }}</td>
         <td style="color:var(--muted);">{{ h.started_at.strftime('%Y-%m-%d') }}</td>
         <td style="color:{{ 'var(--danger)' if (h.due_date and not h.ended_at and h.due_date < now) else 'var(--muted)' }};">
           {{ h.due_date.strftime('%Y-%m-%d') if h.due_date else '—' }}
@@ -330,7 +330,7 @@
       {% for inc in incidents %}
       <tr>
         <td style="color:var(--muted);white-space:nowrap;">{{ inc.created_at.strftime('%Y-%m-%d') }}</td>
-        <td style="color:var(--muted);">{{ inc.person_name or '—' }}</td>
+        <td style="color:var(--muted);">{{ inc.person_name or '—' }}{{ person_status(inc.person_id) }}</td>
         <td>{{ inc.description }}{% if inc.repair_category and inc.repair_category.name != inc.description %}<span style="color:var(--muted);font-size:.78rem;"> — {{ inc.repair_category.name }}</span>{% endif %}
           {% if inc.guardian_notified_at %}<span class="badge badge-blue" style="font-size:.68rem;" title="Damage notice emailed {{ inc.guardian_notified_at.strftime('%Y-%m-%d %H:%M') }} UTC">{{ icon('email') }}Guardian notified</span>{% endif %}
           {{ macros.attachment_thumbs(incident_attachments[inc.id]) }}

@@ -57,7 +57,7 @@
         <td class="rf-muted">{{ model }}</td>
         <td style="white-space:nowrap;">{{ asset.google_aue_date.strftime('%b %Y') }}</td>
         <td>{{ (asset.status or 'available')|capitalize }}</td>
-        <td>{{ asset.assigned_to.full_name if asset.assigned_to else '—' }}</td>
+        <td>{% if asset.assigned_to %}{{ asset.assigned_to.full_name }}{{ person_status(asset.assigned_to) }}{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

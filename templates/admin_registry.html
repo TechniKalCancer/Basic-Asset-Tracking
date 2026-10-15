@@ -133,7 +133,7 @@
         </td>
         <td>
           {% if asset and asset.assigned_to %}
-            {{ asset.assigned_to.full_name }}
+            {{ asset.assigned_to.full_name }}{{ person_status(asset.assigned_to) }}
           {% else %}
             <span style="color:var(--muted);">Unassigned</span>
           {% endif %}

@@ -32,7 +32,7 @@
 <div class="card" style="margin-bottom:1.5rem;">
   <table style="width:100%;">
     <tr><td style="color:var(--muted);width:140px;">Category</td><td>{{ ticket.category.name if ticket.category else '—' }}</td></tr>
-    <tr><td style="color:var(--muted);">Requester</td><td>{{ ticket.requester_name or '—' }} {% if ticket.requester_email %}<span style="color:var(--muted);">({{ ticket.requester_email }})</span>{% endif %}</td></tr>
+    <tr><td style="color:var(--muted);">Requester</td><td>{{ ticket.requester_name or '—' }}{% if ticket.requester_person_id %}{{ person_status(ticket.requester_person_id) }}{% endif %} {% if ticket.requester_email %}<span style="color:var(--muted);">({{ ticket.requester_email }})</span>{% endif %}</td></tr>
     <tr><td style="color:var(--muted);">Site</td><td>{{ ticket.site.name if ticket.site else '—' }}</td></tr>
     <tr>
       <td style="color:var(--muted);">Device</td>

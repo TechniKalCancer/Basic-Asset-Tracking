@@ -95,8 +95,7 @@
       {% for person in pagination.items %}
       <tr>
         <td>
-          <a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>
-          {% if not person.is_active %}<span class="badge badge-yellow" style="font-size:.7rem;">Graduated</span>{% endif %}
+          <a href="/admin/people/{{ person.id }}" class="tag-link">{{ person.full_name }}</a>{{ person_status(person) }}
           {% if person.insurance_opted_in %}<span class="badge badge-blue" style="font-size:.7rem;" title="Device protection plan">{{ icon('protection-plan') or 'Plan' }}</span>{% endif %}
         </td>
         <td style="color:var(--muted);">{{ person.email }}</td>

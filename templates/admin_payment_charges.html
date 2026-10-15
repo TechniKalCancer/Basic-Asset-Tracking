@@ -69,7 +69,7 @@
         <tr>
           <td><input type="checkbox" name="charge" value="{{ c.key }}" data-amount="{{ c.amount }}" aria-label="Select {{ c.person_name }} {{ c.kind_label }}"></td>
           <td style="white-space:nowrap;">{{ c.created_at.strftime('%Y-%m-%d') }}<div class="ch-muted">{{ c.age_days }}d</div></td>
-          <td>{{ c.person_name }}</td>
+          <td>{{ c.person_name }}{% if c.person_id %}{{ person_status(c.person_id) }}{% endif %}</td>
           <td>{{ c.kind_label }}: {{ c.description|truncate(70) }}
             {% if c.link_url %}<div><a class="tag-link ch-muted" href="{{ c.link_url }}">{{ c.link_label }}</a></div>{% endif %}</td>
           <td class="num">${{ '{:,.2f}'.format(c.amount) }}</td>

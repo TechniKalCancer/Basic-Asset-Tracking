@@ -11,7 +11,10 @@ class Site(db.Model):
     google_loaner_autodisable_enabled = db.Column(db.Boolean, nullable=False, default=False)  # per-site opt-in pilot gate, see _sync_device_google_state — despite the name, also gates the OU-move-to-borrower behavior on assignment
     loaner_org_unit_path = db.Column(db.String(255), nullable=True)  # where this site's loaner Chromebooks should live in Google Workspace — see _push_loaners_to_ou
     logo_filename = db.Column(db.String(255), nullable=True)  # overrides BrandingSettings.logo_filename in the nav for this site's users; falls back when unset
+    bell_schedule = db.Column(db.Text, nullable=True)  # one period per line: "1, 7:55, 8:48" — see services/schedules.py
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    techs = db.relationship('User', secondary='site_tech', lazy='select')
 
 
 class BrandingSettings(db.Model):
@@ -182,6 +185,17 @@ class UserSite(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=False, index=True)
     __table_args__ = (db.UniqueConstraint('user_id', 'site_id', name='uq_user_site'),)
+
+
+class SiteTech(db.Model):
+    """The tech(s) responsible for a school: they get its daily overdue email
+    (services/overdue.py). Separate from UserSite, which is only what a user
+    can see — a super admin sees every site but is nobody's site tech."""
+    __tablename__ = 'site_tech'
+    id      = db.Column(db.Integer, primary_key=True)
+    site_id = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint('site_id', 'user_id', name='uq_site_tech'),)
 
 
 class DeviceModel(db.Model):
@@ -614,9 +628,37 @@ class Repair(db.Model):
     outcome              = db.Column(db.String(20), nullable=True)  # 'fixed' | 'could_not_repair' | 'replaced'
     notes                = db.Column(db.Text, nullable=True)
     ticket_id            = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
+    status               = db.Column(db.String(20), nullable=False, default='received', server_default='received')  # REPAIR_STATUSES, while open
+    status_changed_at    = db.Column(db.DateTime, nullable=True)
 
     repair_category = db.relationship('RepairCategory')
     ticket = db.relationship('Ticket', backref=db.backref('repair', uselist=False))
+    note_rows = db.relationship('RepairNote', backref='repair', order_by='RepairNote.created_at.desc()',
+                                cascade='all, delete-orphan', lazy='select')
+
+
+# Where an open repair is; closing it (Mark Returned) records an outcome instead.
+REPAIR_STATUSES = {
+    'received': 'Received',
+    'diagnosing': 'Diagnosing',
+    'waiting_parts': 'Waiting on parts',
+    'at_vendor': 'Sent to vendor',
+    'in_repair': 'Being repaired',
+    'ready': 'Ready to return',
+}
+
+
+class RepairNote(db.Model):
+    """A note on a repair, newest first on its page. A status change is a
+    note too (status_from/status_to), so the page reads as a timeline."""
+    __tablename__ = 'repair_note'
+    id           = db.Column(db.Integer, primary_key=True)
+    repair_id    = db.Column(db.Integer, db.ForeignKey('repair.id'), nullable=False, index=True)
+    body         = db.Column(db.Text, nullable=True)
+    status_from  = db.Column(db.String(20), nullable=True)
+    status_to    = db.Column(db.String(20), nullable=True)
+    author_label = db.Column(db.String(120), nullable=True)
+    created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
 
 
 REPAIR_OUTCOMES = {
@@ -1398,6 +1440,36 @@ class SlaSettings(db.Model):
     targets      = db.Column(db.JSON, nullable=True)
     started_at   = db.Column(db.DateTime, nullable=True)  # when SLAs were last turned on; older tickets get no clocks
     updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class OverdueSettings(db.Model):
+    """One row: the repair time limit and the daily overdue email to each
+    school's techs (services/overdue.py). last_alert_on is claimed with a
+    conditional UPDATE before sending, so gunicorn's several workers don't
+    each send the day's email."""
+    __tablename__ = 'overdue_settings'
+    id              = db.Column(db.Integer, primary_key=True)
+    repair_max_days = db.Column(db.Integer, nullable=False, default=14, server_default='14')
+    alerts_enabled  = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    alert_hour      = db.Column(db.Integer, nullable=False, default=7, server_default='7')  # local time, school days only
+    last_alert_on   = db.Column(db.Date, nullable=True)
+
+
+class StudentSchedule(db.Model):
+    """One class in a student's schedule, from the SIS export (People →
+    Import Schedules). An import replaces the whole schedule of every
+    student it matches, so a row here is never edited, only replaced."""
+    __tablename__ = 'student_schedule'
+    id          = db.Column(db.Integer, primary_key=True)
+    person_id   = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=False, index=True)
+    period      = db.Column(db.String(40), nullable=False)   # as the SIS writes it: "1", "1(A)", "3rd", "HR"
+    course      = db.Column(db.String(160), nullable=True)
+    teacher     = db.Column(db.String(120), nullable=True)
+    room        = db.Column(db.String(40), nullable=True)
+    term        = db.Column(db.String(40), nullable=True)
+    imported_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    person = db.relationship('Person', backref=db.backref('schedule', lazy='select', order_by='StudentSchedule.id'))
 
 
 class Agreement(db.Model):

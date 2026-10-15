@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}Overdue{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('warning') }}Overdue</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/repairs" class="btn btn-ghost">{{ icon('repair') }}Repairs</a>
+</div>
+<p class="od-sub">Repairs past the {{ settings.repair_max_days }}-day limit, loaners past their due date, and assigned devices past theirs,
+  by school. Each school's techs get their list by email on school-day mornings. Students aren't emailed about repair loaners.</p>
+
+{% for sid, s in by_site.items() %}
+<section class="card od-site" aria-labelledby="od{{ sid or 0 }}">
+  <h2 id="od{{ sid or 0 }}" style="margin-top:0;">{{ s.site.name if s.site else 'Devices with no school set' }}
+    <span class="badge badge-red">{{ s.repairs|length + s.loaners|length + s.assignments|length }}</span></h2>
+  {% if s.site %}<p class="od-techs">Techs:
+    {% for u in s.site.techs %}{{ u.username }}{% if not u.email %} <span class="badge badge-yellow" title="No email on their user account">no email</span>{% endif %}{% if not loop.last %}, {% endif %}
+    {% else %}<span style="color:var(--warning);">nobody yet</span>{% if can_admin %}, <a class="tag-link" href="/admin/sites/{{ s.site.id }}/edit">pick techs</a>{% endif %}{% endfor %}</p>
+  {% else %}<p class="od-techs">Goes to super admins. Give these devices a school to route them to its techs.</p>{% endif %}
+
+  {% if s.repairs %}
+  <h3>Repairs past due</h3>
+  <div style="overflow-x:auto;"><table>
+    <thead><tr><th>Device</th><th>Status</th><th>Out</th><th>Due</th><th>Had it</th><th>Loaner</th></tr></thead>
+    <tbody>{% for r in s.repairs %}
+      <tr><td><a class="tag-link" href="/admin/repairs/{{ r.id }}"><code>{{ r.tag }}</code></a></td><td>{{ r.status }}</td>
+        <td>{{ r.days_open }} days</td><td class="od-late">{{ r.due.strftime('%b %d') }} · {{ r.days }}d late</td>
+        <td>{{ r.person or '—' }}</td><td class="od-muted">{{ r.loaner or '—' }}</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
+  {% if s.loaners %}
+  <h3>Loaners past due</h3>
+  <div style="overflow-x:auto;"><table>
+    <thead><tr><th>Loaner</th><th>With</th><th>Due</th><th></th></tr></thead>
+    <tbody>{% for l in s.loaners %}
+      <tr><td><a class="tag-link" href="/admin/assets/{{ l.tag|urlencode }}/assign"><code>{{ l.tag }}</code></a></td>
+        <td>{{ l.person }}{% if l.person_id %}{{ person_status(l.person_id) }}{% endif %}</td>
+        <td class="od-late">{{ l.due.strftime('%b %d') }} · {{ l.days }}d late</td>
+        <td class="od-muted">{% if l.for_repair %}Repair loaner, student not emailed{% endif %}</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
+  {% if s.assignments %}
+  <h3>Assigned devices past their due date</h3>
+  <div style="overflow-x:auto;"><table>
+    <thead><tr><th>Device</th><th>Assigned to</th><th>Due</th></tr></thead>
+    <tbody>{% for a in s.assignments %}
+      <tr><td><a class="tag-link" href="/admin/assets/{{ a.tag|urlencode }}/assign"><code>{{ a.tag }}</code></a></td>
+        <td>{{ a.person }}{% if a.person_id %}{{ person_status(a.person_id) }}{% endif %}</td>
+        <td class="od-late">{{ a.due.strftime('%b %d') }} · {{ a.days }}d late</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
+</section>
+{% else %}
+<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Nothing is overdue.</div>
+{% endfor %}
+
+<section class="card" aria-labelledby="odSettings">
+  <h2 id="odSettings" style="margin-top:0;">{{ icon('settings') }}Repair limit and the techs' email</h2>
+  {% if can_admin %}
+  <form method="POST" action="/admin/overdue/settings" class="od-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Repairs can be out at most <input type="number" name="repair_max_days" min="1" max="120" value="{{ settings.repair_max_days }}" style="width:5rem;"> days
+      <span class="od-muted">(default {{ default_max }}). A repair is due back by then; a later date can't be set.</span></label>
+    <label class="od-check"><input type="checkbox" name="alerts_enabled" {{ 'checked' if settings.alerts_enabled }}> Email each school's techs their overdue list on school days</label>
+    <label>at <input type="number" name="alert_hour" min="0" max="23" value="{{ settings.alert_hour }}" style="width:4.5rem;">:00
+      <span class="od-muted">local time. School days and closed dates come from the SLA calendar (Admin → SLA).</span></label>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+  {% else %}
+  <p class="od-muted">Repairs can be out {{ settings.repair_max_days }} days at most. Techs' email: {{ ('on, ' ~ settings.alert_hour ~ ':00 on school days') if settings.alerts_enabled else 'off' }}.</p>
+  {% endif %}
+  {% if not email_enabled %}<p class="od-muted" style="color:var(--warning);">Email isn't configured on this server, so nothing goes out.</p>{% endif %}
+
+  <h3>Who gets it</h3>
+  <ul class="od-list">
+    {% for site in sites %}
+    <li><strong>{{ site.name }}:</strong>
+      {% for u in site.techs %}{{ u.username }}{{ ' (' ~ u.email ~ ')' if u.email else '' }}{% if not u.email %} <span class="badge badge-yellow">needs an email</span>{% endif %}{% if not loop.last %}, {% endif %}{% else %}<span style="color:var(--warning);">no techs</span>{% endfor %}
+      {% if can_admin %} · <a class="tag-link" href="/admin/sites/{{ site.id }}/edit">change</a>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  <p class="od-muted">Techs are picked on each school's page (Admin → Sites); the email goes to the address on their user account.</p>
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+    <form method="POST" action="/admin/overdue/send_mine">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-ghost">Email me my list now</button>
+    </form>
+    {% if me %}<a href="?preview=1#preview" class="btn btn-ghost">Preview my email</a>{% endif %}
+  </div>
+  {% if preview is not none %}
+  <pre id="preview" class="od-preview">{{ preview or 'Nothing is overdue at the schools you\'re a tech for (or you aren\'t a tech for any yet).' }}</pre>
+  {% endif %}
+</section>
+
+<style>
+  .od-sub { color: var(--muted); font-size: .9rem; max-width: 80ch; margin: 0 0 1rem; }
+  .od-site h3 { font-size: .95rem; margin: 1rem 0 .4rem; }
+  .od-techs { color: var(--muted); font-size: .85rem; margin: -.3rem 0 .4rem; }
+  .od-late { color: var(--danger); white-space: nowrap; }
+  .od-muted { color: var(--muted); font-size: .84rem; }
+  .od-form { display: grid; gap: .7rem; max-width: 760px; margin-bottom: .6rem; }
+  .od-form button { justify-self: start; }
+  .od-form input[type=number] { display: inline-block; }
+  .od-check { display: flex; align-items: center; gap: .45rem; }
+  .od-check input { width: auto; }
+  .od-list { margin: .3rem 0 .6rem; padding-left: 1.1rem; font-size: .9rem; }
+  .od-preview { white-space: pre-wrap; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+                padding: .8rem 1rem; font-size: .82rem; margin-top: .8rem; max-height: 420px; overflow: auto; }
+</style>
+{% endblock %}

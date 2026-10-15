@@ -8,7 +8,8 @@
   {% if repair.returned_at %}
     <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
   {% else %}
-    <span class="badge badge-yellow">Open</span>
+    <span class="badge badge-blue">{{ repair_statuses.get(repair.status, repair.status) }}</span>
+    {% if due < today %}<span class="badge badge-red">Overdue {{ (today - due).days }} day{{ 's' if (today - due).days != 1 }}</span>{% endif %}
   {% endif %}
   <span class="spacer" style="flex:1;"></span>
   {% if repair.ticket_id %}<a href="/admin/tickets/{{ repair.ticket_id }}" class="btn btn-ghost">{{ icon('ticket') }}View Full Ticket</a>{% endif %}
@@ -21,10 +22,15 @@
     <tr><td style="color:var(--muted);width:160px;">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Ticket # (vendor's)</td><td>{{ repair.ticket_number or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Issue</td><td>{{ repair.issue_description or '—' }}</td></tr>
-    <tr><td style="color:var(--muted);">Had It</td><td>{{ repair.person_name_snapshot or '—' }}</td></tr>
-    <tr><td style="color:var(--muted);">Sent</td><td>{{ repair.sent_at.strftime('%Y-%m-%d') }}</td></tr>
-    {% if repair.expected_return_at %}
-    <tr><td style="color:var(--muted);">Expected Return</td><td>{{ repair.expected_return_at.strftime('%Y-%m-%d') }}</td></tr>
+    <tr><td style="color:var(--muted);">Had It</td><td>{{ repair.person_name_snapshot or '—' }}
+      {% if student_now %}<div class="rp-now">{{ macros.where_now(student_now, student) }}</div>{% endif %}</td></tr>
+    <tr><td style="color:var(--muted);">Sent</td><td>{{ repair.sent_at.strftime('%Y-%m-%d') }}
+      {% if not repair.returned_at %}<span style="color:var(--muted);"> · out {{ (today - repair.sent_at.date()).days }} days</span>{% endif %}</td></tr>
+    {% if not repair.returned_at %}
+    <tr><td style="color:var(--muted);">Due Back</td><td style="{{ 'color:var(--danger);font-weight:600;' if due < today }}">{{ due.strftime('%Y-%m-%d') }}
+      <span style="color:var(--muted);font-weight:400;font-size:.82rem;"> · repairs can be out {{ max_days }} days at most</span></td></tr>
+    {% elif repair.expected_return_at %}
+    <tr><td style="color:var(--muted);">Was Due</td><td>{{ repair.expected_return_at.strftime('%Y-%m-%d') }}</td></tr>
     {% endif %}
     {% if repair.returned_at %}
     <tr><td style="color:var(--muted);">Returned</td><td>{{ repair.returned_at.strftime('%Y-%m-%d') }}</td></tr>
@@ -33,6 +39,36 @@
     {% endif %}
     {% endif %}
   </table>
+</div>
+
+<div class="card" style="margin-bottom:1.5rem;" id="notes">
+  <h2 style="margin-top:0;">{{ icon('history') }}Status &amp; Notes</h2>
+  <form method="POST" action="/admin/repairs/{{ repair.id }}/update" class="rp-update">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if not repair.returned_at %}
+    <div class="rp-status-pick" role="radiogroup" aria-label="Repair status">
+      {% for key, label in repair_statuses.items() %}
+      <label class="rp-chip {{ 'on' if repair.status == key }}"><input type="radio" name="status" value="{{ key }}" {{ 'checked' if repair.status == key }}> {{ label }}</label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label for="rpNote" class="rp-label">Note {% if not repair.returned_at %}(optional with a status change){% endif %}</label>
+    <textarea id="rpNote" name="note" rows="2" maxlength="5000" placeholder="e.g. Ordered a new screen from Dell, RMA 4471-22. Student has loaner LN-12."></textarea>
+    <button type="submit" class="btn btn-primary">{{ 'Save' if not repair.returned_at else 'Add Note' }}</button>
+  </form>
+  {% if repair.note_rows %}
+  <ol class="rp-timeline">
+    {% for n in repair.note_rows %}
+    <li>
+      <div class="rp-when">{{ n.created_at.strftime('%b %d, %Y %H:%M') }} UTC · {{ n.author_label or 'Someone' }}</div>
+      {% if n.status_to %}<div><span class="badge badge-neutral">{{ repair_statuses.get(n.status_from, n.status_from) }}</span> → <span class="badge badge-blue">{{ repair_statuses.get(n.status_to, n.status_to) }}</span></div>{% endif %}
+      {% if n.body %}<div class="rp-body">{{ n.body }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p style="color:var(--muted);font-size:.85rem;margin:.8rem 0 0;">No notes yet. Status changes and notes show here, newest first, and on the repair's ticket.</p>
+  {% endif %}
 </div>
 
 {% if not repair.returned_at %}
@@ -59,8 +95,8 @@
         <input name="issue_description" value="{{ repair.issue_description or '' }}" required />
       </div>
       <div style="margin-bottom:1rem;">
-        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return</label>
-        <input type="date" name="expected_return_at" value="{{ repair.expected_return_at.isoformat() if repair.expected_return_at else '' }}" />
+        <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Expected Return (by {{ limit.strftime('%b %d') }} at the latest)</label>
+        <input type="date" name="expected_return_at" max="{{ limit.isoformat() }}" value="{{ repair.expected_return_at.isoformat() if repair.expected_return_at else '' }}" />
       </div>
       <button type="submit" class="btn btn-ghost">Save Changes</button>
     </form>
@@ -244,4 +280,22 @@
   <p style="color:var(--muted);font-size:.85rem;">No ticket is linked to this repair, so there's nowhere to bill charges to.</p>
   {% endif %}
 </div>
+<style>
+  .rp-update { display: grid; gap: .6rem; max-width: 760px; }
+  .rp-update button { justify-self: start; }
+  .rp-label { color: var(--muted); font-size: .85rem; }
+  .rp-status-pick { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .rp-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem .75rem; border: 1px solid var(--border);
+             border-radius: 99px; font-size: .84rem; cursor: pointer; color: var(--muted); }
+  .rp-chip input { width: auto; margin: 0; }
+  .rp-chip.on, .rp-chip:has(input:checked) { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .rp-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .rp-timeline { list-style: none; margin: 1.1rem 0 0; padding: 0 0 0 1rem; border-left: 2px solid var(--border); display: grid; gap: .9rem; }
+  .rp-timeline li { position: relative; }
+  .rp-timeline li::before { content: ''; position: absolute; left: -1.38rem; top: .3rem; width: .6rem; height: .6rem;
+                            border-radius: 50%; background: var(--accent); }
+  .rp-when { font-size: .76rem; color: var(--muted); margin-bottom: .2rem; }
+  .rp-body { white-space: pre-wrap; font-size: .9rem; margin-top: .2rem; }
+  .rp-now { margin-top: .3rem; font-size: .84rem; }
+</style>
 {% endblock %}

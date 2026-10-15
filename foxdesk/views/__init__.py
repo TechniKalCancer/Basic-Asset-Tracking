@@ -16,6 +16,7 @@ from foxdesk.views import insights  # noqa: F401
 from foxdesk.views import integrations  # noqa: F401
 from foxdesk.views import librenms  # noqa: F401
 from foxdesk.views import loaners  # noqa: F401
+from foxdesk.views import overdue  # noqa: F401
 from foxdesk.views import parts  # noqa: F401
 from foxdesk.views import payments  # noqa: F401
 from foxdesk.views import people  # noqa: F401

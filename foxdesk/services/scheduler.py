@@ -47,6 +47,27 @@ if EMAIL_ENABLED:
     threading.Thread(target=_loaner_reminder_loop, daemon=True).start()
 
 
+OVERDUE_CHECK_SECONDS = 600
+
+
+def _overdue_alert_loop():
+    """Background daemon: every 10 minutes, sends the day's overdue email to
+    each school's techs once it's past the set hour on a school day.
+    maybe_send_daily() claims the day first, so only one worker sends."""
+    from foxdesk.services.overdue import maybe_send_daily
+    while True:
+        time.sleep(OVERDUE_CHECK_SECONDS)
+        try:
+            with app.app_context():
+                maybe_send_daily()
+        except Exception as e:
+            logger.error('Overdue email background loop error: %s', e)
+
+
+if EMAIL_ENABLED:
+    threading.Thread(target=_overdue_alert_loop, daemon=True).start()
+
+
 def _run_due_scheduled_syncs():
     """Runs any enabled SyncSchedule whose interval has elapsed. Claims a
     schedule (stamps last_run_at and commits) BEFORE doing the actual sync

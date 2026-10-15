@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+{% block title %}Import Schedules{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('schedule') }}Import Schedules</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/people" class="btn btn-ghost">← People</a>
+</div>
+<p class="si-sub">Student class schedules from the SIS. Each student's page then shows their classes and, once their school has
+  bell times, which room they're in right now. {% if total %}<strong>{{ total }}</strong> students have a schedule
+  (last import {{ last.strftime('%b %d, %Y') }}).{% endif %}</p>
+
+<div class="si-grid">
+  <section class="card" aria-labelledby="siUpload">
+    <h2 id="siUpload" style="margin-top:0;">Upload the export</h2>
+    <form method="POST" enctype="multipart/form-data" class="si-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="siFile">Schedule CSV</label>
+      <input type="file" id="siFile" name="file" accept=".csv,.txt,.tsv" required>
+      <button type="submit" class="btn btn-primary">Import</button>
+    </form>
+    <p class="si-muted">Every student in the file gets their whole schedule replaced with what's in it. Students who aren't in
+      the file keep theirs, so you can import one grade at a time.</p>
+  </section>
+
+  <section class="card" aria-labelledby="siFormat">
+    <h2 id="siFormat" style="margin-top:0;">What the file needs</h2>
+    <p class="si-muted" style="margin-top:0;">One row per class per student, with a header row. Column names can be the SIS's own:</p>
+    <ul class="si-list">
+      <li><strong>Student:</strong> Student Number (matches the ID on People), or Email, or First and Last Name</li>
+      <li><strong>Period:</strong> Period, Expression (PowerSchool, e.g. <code>1(A)</code>), Block or Hour</li>
+      <li><strong>Optional:</strong> Course, Teacher, Room, Term</li>
+    </ul>
+    <pre class="si-sample">Student_Number,Period,Course,Teacher,Room
+100234,1,Math 7,Smith,112
+100234,2,Science 7,Albion,204</pre>
+  </section>
+</div>
+
+{% if result %}
+<section class="card" aria-labelledby="siResult">
+  <h2 id="siResult" style="margin-top:0;">Result</h2>
+  <p>{{ result.classes }} classes for {{ result.students }} students.
+    {% if result.unmatched %}<span style="color:var(--warning);">{{ result.unmatched|length }} rows weren't imported.</span>{% endif %}</p>
+  <p class="si-muted">Columns used: {% for f, h in result.columns.items() %}{{ f|replace('_', ' ') }} = “{{ h }}”{% if not loop.last %}; {% endif %}{% endfor %}</p>
+  {% if result.unmatched %}
+  <div style="overflow-x:auto;"><table>
+    <thead><tr><th>Line</th><th>Why</th><th>Row</th></tr></thead>
+    <tbody>{% for line, why, raw in result.unmatched[:100] %}
+      <tr><td>{{ line }}</td><td>{{ why }}</td><td class="si-muted">{{ raw }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% if result.unmatched|length > 100 %}<p class="si-muted">Showing the first 100.</p>{% endif %}
+  <p class="si-muted">A student who isn't found usually needs their ID number on People (Import People CSV fills it from the SIS).</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card" aria-labelledby="siBells">
+  <h2 id="siBells" style="margin-top:0;">Bell times</h2>
+  <p class="si-muted" style="margin-top:0;">Where-now uses each school's bell times, set on the school's page.</p>
+  <ul class="si-list">
+    {% for s in sites %}<li>{{ s.name }}: {% if s.bell_schedule %}{{ s.bell_schedule.strip().splitlines()|length }} periods{% else %}<span style="color:var(--warning);">not set</span>{% endif %}
+      {% if is_super_admin() %} · <a class="tag-link" href="/admin/sites/{{ s.id }}/edit#bells">edit</a>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+
+<style>
+  .si-sub { color: var(--muted); font-size: .9rem; max-width: 80ch; margin: 0 0 1rem; }
+  .si-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .si-grid .card { margin: 0; }
+  .si-form { display: grid; gap: .5rem; }
+  .si-form button { justify-self: start; }
+  .si-form label { color: var(--muted); font-size: .85rem; }
+  .si-muted { color: var(--muted); font-size: .84rem; }
+  .si-list { margin: .3rem 0 .6rem; padding-left: 1.1rem; font-size: .88rem; }
+  .si-sample { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: .6rem .8rem;
+               font-size: .8rem; overflow-x: auto; margin: 0; }
+</style>
+{% endblock %}

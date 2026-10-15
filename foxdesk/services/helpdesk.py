@@ -53,6 +53,12 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
         return 'error', f'"{asset_tag}" was not found in the asset registry.'
     if Repair.query.filter_by(asset_tag=asset_tag, returned_at=None).first():
         return 'error', f'{asset_tag} already has an open repair.'
+    from foxdesk.services.overdue import repair_limit_date, repair_limit_problem
+    now = utcnow()
+    problem = repair_limit_problem(now, expected_return_at)
+    if problem:
+        return 'error', problem
+    expected_return_at = expected_return_at or repair_limit_date(now)
 
     asset = Asset.query.filter_by(asset_tag=asset_tag).first()
     person = asset.assigned_to if asset else None
@@ -68,7 +74,8 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
     db.session.add(Repair(
         asset_tag=asset_tag, repair_category_id=repair_category.id if repair_category else None,
         ticket_number=ticket_number, issue_description=issue_description, expected_return_at=expected_return_at,
-        person_name_snapshot=person.full_name if person else None, ticket_id=ticket.id,
+        person_name_snapshot=person.full_name if person else None, ticket_id=ticket.id, sent_at=now,
+        status='at_vendor' if ticket_number else 'received', status_changed_at=now,
     ))
     if not asset:
         asset = Asset(asset_tag=asset_tag, is_valid=True)

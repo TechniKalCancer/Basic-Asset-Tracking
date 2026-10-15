@@ -12,6 +12,7 @@
   <a href="/admin/people/{{ person.id }}/edit" class="btn btn-ghost">{{ icon('edit') }}Edit</a>
   <a href="/admin/people" class="btn btn-ghost">← People</a>
 </div>
+{% if now %}<p class="pp-now">{{ macros.where_now(now, person) }}</p>{% endif %}
 {% if not person.is_active %}<p class="pp-inactive">Marked inactive (graduated or left). Their history is kept; use <strong>Reactivate</strong> on People to bring them back.</p>{% endif %}
 <p class="pp-muted pp-facts">
   {{ person.site.name if person.site else 'No school' }}
@@ -56,6 +57,26 @@
     {% endif %}
   </div>
 </div>
+
+{% if schedule %}
+<h2 class="pp-section" id="schedule">{{ icon('schedule') }}Schedule <span class="badge badge-blue">{{ schedule|length }}</span></h2>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Period</th><th>Course</th><th>Teacher</th><th>Room</th><th>Term</th></tr></thead>
+    <tbody>
+    {% set now_ids = (now.classes|map(attribute='id')|list) if now and now.state == 'in_class' else [] %}
+    {% for c in schedule %}
+      <tr{% if c.id in now_ids %} class="pp-now-row"{% endif %}>
+        <td style="white-space:nowrap;">{{ c.period }}{% if c.id in now_ids %} <span class="badge badge-green">Now</span>{% endif %}</td>
+        <td>{{ c.course or '—' }}</td><td>{{ c.teacher or '—' }}</td><td>{{ c.room or '—' }}</td>
+        <td class="pp-muted">{{ c.term or '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="pp-muted" style="margin:.4rem 0 0;">From the SIS schedule import, {{ schedule[0].imported_at.strftime('%b %d, %Y') }}.</p>
+{% endif %}
 
 {% if recent %}
 <h2 class="pp-section" id="recent">{{ icon('history') }}Recently signed in to <span class="badge badge-blue">{{ recent|length }}</span></h2>
@@ -172,6 +193,8 @@
 <script src="/static/js/agreement_checks.js"></script>
 <style>
   .pp-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  .pp-now { margin: .3rem 0; font-size: .92rem; }
+  .pp-now-row td { background: #14532d33; }
   .pp-inactive { margin: .4rem 0 .3rem; padding: .55rem .8rem; border-left: 4px solid var(--danger); background: #7f1d1d33;
                  border-radius: 6px; font-size: .88rem; }
   .pp-facts { margin: 0 0 1.2rem; }

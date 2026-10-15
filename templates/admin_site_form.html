@@ -57,7 +57,34 @@
       </span>
     </div>
 
+    <fieldset class="sf-set">
+      <legend>Techs for this school</legend>
+      <p class="sf-help">They get this school's overdue repairs and loaners by email on school-day mornings (Repairs → Overdue).</p>
+      {% set picked = (form.getlist('tech_user_id')|map('int')|list) if form else ((site.techs|map(attribute='id')|list) if site else []) %}
+      <div class="sf-techs">
+        {% for u in users %}
+        <label><input type="checkbox" name="tech_user_id" value="{{ u.id }}" {{ 'checked' if u.id in picked }}>
+          {{ u.username }}{% if u.email %} <span class="sf-help">{{ u.email }}</span>{% else %} <span class="badge badge-yellow" title="Add an email on Users & Permissions">no email</span>{% endif %}</label>
+        {% else %}<span class="sf-help">No user accounts yet.</span>{% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset class="sf-set" id="bells">
+      <legend>Bell times</legend>
+      <p class="sf-help">One period per line: name, start, end. Used with imported schedules to show where a student is right now.
+        Times without am/pm from 1:00 to 5:59 count as afternoon.</p>
+      <textarea name="bell_schedule" rows="9" placeholder="HR, 7:45, 7:55&#10;1, 7:55, 8:48&#10;2, 8:52, 9:45&#10;Lunch, 11:30, 12:00&#10;7, 2:10, 3:05">{{ form.get('bell_schedule', '') if form else (site.bell_schedule or '' if site else '') }}</textarea>
+    </fieldset>
+
     <button type="submit" class="btn btn-primary">{{ 'Save Changes' if site else 'Add Site' }}</button>
   </form>
 </div>
+<style>
+  .sf-set { border: 1px solid var(--border); border-radius: 8px; padding: .8rem 1rem 1rem; margin: 0 0 1.5rem; }
+  .sf-set legend { padding: 0 .4rem; font-size: .9rem; }
+  .sf-help { color: var(--muted); font-size: .78rem; margin: 0 0 .5rem; }
+  .sf-techs { display: grid; gap: .35rem; }
+  .sf-techs label { display: flex; align-items: center; gap: .45rem; font-size: .88rem; flex-wrap: wrap; }
+  .sf-techs input { width: auto; }
+</style>
 {% endblock %}

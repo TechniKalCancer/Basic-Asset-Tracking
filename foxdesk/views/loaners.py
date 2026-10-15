@@ -214,6 +214,8 @@ def admin_loaners_email_selected():
         query = query.join(AssetRegistry, AssetRegistry.asset_tag == LoanerCheckout.asset_tag) \
             .filter(AssetRegistry.site_id.in_(site_ids))
     rows = query.all()
+    for_repair = [r for r in rows if r.repair_id]
+    rows = [r for r in rows if not r.repair_id]
 
     now = utcnow()
     sent = failed = skipped = 0
@@ -239,6 +241,9 @@ def admin_loaners_email_selected():
         msg += f' {failed} failed to send.'
     if skipped:
         msg += f' {skipped} skipped (person no longer exists).'
+    if for_repair:
+        msg += (f' Not emailed: {", ".join(r.asset_tag for r in for_repair[:5])}{"…" if len(for_repair) > 5 else ""} '
+                '(repair loaners: the student is waiting on the repair, so their school\'s techs hear about it instead).')
     flash(msg, 'success' if sent else 'info')
     return redirect(url_for('admin_loaners'))
 

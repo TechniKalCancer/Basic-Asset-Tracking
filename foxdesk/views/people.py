@@ -430,8 +430,10 @@ def admin_person(person_id):
     spot_checks = (SpotCheck.query.filter(db.or_(SpotCheck.found_person_id == person.id, SpotCheck.expected_person_id == person.id))
                    .order_by(SpotCheck.created_at.desc()).limit(15).all())
     from foxdesk.services.recent_use import recent_devices
+    from foxdesk.services.schedules import schedule_rows, where_now
     recent = recent_devices([person])[person.id]
     return render_template('admin_person.html', person=person, current=current, chromebooks=chromebooks, recent=recent,
+                           schedule=schedule_rows(person), now=where_now(person),
                            other_devices=other_devices, loaners=loaners, incidents=incidents, tickets=tickets,
                            spot_checks=spot_checks, agreements=agreement_rows(person), owed=_person_unpaid_fee_total(person.id),
                            assignment_count=len(assignments))

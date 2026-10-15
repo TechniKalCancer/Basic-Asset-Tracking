@@ -60,6 +60,7 @@ NAV_SECTION_PREFIXES = [
     ('/loaner_checkin', 'loaners'),
     ('/admin/loaners', 'loaners'),
     ('/admin/repairs', 'repairs'),
+    ('/admin/overdue', 'repairs'),
     ('/admin/parts', 'repairs'),
     ('/admin/tickets', 'tickets'),
     ('/admin/helpdesk_reports', 'tickets'),
@@ -287,6 +288,13 @@ def person_status(who, size='sm'):
 
 
 app.jinja_env.globals.update(person_status=person_status)
+
+
+@app.template_filter('clock')
+def _clock_filter(value):
+    """7:55 AM from a time."""
+    from foxdesk.services.schedules import fmt_time
+    return fmt_time(value) if value else ''
 
 
 @app.template_filter('ago')

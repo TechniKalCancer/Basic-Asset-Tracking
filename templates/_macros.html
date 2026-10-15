@@ -187,3 +187,19 @@ asset_tag puts parts that fit that device's model first. Needs the repairs permi
 </div>
 {%- else -%}<span style="color:var(--muted);">—</span>{%- endif -%}
 {%- endmacro %}
+
+
+{# Where a student is now, from their imported schedule and their school's bell times (services/schedules.where_now). #}
+{% macro where_now(now, person) -%}
+{%- if now.state == 'in_class' -%}
+<span class="wn"><strong>Now</strong> ({{ now.bell.start|clock }}–{{ now.bell.end|clock }}): {{ now.bell.label }}
+  {%- for c in now.classes %} · {{ c.course or 'Class' }}{% if c.room %}, Room {{ c.room }}{% endif %}{% if c.teacher %}, {{ c.teacher }}{% endif %}{% else %} · no class listed for this period{% endfor %}</span>
+{%- elif now.state == 'passing' -%}
+<span class="wn"><strong>Between classes</strong> · next {{ now.next.label }} at {{ now.next.start|clock }}
+  {%- for c in now.classes %} · {{ c.course or 'Class' }}{% if c.room %}, Room {{ c.room }}{% endif %}{% if c.teacher %}, {{ c.teacher }}{% endif %}{% endfor %}</span>
+{%- elif now.state == 'out' -%}
+<span class="wn" style="color:var(--muted);">Not in class now ({{ now.reason }})</span>
+{%- elif now.state == 'no_bell' -%}
+<span class="wn" style="color:var(--muted);">Add bell times for {{ person.site.name if person.site else 'their school' }} (Admin → Sites) to see where they are now.</span>
+{%- endif -%}
+{%- endmacro %}

@@ -137,6 +137,8 @@ def _send_overdue_loaner_reminders(site_ids=None):
     Emails anyone with an overdue loaner. Safe to call repeatedly (e.g. from a
     background loop) — reminder_sent_at gates re-sending to once per
     LOANER_REMINDER_RESEND_HOURS, so it won't spam the same student hourly.
+    A repair loaner's student is never emailed: they're waiting on the repair,
+    so it goes to the school's techs instead (services/overdue.py).
     site_ids=None (the background loop's case) means every site.
     Returns (sent, failed, skipped) counts.
     """
@@ -146,6 +148,8 @@ def _send_overdue_loaner_reminders(site_ids=None):
     sent = failed = skipped = 0
     now = utcnow()
     for row in _overdue_loaners(site_ids):
+        if row.repair_id:
+            continue
         if row.reminder_sent_at and (now - row.reminder_sent_at).total_seconds() < LOANER_REMINDER_RESEND_HOURS * 3600:
             continue
         person = db.session.get(Person, row.person_id) if row.person_id else None

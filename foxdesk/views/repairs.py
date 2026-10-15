@@ -9,8 +9,10 @@ from foxdesk.models import (
     LoanerCheckout,
     Person,
     REPAIR_OUTCOMES,
+    REPAIR_STATUSES,
     Repair,
     RepairCategory,
+    RepairNote,
     TicketComment,
 )
 from foxdesk.services.util import _parse_date, resolve_scan
@@ -19,6 +21,8 @@ from foxdesk.services.scoping import _scope_people, _scope_repairs
 from foxdesk.services.assignments import _checkout_loaner
 from foxdesk.services.helpdesk import _send_device_to_repair
 from foxdesk.services.attachments import _attachments_for
+from foxdesk.services.overdue import repair_due_date, repair_limit_date, repair_limit_problem, repair_max_days
+from foxdesk.services.schedules import where_now
 
 
 @app.route('/admin/assets/<string:asset_tag>/repairs/send', methods=['POST'])
@@ -92,10 +96,59 @@ def admin_repair_detail(repair_id):
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
     active_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
     default_loaner_person = repair.ticket.requester if repair.ticket else None
+    student = default_loaner_person or (db.session.get(Person, active_loaner.person_id)
+                                        if active_loaner and active_loaner.person_id else None)
     return render_template('admin_repair_detail.html', repair=repair, repair_categories=repair_categories,
-                           repair_outcomes=REPAIR_OUTCOMES, active_loaner=active_loaner,
-                           default_loaner_person=default_loaner_person,
+                           repair_outcomes=REPAIR_OUTCOMES, repair_statuses=REPAIR_STATUSES, active_loaner=active_loaner,
+                           default_loaner_person=default_loaner_person, due=repair_due_date(repair),
+                           limit=repair_limit_date(repair.sent_at), max_days=repair_max_days(), today=utcnow().date(),
+                           student=student, student_now=where_now(student) if student else None,
                            attachments=_attachments_for('repair', [repair.id])[repair.id])
+
+
+@app.route('/admin/repairs/<int:repair_id>/update', methods=['POST'])
+@require_permission('repairs')
+def admin_repair_update(repair_id):
+    """Moves an open repair to a new status and/or adds a note. Both land on
+    the repair's timeline, and on its ticket so the help-desk history matches."""
+    site_ids = _current_site_ids()
+    repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
+    fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
+    status = request.form.get('status', '').strip() or repair.status
+    body = request.form.get('note', '').strip()[:5000] or None
+    if status not in REPAIR_STATUSES:
+        flash('Choose a valid status.', 'error')
+        return redirect(request.referrer or fallback_url)
+    if repair.returned_at and status != repair.status:
+        flash('This repair is closed; you can still add a note.', 'error')
+        return redirect(request.referrer or fallback_url)
+    changed = status != repair.status
+    if not changed and not body:
+        flash('Pick a new status or write a note.', 'error')
+        return redirect(request.referrer or fallback_url)
+    _, actor_label, _ = _current_actor()
+    try:
+        now = utcnow()
+        db.session.add(RepairNote(repair_id=repair.id, body=body, author_label=actor_label, created_at=now,
+                                  status_from=repair.status if changed else None, status_to=status if changed else None))
+        summary = []
+        if changed:
+            summary.append(f'Repair status: {REPAIR_STATUSES[repair.status]} → {REPAIR_STATUSES[status]}.')
+            repair.status, repair.status_changed_at = status, now
+        if body:
+            summary.append(body)
+        if repair.ticket_id:
+            db.session.add(TicketComment(ticket_id=repair.ticket_id, body=' '.join(summary), author_label=actor_label))
+            repair.ticket.updated_at = now
+        registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
+        _log_activity('repair_edit', f'{repair.asset_tag}: ' + ' '.join(summary)[:200],
+                      site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
+        db.session.commit()
+        flash(f'Status is now {REPAIR_STATUSES[status]}.' if changed else 'Note added.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not update repair: {e}', 'error')
+    return redirect(request.referrer or fallback_url)
 
 
 @app.route('/admin/repairs/<int:repair_id>/return', methods=['POST'])
@@ -122,6 +175,9 @@ def admin_repair_return(repair_id):
         repair.returned_at = utcnow()
         repair.outcome = outcome
         repair.notes = notes
+        _, closer, _ = _current_actor()
+        db.session.add(RepairNote(repair_id=repair.id, author_label=closer, created_at=repair.returned_at,
+                                  body=f'Returned: {REPAIR_OUTCOMES[outcome]}.' + (f' {notes}' if notes else '')))
         if asset:
             if outcome == 'fixed':
                 asset.status = 'assigned' if asset.assigned_to_id else 'available'
@@ -166,10 +222,15 @@ def admin_repair_edit(repair_id):
         flash('Describe the issue — this field is required.', 'error')
         return redirect(request.referrer or fallback_url)
 
+    expected_return_at = _parse_date(request.form.get('expected_return_at'))
+    problem = repair_limit_problem(repair.sent_at, expected_return_at)
+    if problem:
+        flash(problem, 'error')
+        return redirect(request.referrer or fallback_url)
     repair.repair_category_id = request.form.get('repair_category_id', type=int) or None
     repair.ticket_number = request.form.get('ticket_number', '').strip() or None
     repair.issue_description = issue_description
-    repair.expected_return_at = _parse_date(request.form.get('expected_return_at'))
+    repair.expected_return_at = expected_return_at or repair_limit_date(repair.sent_at)
     registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
     _log_activity('repair_edit', f'Updated repair details for {repair.asset_tag}.',
                    site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
@@ -259,7 +320,14 @@ def admin_repairs():
         c.repair_id: c for c in LoanerCheckout.query.filter(
             LoanerCheckout.repair_id.in_(open_repair_ids), LoanerCheckout.checked_in_at.is_(None))
     } if open_repair_ids else {}
+    status_filter = request.args.get('status', '').strip()
+    if status_filter == 'overdue':
+        open_repairs = [r for r in open_repairs if repair_due_date(r) < utcnow().date()]
+    elif status_filter in REPAIR_STATUSES:
+        open_repairs = [r for r in open_repairs if r.status == status_filter]
     return render_template('admin_repairs.html', open_repairs=open_repairs, closed_repairs=closed_repairs,
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
+                           repair_statuses=REPAIR_STATUSES, status_filter=status_filter,
+                           due_dates={r.id: repair_due_date(r) for r in open_repairs}, max_days=repair_max_days(),
                            active_repair_loaners=active_repair_loaners,
                            today=utcnow().date(), search=search, sort=sort, sort_dir=sort_dir)

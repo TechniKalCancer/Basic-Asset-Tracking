@@ -237,6 +237,19 @@ is archived (`is_active = False`) — **not deleted**. Archived people:
 - Can be viewed via `/admin/people?show=inactive` and undone anytime with the **Reactivate**
   button, e.g. if a student was graduated by mistake.
 
+### Student Schedules (`/admin/people/schedules`)
+
+Import the SIS schedule export as CSV, one row per class per student. Columns are recognized by
+the SIS's own names: student by **Student Number** (the ID on People), Email, or First/Last
+Name; **Period** (or PowerSchool's Expression, e.g. `1(A)`, or Block/Hour); and optional Course,
+Teacher, Room, Term. Every student in the file has their schedule replaced; students not in it
+keep theirs, so one grade at a time works. Rows that don't match a student are listed with why.
+
+Each school's **bell times** go on its page (Admin → Sites), one period per line:
+`1, 7:55, 8:48`. With those, the person page shows the student's schedule and where they are right
+now (or that they're between classes and where they're headed); so does a repair's page for the
+student who had the device. Periods match by number, so `1(A)`, `1st` and `Period 1` are the same.
+
 ## Person Page (People → a name)
 
 Everything about one student or staff member on one page: what they have now (assigned devices and
@@ -614,8 +627,8 @@ assignment whose due date has passed and lets you email each assigned person a r
 - `POST /admin/reminders/send` emails everyone currently overdue in one batch, skipping
   gracefully (with a summary count) if a person was deleted or a send fails, and records
   `reminder_sent_at` per assignment so you can see who's already been nudged.
-- Sending is always a manual, explicit click on that page — nothing emails anyone automatically
-  in the background.
+- Sending assignment reminders is a manual click on that page. Overdue **loaners** are emailed
+  automatically once a day (except repair loaners, see **Overdue at Each School**).
 - I couldn't test an actual send in this environment (no real Gmail credentials configured
   here) — the SMTP logic is standard `smtplib` STARTTLS + login, but do a real test send once
   you've set your credentials.
@@ -773,7 +786,28 @@ A real tracking record for devices sent out for repair, separate from just label
   (both retire the physical unit; adding its replacement is an ordinary separate "Add Device").
 - `/admin/repairs`: fleet-wide list of open and recently-closed repairs, gated by a dedicated
   **Repairs** permission (`can_repairs` on a `User`) independent of Devices access — useful for
-  a repair-desk-only account that shouldn't otherwise touch the registry.
+  a repair-desk-only account that shouldn't otherwise touch the registry. Filter by status, or
+  **Overdue** for repairs past their due date.
+- **Two-week limit:** a repair is due back within 14 days of being sent (Repairs → Overdue to
+  change it). Leaving Expected Return blank sets it to the limit; a later date is refused.
+- **Status and notes:** an open repair is Received, Diagnosing, Waiting on parts, Sent to vendor,
+  Being repaired, or Ready to return (one with a vendor RMA number starts as Sent to vendor). The
+  repair page's **Status & Notes** card changes the status and/or adds a note; both show newest
+  first as a timeline and are copied to the repair's ticket. Marking it returned adds the outcome
+  to the timeline, and notes can still be added after.
+
+## Overdue at Each School (Repairs → Overdue)
+
+`/admin/overdue` lists, per school, repairs past due, loaners past their due date, and assigned
+devices past theirs. Each school's **techs** (picked on Admin → Sites → the school) get that list
+by email once a school day at the set hour (default 7:00), only when something is overdue. School
+days and closed dates come from the SLA calendar (Admin → SLA), whether or not SLAs are on.
+Devices with no school go to super admins. The email goes to the address on the tech's user
+account (Users & Permissions). **Email me my list now** and **Preview my email** show what a tech gets.
+
+Students are never emailed about a **repair loaner** (one checked out from a repair's page): the
+automatic overdue sweep, the Loaners page's Email Selected, and automations emailing "whoever holds
+the device" all skip it, since the student is waiting on the repair. Their school's techs see it.
 
 ## Fee Tracker
 

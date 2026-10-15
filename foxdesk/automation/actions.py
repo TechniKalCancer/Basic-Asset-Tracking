@@ -49,6 +49,9 @@ RECIPIENTS = _plain(['requester', 'holder', 'person', 'guardian', 'address'],
 
 def _recipient(ctx, who, address):
     t, person, holder = ctx.get('ticket'), ctx.get('person'), ctx.get('holder')
+    loaner = ctx.get('loaner')
+    if loaner is not None and loaner.repair_id and who in ('holder', 'person'):
+        return None  # a repair loaner's student isn't emailed; the wait is on the repair
     if who == 'requester':
         return t.requester_email if t else None
     if who == 'holder':

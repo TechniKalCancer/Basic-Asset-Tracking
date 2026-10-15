@@ -107,6 +107,9 @@ class Calendar:
             return None
         return datetime.combine(d, self.start, tzinfo=self.tz), datetime.combine(d, self.end, tzinfo=self.tz)
 
+    def is_school_day(self, d):
+        return self._window(d) is not None
+
     def add_hours(self, start_utc, hours):
         """The naive-UTC moment `hours` school hours after start_utc, or
         None for a blank target (or a calendar with no working time)."""

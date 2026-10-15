@@ -603,6 +603,25 @@ def admin_sites():
     return render_template('admin_sites.html', sites=sites, search=search, sort_dir=sort_dir)
 
 
+def _tech_choices():
+    return User.query.filter_by(is_active=True).order_by(User.username).all()
+
+
+def _apply_site_extras(site, form):
+    """Techs (who get the school's overdue email) and bell times from the
+    site form. Returns an error message, or None once applied."""
+    from foxdesk.services.schedules import parse_bell_schedule
+    bells = (form.get('bell_schedule') or '').strip()
+    periods, problems = parse_bell_schedule(bells)
+    if problems:
+        return ('These bell-time lines aren\'t "period, start, end" (like "1, 7:55, 8:48"): '
+                + '; '.join(problems[:3]) + ('…' if len(problems) > 3 else ''))
+    site.bell_schedule = bells or None
+    ids = {int(x) for x in form.getlist('tech_user_id') if str(x).isdigit()}
+    site.techs = User.query.filter(User.id.in_(ids)).all() if ids else []
+    return None
+
+
 @app.route('/admin/sites/new', methods=['GET', 'POST'])
 @require_super_admin
 def admin_site_new():
@@ -611,10 +630,10 @@ def admin_site_new():
         name = request.form.get('name', '').strip()
         if not name:
             flash('Site name is required.', 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units, users=_tech_choices())
         if Site.query.filter(db.func.lower(Site.name) == name.lower()).first():
             flash(f'A site named "{name}" already exists.', 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units, users=_tech_choices())
 
         site = Site(name=name, google_loaner_autodisable_enabled=bool(request.form.get('google_loaner_autodisable_enabled')),
                     loaner_org_unit_path=request.form.get('loaner_org_unit_path', '').strip() or None)
@@ -626,16 +645,21 @@ def admin_site_new():
         except ValueError as e:
             db.session.rollback()
             flash(str(e), 'error')
-            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units, users=_tech_choices())
         if new_logo:
             site.logo_filename = new_logo
+        problem = _apply_site_extras(site, request.form)
+        if problem:
+            db.session.rollback()
+            flash(problem, 'error')
+            return render_template('admin_site_form.html', site=None, form=request.form, org_units=org_units, users=_tech_choices())
 
         _log_activity('site_add', f'Added site "{name}".')
         db.session.commit()
         flash(f'Added site "{name}".', 'success')
         return redirect(url_for('admin_sites'))
 
-    return render_template('admin_site_form.html', site=None, form=None, org_units=org_units)
+    return render_template('admin_site_form.html', site=None, form=None, org_units=org_units, users=_tech_choices())
 
 
 @app.route('/admin/sites/<int:site_id>/edit', methods=['GET', 'POST'])
@@ -647,18 +671,23 @@ def admin_site_edit(site_id):
         name = request.form.get('name', '').strip()
         if not name:
             flash('Site name is required.', 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units, users=_tech_choices())
         dupe = Site.query.filter(db.func.lower(Site.name) == name.lower(), Site.id != site_id).first()
         if dupe:
             flash(f'A site named "{name}" already exists.', 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units, users=_tech_choices())
 
         try:
             new_logo = _save_branding_logo(request.files.get('logo'), f'site{site.id}')
         except ValueError as e:
             flash(str(e), 'error')
-            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units)
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units, users=_tech_choices())
 
+        problem = _apply_site_extras(site, request.form)
+        if problem:
+            db.session.rollback()
+            flash(problem, 'error')
+            return render_template('admin_site_form.html', site=site, form=request.form, org_units=org_units, users=_tech_choices())
         site.name = name
         site.google_loaner_autodisable_enabled = bool(request.form.get('google_loaner_autodisable_enabled'))
         site.loaner_org_unit_path = request.form.get('loaner_org_unit_path', '').strip() or None
@@ -674,7 +703,7 @@ def admin_site_edit(site_id):
         flash(f'Updated site "{name}".', 'success')
         return redirect(url_for('admin_sites'))
 
-    return render_template('admin_site_form.html', site=site, form=None, org_units=org_units)
+    return render_template('admin_site_form.html', site=site, form=None, org_units=org_units, users=_tech_choices())
 
 
 @app.route('/admin/sites/<int:site_id>/delete', methods=['POST'])

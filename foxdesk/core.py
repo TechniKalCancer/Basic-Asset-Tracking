@@ -1,4 +1,5 @@
 """Flask app, configuration (from environment variables), extensions, security headers and error pages."""
+import ipaddress
 import logging
 import os
 import sys
@@ -6,11 +7,12 @@ import time
 from collections import defaultdict
 from datetime import timedelta
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, session, url_for
+from flask import Flask, flash, redirect, render_template, request, session, url_for
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash
 
 
@@ -48,7 +50,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FORCE_HTTPS', 'false').lower() == 'true'
+FORCE_HTTPS = os.environ.get('FORCE_HTTPS', 'false').lower() == 'true'
+
+
+app.config['SESSION_COOKIE_SECURE'] = FORCE_HTTPS
 
 
 SESSION_TIMEOUT_MINUTES = 180  # how long an idle admin session stays logged in
@@ -80,6 +85,9 @@ def _set_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'same-origin'
+    if FORCE_HTTPS and request.is_secure:
+        # This host only — no includeSubDomains, the district's other sites aren't ours to pin.
+        response.headers['Strict-Transport-Security'] = 'max-age=15552000'
     return response
 
 
@@ -204,6 +212,62 @@ ALLOW_SHARED_PASSWORD      = os.environ.get('ALLOW_SHARED_PASSWORD', '').lower()
 # scheduled automations ("every Monday at 7") and report periods follow.
 APP_URL      = os.environ.get('APP_URL', '').strip().rstrip('/')
 APP_TIMEZONE = os.environ.get('APP_TIMEZONE', '').strip() or 'America/New_York'
+
+
+# ─── Behind a reverse proxy (Traefik doing HTTPS) ──────────────────────────────
+# TRUSTED_PROXIES lists the networks the proxy connects from (the Docker network
+# Traefik shares with this container). Only requests from there get their
+# X-Forwarded-For/-Proto believed — the port is also published directly, and a
+# client hitting it could otherwise claim any IP (dodging the per-IP login limit)
+# or claim https. Empty = no proxy, nothing forwarded is trusted.
+def _parse_networks(value):
+    networks = []
+    for part in (value or '').replace(' ', '').split(','):
+        if part:
+            try:
+                networks.append(ipaddress.ip_network(part, strict=False))
+            except ValueError:
+                logger.warning('Ignoring TRUSTED_PROXIES entry %r: not an IP network.', part)
+    return networks
+
+
+TRUSTED_PROXIES = _parse_networks(os.environ.get('TRUSTED_PROXIES', ''))
+
+
+class _TrustedProxyFix:
+    def __init__(self, wsgi_app, networks):
+        self.plain = wsgi_app
+        self.fixed = ProxyFix(wsgi_app, x_for=1, x_proto=1)
+        self.networks = networks
+
+    def __call__(self, environ, start_response):
+        try:
+            addr = ipaddress.ip_address(environ.get('REMOTE_ADDR', ''))
+        except ValueError:
+            addr = None
+        trusted = addr is not None and any(addr in n for n in self.networks)
+        return (self.fixed if trusted else self.plain)(environ, start_response)
+
+
+if TRUSTED_PROXIES:
+    app.wsgi_app = _TrustedProxyFix(app.wsgi_app, TRUSTED_PROXIES)
+
+
+# With FORCE_HTTPS and an https APP_URL, a page opened the old way (the server's
+# IP and port, or a plain-http name) moves to APP_URL — session cookies are
+# https-only then, so staying on http would just bounce back to the login page.
+# The healthcheck and /api/ (scripts and scanners posting to the old address)
+# are left alone, and only GET/HEAD move, since a redirected POST loses its body.
+CANONICAL_EXEMPT_PREFIXES = ('/healthz', '/api/')
+
+
+@app.before_request
+def _move_to_app_url():
+    if not (FORCE_HTTPS and APP_URL.startswith('https://')) or request.is_secure:
+        return None
+    if request.method not in ('GET', 'HEAD') or request.path.startswith(CANONICAL_EXEMPT_PREFIXES):
+        return None
+    return redirect(APP_URL + request.full_path.rstrip('?'), code=301)
 
 
 # ─── Email config (Google SMTP by default — smtp.gmail.com with an App Password) ──

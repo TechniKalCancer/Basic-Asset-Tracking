@@ -648,8 +648,26 @@ the **School email** on their FoxDesk user (Users & Permissions); nobody is crea
 only the allowed email domains are accepted. Setup: an OAuth client (type Web application, consent
 screen Internal) in Google Cloud Console, with the redirect URI the Sign-in page shows. Google only
 accepts `https://` on a public domain name, so set `APP_URL` to that address (it can resolve to the
-server only inside your network). Once staff sign in with their own accounts, turn off the **shared
+server only inside your network; see **HTTPS** below). Once staff sign in with their own accounts, turn off the **shared
 admin password** on the same page; `ALLOW_SHARED_PASSWORD=1` in `.env` turns it back on if needed.
+
+## HTTPS
+
+The phone scanner (browsers only allow the camera on https pages), Google sign-in and the portal need
+FoxDesk on `https://`. The district setup: Traefik on the Docker host terminates TLS with a Let's
+Encrypt certificate it renews itself through a DNS challenge (Cloudflare API token, DNS edit on one
+zone), and the public DNS name points at the server's private IP, so it resolves everywhere but only
+works on the district network. In FoxDesk's `.env`:
+
+```bash
+APP_URL=https://foxdesk.yourdistrict.org
+TRUSTED_PROXIES=172.23.0.0/16   # the Docker network shared with Traefik
+FORCE_HTTPS=true                # once the https address works: old http addresses move there
+```
+
+With `FORCE_HTTPS`, pages opened at the old address (`http://<server>:8081/...`) redirect to `APP_URL`,
+including old printed QR labels; `/api/` and `/healthz` stay on plain http so scripts keep working.
+Forwarded headers are only believed from `TRUSTED_PROXIES`, since the port is also published directly.
 
 ## Vendors
 

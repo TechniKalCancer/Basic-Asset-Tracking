@@ -64,7 +64,7 @@
       <div class="sf-techs">
         {% for u in users %}
         <label><input type="checkbox" name="tech_user_id" value="{{ u.id }}" {{ 'checked' if u.id in picked }}>
-          {{ u.username }}{% if u.email %} <span class="sf-help">{{ u.email }}</span>{% else %} <span class="badge badge-yellow" title="Add an email on Users & Permissions">no email</span>{% endif %}</label>
+          {{ u.username }}{% if u.email %} <span class="sf-help">{{ u.email }}</span>{% else %} {% if can('manage_users') %}<a class="badge badge-yellow" href="/admin/users/{{ u.id }}/edit" title="Add the school email on their login (Users & Permissions)">no email, add one</a>{% else %}<span class="badge badge-yellow">no email</span>{% endif %}{% endif %}</label>
         {% else %}<span class="sf-help">No user accounts yet.</span>{% endfor %}
       </div>
     </fieldset>

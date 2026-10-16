@@ -19,9 +19,25 @@
     {% endif %}
 
     <div style="margin-bottom:1rem;">
-      <label for="userEmail" style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">School email (optional)</label>
+      <label for="userEmail" style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">School email</label>
       <input id="userEmail" name="email" type="email" value="{{ user.email or '' if user else '' }}" placeholder="jsmith@yourdistrict.org" />
-      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">Lets them use Sign in with Google with this account.</span>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">Where FoxDesk emails them (like a school's daily overdue list), and the Google account they can sign in with. This login is separate from their People record.</span>
+      {% if people_emails %}
+      <div class="uf-suggest">From People:
+        {% for e in people_emails %}<button type="button" class="btn btn-ghost uf-use" data-email="{{ e }}">Use {{ e }}</button>{% endfor %}
+      </div>
+      <script>
+        document.querySelectorAll('.uf-use').forEach(b => b.addEventListener('click', () => {
+          const input = document.getElementById('userEmail');
+          input.value = b.dataset.email;
+          input.focus();
+        }));
+      </script>
+      <style>
+        .uf-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .45rem; font-size: .8rem; color: var(--muted); }
+        .uf-use { padding: .2rem .55rem; font-size: .78rem; }
+      </style>
+      {% endif %}
     </div>
 
     <div style="margin-bottom:1.5rem;">

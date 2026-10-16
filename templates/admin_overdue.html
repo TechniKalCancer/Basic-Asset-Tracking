@@ -75,11 +75,11 @@
   <ul class="od-list">
     {% for site in sites %}
     <li><strong>{{ site.name }}:</strong>
-      {% for u in site.techs %}{{ u.username }}{{ ' (' ~ u.email ~ ')' if u.email else '' }}{% if not u.email %} <span class="badge badge-yellow">needs an email</span>{% endif %}{% if not loop.last %}, {% endif %}{% else %}<span style="color:var(--warning);">no techs</span>{% endfor %}
+      {% for u in site.techs %}{{ u.username }}{{ ' (' ~ u.email ~ ')' if u.email else '' }}{% if not u.email %} {% if can('manage_users') %}<a class="badge badge-yellow" href="/admin/users/{{ u.id }}/edit">needs an email, add one</a>{% else %}<span class="badge badge-yellow">needs an email</span>{% endif %}{% endif %}{% if not loop.last %}, {% endif %}{% else %}<span style="color:var(--warning);">no techs</span>{% endfor %}
       {% if can_admin %} · <a class="tag-link" href="/admin/sites/{{ site.id }}/edit">change</a>{% endif %}</li>
     {% endfor %}
   </ul>
-  <p class="od-muted">Techs are picked on each school's page (Admin → Sites); the email goes to the address on their user account.</p>
+  <p class="od-muted">Techs are picked on each school's page (Admin → Sites). The email goes to the School email on their login (Users &amp; Permissions), not their People record.</p>
   <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
     <form method="POST" action="/admin/overdue/send_mine">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

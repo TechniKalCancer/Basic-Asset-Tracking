@@ -194,3 +194,18 @@ def test_settings_validation(client):
     client.post('/admin/overdue/settings', data={'repair_max_days': '10', 'alert_hour': '6'})
     row = od.overdue_settings()
     assert (row.repair_max_days, row.alert_hour, row.alerts_enabled) == (10, 6, False)
+
+
+def test_user_form_offers_the_people_email(client, make):
+    tech = make_user('mstech')
+    make.person('Ms', 'Tech', role='staff', email='mstech@district.org')
+    make.person('Ms', 'Student', email='mstech@students.org')
+    site = make.site('Middle')
+    site.techs = [tech]
+    A.db.session.commit()
+    form = client.get(f'/admin/users/{tech.id}/edit').get_data(as_text=True)
+    assert 'Use mstech@district.org' in form and 'mstech@students.org' not in form, 'staff People records only'
+    assert f'href="/admin/users/{tech.id}/edit"' in client.get(f'/admin/sites/{site.id}/edit').get_data(as_text=True)
+    tech.email = 'mstech@district.org'
+    A.db.session.commit()
+    assert 'Use mstech@district.org' not in client.get(f'/admin/users/{tech.id}/edit').get_data(as_text=True)

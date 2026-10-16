@@ -215,6 +215,17 @@ def admin_users():
     return render_template('admin_users.html', users=users, search=search, sort_dir=sort_dir)
 
 
+def _people_emails_for(user):
+    """Staff People emails that look like this login (same name before the @),
+    offered on the user form: People records and logins are separate, and
+    it's the login's email that FoxDesk sends to."""
+    if not user:
+        return []
+    rows = Person.query.filter(db.func.lower(Person.email).like(user.username.lower() + '@%'), Person.role == 'staff') \
+        .order_by(Person.is_active.desc(), Person.email).all()
+    return [p.email.lower() for p in rows if p.email and p.email.lower() != (user.email or '').lower()][:4]
+
+
 def _user_email_from_form(user_id=None):
     """The Google sign-in email from the form, lowercased, or None. Raises
     ValueError if it's malformed or another user already has it."""
@@ -285,7 +296,7 @@ def admin_user_edit(user_id):
             user.email = _user_email_from_form(user.id)
         except ValueError as e:
             flash(str(e), 'error')
-            return render_template('admin_user_form.html', user=user, sites=sites)
+            return render_template('admin_user_form.html', user=user, sites=sites, people_emails=_people_emails_for(user))
         for field, value in _user_form_permissions(bool(session.get('is_admin'))).items():
             setattr(user, field, value)
         user.is_active = bool(request.form.get('is_active'))
@@ -308,7 +319,7 @@ def admin_user_edit(user_id):
         flash(f'Updated user "{user.username}".', 'success')
         return redirect(url_for('admin_users'))
 
-    return render_template('admin_user_form.html', user=user, sites=sites)
+    return render_template('admin_user_form.html', user=user, sites=sites, people_emails=_people_emails_for(user))
 
 
 @app.route('/admin/users/<int:user_id>/delete', methods=['POST'])

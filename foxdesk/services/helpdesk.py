@@ -5,10 +5,13 @@ from foxdesk.models import (
     AUTOMATION_ACTIONS,
     Asset,
     AssetRegistry,
+    REPAIR_OUTCOMES,
     Repair,
     RepairCategory,
+    RepairNote,
     TICKET_PRIORITIES,
     Ticket,
+    TicketComment,
     TicketAutomation,
     TicketCategory,
     TicketCharge,
@@ -35,7 +38,17 @@ def _get_or_create_repair_ticket_category():
     return category
 
 
-def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_description, expected_return_at, site_ids=None):
+def _open_ticket_for_device(asset_tag):
+    """The device's newest open ticket that has no repair yet — a repair
+    started from it belongs on it, rather than on a second ticket."""
+    return (Ticket.query.outerjoin(Repair, Repair.ticket_id == Ticket.id)
+            .filter(Ticket.asset_tag == asset_tag, Ticket.status.in_(('open', 'in_progress')),
+                    Ticket.merged_into_id.is_(None), Repair.id.is_(None))
+            .order_by(Ticket.created_at.desc()).first())
+
+
+def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_description, expected_return_at, site_ids=None,
+                           ticket=None):
     """Shared repair-creation logic used by both the device-page form and the
     quick Send to Repair flow on /admin/repairs — creates the tracking
     record, opens a matching help-desk Ticket (so repairs show up in the
@@ -44,7 +57,10 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
     (status, message) same as the _checkout_loaner/_checkin_loaner pattern.
     issue_description is required (checked here so both callers get the same
     validation for free); repair_category_id is optional, same reasoning as
-    Incident's repair_category_id."""
+    Incident's repair_category_id.
+
+    The repair goes on `ticket` when given (sent from a ticket), else on the
+    device's open ticket if it has one, and only otherwise on a new ticket."""
     issue_description = (issue_description or '').strip()
     if not issue_description:
         return 'error', 'Describe the issue before sending a device to repair.'
@@ -64,12 +80,22 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
     person = asset.assigned_to if asset else None
 
     repair_category = db.session.get(RepairCategory, repair_category_id) if repair_category_id else None
-    ticket_category = _get_or_create_repair_ticket_category()
-    subject = f'Repair: {asset_tag}' + (f' ({repair_category.name})' if repair_category else '')
-    ticket = _create_ticket(
-        ticket_category.id, subject, issue_description,
-        person=person, asset_tag=asset_tag, site_id=registry_row.site_id,
-    )
+    if ticket is not None and ticket.repair is not None:
+        return 'error', f'Ticket #{ticket.id} already has a repair.'
+    ticket = ticket or _open_ticket_for_device(asset_tag)
+    reused = ticket is not None
+    if not reused:
+        ticket_category = _get_or_create_repair_ticket_category()
+        subject = f'Repair: {asset_tag}' + (f' ({repair_category.name})' if repair_category else '')
+        ticket = _create_ticket(
+            ticket_category.id, subject, issue_description,
+            person=person, asset_tag=asset_tag, site_id=registry_row.site_id,
+        )
+    else:
+        db.session.add(TicketComment(ticket_id=ticket.id, author_label='FoxDesk',
+                                     body=f'Sent {asset_tag} to repair: {issue_description}'))
+        ticket.asset_tag = ticket.asset_tag or asset_tag
+        ticket.updated_at = now
 
     db.session.add(Repair(
         asset_tag=asset_tag, repair_category_id=repair_category.id if repair_category else None,
@@ -82,8 +108,75 @@ def _send_device_to_repair(asset_tag, repair_category_id, ticket_number, issue_d
         db.session.add(asset)
     asset.status = 'repair'
     _log_activity('repair_send', f'Sent {asset_tag} to repair{" (" + repair_category.name + ")" if repair_category else ""}.',
-                   site_id=registry_row.site_id)
+                   site_id=registry_row.site_id, ticket_id=ticket.id)
+    if reused:
+        return 'ok', f'{asset_tag} sent to repair — on its ticket #{ticket.id}.'
     return 'ok', f'{asset_tag} sent to repair — opened ticket #{ticket.id}.'
+
+
+def close_repair(repair, outcome, notes=None, actor_label=None, close_ticket=True):
+    """Closes an open repair the one way both the repair and ticket pages
+    use: records the outcome, puts the device back in service (Fixed) or
+    retires it (Could Not Repair / Replaced), notes it on the timeline and
+    the ticket, and with close_ticket resolves the ticket too. Does not
+    commit. Returns (the ticket's status before, or None if it wasn't
+    resolved here; the repair's loaner still out, or None)."""
+    from foxdesk.models import LoanerCheckout
+    from foxdesk.services.sla import mark_responded
+    now = utcnow()
+    repair.returned_at, repair.outcome, repair.notes = now, outcome, notes
+    label = REPAIR_OUTCOMES[outcome]
+    asset = Asset.query.filter_by(asset_tag=repair.asset_tag).first()
+    if asset:
+        if outcome == 'fixed':
+            asset.status = 'assigned' if asset.assigned_to_id else 'available'
+        else:
+            asset.status = 'retired'
+    db.session.add(RepairNote(repair_id=repair.id, author_label=actor_label, created_at=now,
+                              body=f'Returned: {label}.' + (f' {notes}' if notes else '')))
+    resolved_from = None
+    ticket = repair.ticket
+    if ticket is not None:
+        db.session.add(TicketComment(ticket_id=ticket.id, author_label=actor_label or 'FoxDesk',
+                                     body=f'Returned from repair: {label}.' + (f' {notes}' if notes else '')))
+        ticket.updated_at = now
+        if close_ticket and ticket.status in ('open', 'in_progress'):
+            resolved_from = ticket.status
+            ticket.status, ticket.resolved_at = 'resolved', ticket.resolved_at or now
+            mark_responded(ticket, now)
+            _log_activity('ticket_status', f'Ticket #{ticket.id} resolved: its repair is back ({label}).',
+                          site_id=ticket.site_id, ticket_id=ticket.id)
+    registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
+    _log_activity('repair_return', f'{repair.asset_tag} returned from repair ({label}).',
+                  site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
+    loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
+    return resolved_from, loaner
+
+
+def link_repair_to_ticket(repair, ticket, actor_label=None):
+    """Puts a repair on a ticket (each has at most one of the other).
+    Raises ValueError when it can't. Does not commit. Returns the ticket
+    the repair was on before, if any."""
+    if ticket.merged_into_id:
+        raise ValueError(f'Ticket #{ticket.id} was merged into #{ticket.merged_into_id}; use that one.')
+    if ticket.repair is not None and ticket.repair.id != repair.id:
+        raise ValueError(f'Ticket #{ticket.id} already has a repair ({ticket.repair.asset_tag}).')
+    previous = repair.ticket if repair.ticket_id and repair.ticket_id != ticket.id else None
+    if repair.ticket_id == ticket.id:
+        return None
+    repair.ticket_id = ticket.id
+    ticket.asset_tag = ticket.asset_tag or repair.asset_tag
+    ticket.updated_at = utcnow()
+    db.session.add(TicketComment(ticket_id=ticket.id, author_label=actor_label or 'FoxDesk',
+                                 body=f'Linked the repair of {repair.asset_tag} to this ticket.'
+                                      + (f' It was on ticket #{previous.id}.' if previous else '')))
+    if previous is not None:
+        db.session.add(TicketComment(ticket_id=previous.id, author_label=actor_label or 'FoxDesk',
+                                     body=f'The repair of {repair.asset_tag} moved to ticket #{ticket.id}.'))
+        previous.updated_at = utcnow()
+    _log_activity('repair_edit', f'Linked the repair of {repair.asset_tag} to ticket #{ticket.id}.',
+                  site_id=ticket.site_id, ticket_id=ticket.id)
+    return previous
 
 
 def _create_ticket(category_id, subject, description, person=None, requester_name=None,
@@ -218,7 +311,8 @@ def _execute_device_automation_action(action_type, asset_tag, ticket=None, autom
             issue_description = f'Auto-sent to repair via automation from ticket #{ticket.id}: {ticket.subject}'
         else:
             issue_description = f'Automated Send to Repair for {asset_tag}.'
-        return _send_device_to_repair(asset_tag, repair_category_id, None, issue_description, None, site_ids=None)
+        return _send_device_to_repair(asset_tag, repair_category_id, None, issue_description, None, site_ids=None,
+                                      ticket=ticket if ticket is not None and ticket.repair is None else None)
 
     if action_type == 'move_device':
         target_ou = params.get('org_unit') or (automation.target_org_unit_path if automation else None)

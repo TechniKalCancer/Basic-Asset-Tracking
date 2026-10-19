@@ -107,14 +107,21 @@ def unlink_ticket(ticket):
     _log_activity('ticket_link', f'Unlinked ticket #{ticket.id} from #{main_id}.', site_id=ticket.site_id, ticket_id=ticket.id)
 
 
+def repair_still_out(ticket):
+    return ticket.repair is not None and ticket.repair.returned_at is None
+
+
 def resolve_linked(main, message, email_requesters, actor_label):
     """Resolve every open ticket linked under `main` with the same note;
     returns ([(ticket, its old status)], the tickets whose requester should
-    be emailed). Does not commit."""
+    be emailed). A ticket whose repair is still out stays open: closing it
+    closes the repair, which needs an outcome. Does not commit."""
     from foxdesk.services.sla import mark_responded
     now = utcnow()
     resolved, to_email = [], []
     for t in Ticket.query.filter(Ticket.parent_id == main.id, Ticket.status.in_(['open', 'in_progress'])):
+        if repair_still_out(t):
+            continue
         emailed = bool(email_requesters and message and t.requester_email)
         if message:
             db.session.add(TicketComment(ticket_id=t.id, body=message, author_label=actor_label,

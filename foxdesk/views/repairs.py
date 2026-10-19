@@ -4,7 +4,6 @@ from foxdesk.clock import utcnow
 from foxdesk.core import app, db
 from foxdesk.automation.engine import emit
 from foxdesk.models import (
-    Asset,
     AssetRegistry,
     LoanerCheckout,
     Person,
@@ -19,7 +18,7 @@ from foxdesk.services.util import _parse_date, resolve_scan
 from foxdesk.services.auth import _current_actor, _current_site_ids, _log_activity, require_permission
 from foxdesk.services.scoping import _scope_people, _scope_repairs
 from foxdesk.services.assignments import _checkout_loaner
-from foxdesk.services.helpdesk import _send_device_to_repair
+from foxdesk.services.helpdesk import _notify_ticket_requester, _send_device_to_repair, close_repair, link_repair_to_ticket
 from foxdesk.services.attachments import _attachments_for
 from foxdesk.services.overdue import repair_due_date, repair_limit_date, repair_limit_problem, repair_max_days
 from foxdesk.services.schedules import where_now
@@ -106,6 +105,34 @@ def admin_repair_detail(repair_id):
                            attachments=_attachments_for('repair', [repair.id])[repair.id])
 
 
+@app.route('/admin/repairs/<int:repair_id>/link_ticket', methods=['POST'])
+@require_permission('repairs')
+def admin_repair_link_ticket(repair_id):
+    """Puts this repair on a different ticket (by number), e.g. the ticket
+    the problem was first reported on."""
+    from foxdesk.models import Ticket
+    from foxdesk.services.scoping import _scope_tickets
+    site_ids = _current_site_ids()
+    repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
+    fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
+    number = request.form.get('ticket_id', '').strip().lstrip('#')
+    ticket = _scope_tickets(Ticket.query, site_ids).filter_by(id=int(number)).first() if number.isdigit() else None
+    if ticket is None:
+        flash(f'No ticket #{number} found.' if number else 'Enter a ticket number.', 'error')
+        return redirect(request.referrer or fallback_url)
+    _, actor_label, _ = _current_actor()
+    try:
+        previous = link_repair_to_ticket(repair, ticket, actor_label)
+        db.session.commit()
+        flash(f'This repair is on ticket #{ticket.id} now.'
+              + (f' Ticket #{previous.id} is still open if you want to close or merge it.' if previous and previous.is_open else ''),
+              'success')
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+    return redirect(request.referrer or fallback_url)
+
+
 @app.route('/admin/repairs/<int:repair_id>/update', methods=['POST'])
 @require_permission('repairs')
 def admin_repair_update(repair_id):
@@ -158,8 +185,9 @@ def admin_repair_return(repair_id):
     device's status next: Fixed goes back into service, Could Not Repair and
     Replaced both retire this physical unit (a Replaced device's replacement
     is added separately as an ordinary new device, not automated here).
-    Redirects back to wherever the form was submitted from (device page or
-    the Repairs list), so it works from both entry points."""
+    Redirects back to wherever the form was submitted from (device page,
+    Repairs list or the ticket), so it works from every entry point. Its
+    ticket is resolved along with it (close_repair)."""
     site_ids = _current_site_ids()
     repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
     fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
@@ -169,31 +197,16 @@ def admin_repair_return(repair_id):
         return redirect(request.referrer or fallback_url)
 
     notes = request.form.get('notes', '').strip() or None
-    asset = Asset.query.filter_by(asset_tag=repair.asset_tag).first()
-    registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
+    _, actor_label, _ = _current_actor()
     try:
-        repair.returned_at = utcnow()
-        repair.outcome = outcome
-        repair.notes = notes
-        _, closer, _ = _current_actor()
-        db.session.add(RepairNote(repair_id=repair.id, author_label=closer, created_at=repair.returned_at,
-                                  body=f'Returned: {REPAIR_OUTCOMES[outcome]}.' + (f' {notes}' if notes else '')))
-        if asset:
-            if outcome == 'fixed':
-                asset.status = 'assigned' if asset.assigned_to_id else 'available'
-            else:
-                asset.status = 'retired'
-        if repair.ticket_id:
-            _, actor_label, _ = _current_actor()
-            comment_body = f'Returned from repair: {REPAIR_OUTCOMES[outcome]}.' + (f' {notes}' if notes else '')
-            db.session.add(TicketComment(ticket_id=repair.ticket_id, body=comment_body, author_label=actor_label))
-            repair.ticket.updated_at = utcnow()
-        _log_activity('repair_return', f'{repair.asset_tag} returned from repair ({REPAIR_OUTCOMES[outcome]}).',
-                       site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
-        open_loaner = LoanerCheckout.query.filter_by(repair_id=repair.id, checked_in_at=None).first()
+        resolved_from, open_loaner = close_repair(repair, outcome, notes, actor_label)
         db.session.commit()
         emit('repair.returned', repair)
         msg = f'{repair.asset_tag} marked returned ({REPAIR_OUTCOMES[outcome]}).'
+        if resolved_from:
+            _notify_ticket_requester(repair.ticket, 'ticket_resolved')
+            emit('ticket.status_changed', repair.ticket, old_status=resolved_from)
+            msg += f' Ticket #{repair.ticket_id} is resolved too.'
         if open_loaner:
             msg += f' Note: loaner {open_loaner.asset_tag} is still checked out to {open_loaner.person_name} — check it in once it\'s back.'
         flash(msg, 'success')

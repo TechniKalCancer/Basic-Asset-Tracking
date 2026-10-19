@@ -278,14 +278,18 @@ def admin_ticket_resolve_linked(ticket_id):
     from foxdesk.core import EMAIL_ENABLED
     from foxdesk.services.helpdesk import _notify_ticket_requester
     from foxdesk.services.sla import mark_responded
-    from foxdesk.services.ticket_links import resolve_linked
+    from foxdesk.services.ticket_links import repair_still_out, resolve_linked
     main = _scope_tickets(Ticket.query, _current_site_ids()).filter_by(id=ticket_id).first_or_404()
+    kept_open = [t.id for t in Ticket.query.filter(Ticket.parent_id == main.id, Ticket.status.in_(['open', 'in_progress']))
+                 if repair_still_out(t)]
     message = request.form.get('message', '').strip()
     email_them = request.form.get('email_requesters') == 'on' and EMAIL_ENABLED
     _, actor_label, _ = _current_actor()
     resolved, to_email = resolve_linked(main, message, email_them, actor_label)
     main_emailed = False
-    if request.form.get('include_main') == 'on' and main.is_open:
+    if request.form.get('include_main') == 'on' and main.is_open and repair_still_out(main):
+        kept_open.insert(0, main.id)
+    elif request.form.get('include_main') == 'on' and main.is_open:
         resolved.append((main, main.status))
         main_emailed = bool(email_them and message and main.requester_email)
         if message:
@@ -305,8 +309,10 @@ def admin_ticket_resolve_linked(ticket_id):
         if t not in to_email:
             _notify_ticket_requester(t, 'ticket_resolved')
         emit('ticket.status_changed', t, old_status=old_status)
+    kept = (f' Kept open: {", ".join("#" + str(i) for i in kept_open)}, whose repair is still out. '
+            'Close those from the repair, or pick the repair outcome when resolving.') if kept_open else ''
     if not resolved:
-        flash('Nothing to resolve — the linked tickets are already closed.', 'info')
+        flash(('Nothing resolved.' + kept) if kept_open else 'Nothing to resolve — the linked tickets are already closed.', 'info')
     else:
-        flash(f'Resolved {len(resolved)} ticket(s)' + (f'; {len(to_email)} requester(s) emailed.' if to_email else '.'), 'success')
+        flash(f'Resolved {len(resolved)} ticket(s)' + (f'; {len(to_email)} requester(s) emailed.' if to_email else '.') + kept, 'success')
     return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))

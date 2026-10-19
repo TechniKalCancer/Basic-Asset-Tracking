@@ -19,7 +19,19 @@
 
 <div class="card" style="margin-bottom:1.5rem;">
   <table style="width:100%;">
-    <tr><td style="color:var(--muted);width:160px;">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
+    <tr><td style="color:var(--muted);width:160px;">Help desk ticket</td><td>
+      {% if repair.ticket %}<a class="tag-link" href="/admin/tickets/{{ repair.ticket_id }}">#{{ repair.ticket_id }} {{ repair.ticket.subject }}</a>
+        <span class="badge {{ 'badge-green' if not repair.ticket.is_open else 'badge-blue' }}" style="font-size:.7rem;">{{ repair.ticket.status|replace('_', ' ')|capitalize }}</span>
+      {% else %}<span style="color:var(--muted);">None</span>{% endif %}
+      <details class="rp-link"><summary>{{ 'Use a different ticket' if repair.ticket else 'Link a ticket' }}</summary>
+        <form method="POST" action="/admin/repairs/{{ repair.id }}/link_ticket">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="rp-label" for="rpTicket">Ticket number</label>
+          <input id="rpTicket" name="ticket_id" inputmode="numeric" placeholder="e.g. 1230" required style="max-width:140px;">
+          <button type="submit" class="btn btn-ghost">Link</button>
+        </form>
+      </details></td></tr>
+    <tr><td style="color:var(--muted);">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Ticket # (vendor's)</td><td>{{ repair.ticket_number or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Issue</td><td>{{ repair.issue_description or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Had It</td><td>{{ repair.person_name_snapshot or '—' }}
@@ -168,6 +180,7 @@
     </div>
     <button type="submit" class="btn btn-primary">Mark Returned</button>
   </form>
+  {% if repair.ticket and repair.ticket.is_open %}<p style="font-size:.8rem;color:var(--muted);margin:.5rem 0 0;">Ticket #{{ repair.ticket_id }} is resolved along with it.</p>{% endif %}
 </div>
 {% endif %}
 
@@ -297,5 +310,8 @@
   .rp-when { font-size: .76rem; color: var(--muted); margin-bottom: .2rem; }
   .rp-body { white-space: pre-wrap; font-size: .9rem; margin-top: .2rem; }
   .rp-now { margin-top: .3rem; font-size: .84rem; }
+  .rp-link { margin-top: .35rem; }
+  .rp-link summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+  .rp-link form { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: .4rem; }
 </style>
 {% endblock %}

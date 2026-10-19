@@ -11,6 +11,8 @@ from foxdesk.models import (
     PendingDeviceAction,
     Person,
     REPAIR_OUTCOMES,
+    REPAIR_STATUSES,
+    Repair,
     RepairCategory,
     TICKET_PRIORITIES,
     TICKET_STATUSES,
@@ -44,6 +46,9 @@ from foxdesk.services.helpdesk import (
     _execute_device_automation_action,
     _notify_ticket_requester,
     _run_pending_device_action,
+    _send_device_to_repair,
+    close_repair,
+    link_repair_to_ticket,
 )
 from foxdesk.services.attachments import _attachments_for, _save_attachments
 from foxdesk.services.sla import apply_sla, mark_responded, overdue_filter, sla_on
@@ -267,7 +272,13 @@ def admin_ticket_detail(ticket_id):
     history = ActivityLog.query.filter_by(ticket_id=ticket.id).order_by(ActivityLog.timestamp.desc()).all()
     repair_categories = RepairCategory.query.filter_by(is_active=True).order_by(RepairCategory.name).all()
     pending_action = PendingDeviceAction.query.filter_by(ticket_id=ticket.id, status='pending').first()
+    device_repair = None
+    if ticket.repair is None and ticket.asset_tag:
+        device_repair = Repair.query.filter_by(asset_tag=ticket.asset_tag, returned_at=None).first()
+    from foxdesk.services.overdue import repair_due_date
     return render_template('admin_ticket_detail.html', ticket=ticket, registry_row=registry_row,
+                           repair_statuses=REPAIR_STATUSES, device_repair=device_repair,
+                           repair_due=repair_due_date(ticket.repair) if ticket.repair is not None else None,
                            statuses=TICKET_STATUSES, priorities=TICKET_PRIORITIES,
                            assignees=_ticket_assignees(site_ids), history=history,
                            repair_outcomes=REPAIR_OUTCOMES, repair_categories=repair_categories,
@@ -396,6 +407,20 @@ def admin_ticket_status(ticket_id):
     status = request.form.get('status', '').strip()
     priority = request.form.get('priority', '').strip()
     old_status, old_priority = ticket.status, ticket.priority
+    # Resolving or closing a ticket whose repair is still out closes the repair
+    # too, with the outcome picked here: it decides the device's status.
+    open_repair = ticket.repair if ticket.repair is not None and ticket.repair.returned_at is None else None
+    closing = status in ('resolved', 'closed') and old_status not in ('resolved', 'closed')
+    repair_closed = None
+    if open_repair is not None and closing:
+        outcome = request.form.get('repair_outcome', '').strip()
+        if outcome not in REPAIR_OUTCOMES:
+            flash(f'{open_repair.asset_tag} is still out for repair. Pick how the repair ended to resolve or close this ticket.', 'error')
+            return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+        _, actor_label, _ = _current_actor()
+        close_repair(open_repair, outcome, request.form.get('repair_notes', '').strip()[:500] or None, actor_label,
+                     close_ticket=False)
+        repair_closed = open_repair
     if status and status in TICKET_STATUSES:
         ticket.status = status
         if status in ('resolved', 'closed'):
@@ -422,8 +447,71 @@ def admin_ticket_status(ticket_id):
         _notify_ticket_requester(ticket, 'ticket_resolved')
     if old_status != ticket.status:
         emit('ticket.status_changed', ticket, old_status=old_status)
-    flash(f'Ticket #{ticket.id} updated.', 'success')
+    if repair_closed is not None:
+        emit('repair.returned', repair_closed)
+        flash(f'Ticket #{ticket.id} updated, and the repair of {repair_closed.asset_tag} is closed '
+              f'({REPAIR_OUTCOMES[repair_closed.outcome]}).', 'success')
+    else:
+        flash(f'Ticket #{ticket.id} updated.', 'success')
     return redirect(url_for('admin_ticket_detail', ticket_id=ticket_id))
+
+
+@app.route('/admin/tickets/<int:ticket_id>/link_repair', methods=['POST'])
+@require_permission('tickets')
+def admin_ticket_link_repair(ticket_id):
+    """Puts a device's open repair on this ticket — by repair id (the button
+    for this ticket's device) or by device tag/serial."""
+    from foxdesk.services.scoping import _scope_repairs
+    site_ids = _current_site_ids()
+    ticket = _scope_tickets(Ticket.query, site_ids).filter_by(id=ticket_id).first_or_404()
+    back = url_for('admin_ticket_detail', ticket_id=ticket.id)
+    repair = None
+    if request.form.get('repair_id', '').isdigit():
+        repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == int(request.form['repair_id'])).first()
+    elif request.form.get('device', '').strip():
+        tag, _ = resolve_scan(request.form['device'].strip())
+        repair = _scope_repairs(Repair.query, site_ids).filter(Repair.asset_tag == tag, Repair.returned_at.is_(None)).first() if tag else None
+    if repair is None:
+        flash('No open repair found for that device.', 'error')
+        return redirect(back)
+    _, actor_label, _ = _current_actor()
+    try:
+        previous = link_repair_to_ticket(repair, ticket, actor_label)
+        db.session.commit()
+        flash(f'The repair of {repair.asset_tag} is on this ticket now.'
+              + (f' Ticket #{previous.id} is still open if you want to close or merge it.' if previous and previous.is_open else ''),
+              'success')
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+    return redirect(back)
+
+
+@app.route('/admin/tickets/<int:ticket_id>/send_to_repair', methods=['POST'])
+@require_permission('repairs')
+def admin_ticket_send_to_repair(ticket_id):
+    """Sends the ticket's device to repair with the repair on this ticket."""
+    site_ids = _current_site_ids()
+    ticket = _scope_tickets(Ticket.query, site_ids).filter_by(id=ticket_id).first_or_404()
+    back = url_for('admin_ticket_detail', ticket_id=ticket.id)
+    if not ticket.asset_tag:
+        flash('This ticket has no device. Add the device tag to the ticket first.', 'error')
+        return redirect(back)
+    from foxdesk.services.util import _parse_date
+    status, message = _send_device_to_repair(
+        ticket.asset_tag, request.form.get('repair_category_id', type=int),
+        request.form.get('ticket_number', '').strip() or None,
+        request.form.get('issue_description', '').strip() or ticket.subject,
+        _parse_date(request.form.get('expected_return_at')), site_ids=site_ids, ticket=ticket)
+    if status == 'ok':
+        db.session.commit()
+        repair = Repair.query.filter_by(asset_tag=ticket.asset_tag, returned_at=None).first()
+        if repair:
+            emit('repair.sent', repair)
+    else:
+        db.session.rollback()
+    flash(message, 'success' if status == 'ok' else 'error')
+    return redirect(back)
 
 
 @app.route('/admin/tickets/<int:ticket_id>/assign', methods=['POST'])

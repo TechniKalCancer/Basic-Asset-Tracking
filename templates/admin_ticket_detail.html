@@ -38,7 +38,7 @@
       <td style="color:var(--muted);">Device</td>
       <td>
         {% if ticket.asset_tag %}
-          {% if registry_row %}<a href="/admin/assets/{{ ticket.asset_tag }}/assign"><code>{{ ticket.asset_tag }}</code></a>{{ ' — ' ~ registry_row.description if registry_row.description }}
+          {% if registry_row %}<a class="tag-link" href="/admin/assets/{{ ticket.asset_tag|urlencode }}/assign"><code>{{ ticket.asset_tag }}</code></a>{{ ' — ' ~ registry_row.description if registry_row.description }}
           {% else %}<code>{{ ticket.asset_tag }}</code> <span style="color:var(--warning);">(not in registry)</span>{% endif %}
         {% else %}—{% endif %}
       </td>
@@ -110,6 +110,16 @@
           {% endfor %}
         </select>
       </div>
+      {% if ticket.repair and not ticket.repair.returned_at %}
+      <div class="tr-close">
+        <label for="trOutcome">Repair outcome <span>(needed to resolve or close: the repair of {{ ticket.repair.asset_tag }} closes with this ticket)</span></label>
+        <select id="trOutcome" name="repair_outcome">
+          <option value="">Choose…</option>
+          {% for key, label in repair_outcomes.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+        <input name="repair_notes" maxlength="500" placeholder="Repair notes (optional)">
+      </div>
+      {% endif %}
       <button type="submit" class="btn btn-primary">Update</button>
     </form>
   </div>
@@ -217,23 +227,32 @@
 
 {% if ticket.repair %}
 {% set repair = ticket.repair %}
-<div class="card" style="margin-bottom:1.5rem;">
+<div class="card" style="margin-bottom:1.5rem;" id="repair">
   <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
-    <h2 style="margin:0;">{{ icon('repair') }}Repair</h2>
+    <h2 style="margin:0;">{{ icon('repair') }}Repair <code style="font-size:.9rem;">{{ repair.asset_tag }}</code></h2>
     {% if repair.returned_at %}
       {% set outcome_badge = {'fixed': 'badge-green', 'could_not_repair': 'badge-red', 'replaced': 'badge-yellow'} %}
       <span class="badge {{ outcome_badge.get(repair.outcome, 'badge-blue') }}">{{ repair_outcomes.get(repair.outcome, repair.outcome or '—') }}</span>
     {% else %}
-      <span class="badge badge-yellow">Open</span>
+      <span class="badge badge-blue">{{ repair_statuses.get(repair.status, repair.status) }}</span>
+      {% if repair_due and repair_due < today() %}<span class="badge badge-red">Overdue {{ (today() - repair_due).days }}d</span>{% endif %}
     {% endif %}
+    <span class="spacer" style="flex:1;"></span>
+    <a href="/admin/repairs/{{ repair.id }}" class="btn btn-ghost">Open repair page →</a>
   </div>
+  {% if repair.note_rows %}{% set last = repair.note_rows[0] %}
+  <p style="font-size:.85rem;margin:-.4rem 0 .8rem;color:var(--muted);">Latest note ({{ last.created_at.strftime('%b %d') }}, {{ last.author_label or 'someone' }}):
+    {% if last.status_to %}{{ repair_statuses.get(last.status_to, last.status_to) }}.{% endif %} {{ last.body or '' }}</p>
+  {% endif %}
 
   <table style="width:100%;margin-bottom:1rem;">
     <tr><td style="color:var(--muted);width:160px;">Category</td><td>{{ repair.repair_category.name if repair.repair_category else '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Ticket # (vendor's)</td><td>{{ repair.ticket_number or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Issue</td><td>{{ repair.issue_description or '—' }}</td></tr>
     <tr><td style="color:var(--muted);">Sent</td><td>{{ repair.sent_at.strftime('%Y-%m-%d') }}</td></tr>
-    {% if repair.expected_return_at %}
+    {% if not repair.returned_at and repair_due %}
+    <tr><td style="color:var(--muted);">Due Back</td><td style="{{ 'color:var(--danger);' if repair_due < today() }}">{{ repair_due.strftime('%Y-%m-%d') }}</td></tr>
+    {% elif repair.expected_return_at %}
     <tr><td style="color:var(--muted);">Expected Return</td><td>{{ repair.expected_return_at.strftime('%Y-%m-%d') }}</td></tr>
     {% endif %}
     {% if repair.returned_at %}
@@ -292,6 +311,46 @@
     </div>
     <button type="submit" class="btn btn-primary">Mark Returned</button>
   </form>
+  <p style="font-size:.8rem;color:var(--muted);margin:.5rem 0 0;">Marking it returned resolves this ticket too.</p>
+  {% endif %}
+</div>
+{% elif can('repairs') %}
+<div class="card" style="margin-bottom:1.5rem;" id="repair">
+  <h2 style="margin-top:0;">{{ icon('repair') }}Repair</h2>
+  {% if device_repair %}
+  <p style="margin:0 0 .7rem;"><code>{{ device_repair.asset_tag }}</code> is already out for repair
+    ({{ repair_statuses.get(device_repair.status, device_repair.status) }}{% if device_repair.ticket_id %}, on ticket <a class="tag-link" href="/admin/tickets/{{ device_repair.ticket_id }}">#{{ device_repair.ticket_id }}</a>{% endif %}).
+    <a class="tag-link" href="/admin/repairs/{{ device_repair.id }}">Open repair page</a></p>
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/link_repair">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="repair_id" value="{{ device_repair.id }}">
+    <button type="submit" class="btn btn-primary">Put that repair on this ticket</button>
+  </form>
+  {% elif ticket.asset_tag %}
+  <form method="POST" action="/admin/tickets/{{ ticket.id }}/send_to_repair" class="tr-send">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p style="margin:0;font-size:.88rem;">Send <code>{{ ticket.asset_tag }}</code> to repair. The repair stays on this ticket, and each one closes the other.</p>
+    <label>Issue <input name="issue_description" value="{{ ticket.subject }}" required></label>
+    <label>Category
+      <select name="repair_category_id"><option value="">— None —</option>
+        {% for c in repair_categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></label>
+    <label>Vendor RMA # (optional) <input name="ticket_number"></label>
+    <label>Expected return (blank = the repair limit) <input type="date" name="expected_return_at"></label>
+    <button type="submit" class="btn btn-primary">Send to Repair</button>
+  </form>
+  {% else %}
+  <p style="margin:0 0 .6rem;color:var(--muted);font-size:.88rem;">No device on this ticket. Link a repair that's already open:</p>
+  {% endif %}
+  {% if not device_repair %}
+  <details style="margin-top:.8rem;">
+    <summary style="cursor:pointer;color:var(--muted);font-size:.85rem;">Link an open repair by device</summary>
+    <form method="POST" action="/admin/tickets/{{ ticket.id }}/link_repair" style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.6rem;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="sr-only" for="trDevice">Device tag or serial</label>
+      <input id="trDevice" name="device" placeholder="Device tag or serial" required style="max-width:240px;">
+      <button type="submit" class="btn btn-ghost">Link</button>
+    </form>
+  </details>
   {% endif %}
 </div>
 {% endif %}
@@ -510,6 +569,15 @@
   .tl-grid button { margin-top: .8rem; }
   .btn-small { padding: .25rem .6rem; font-size: .8rem; }
   .canned-row select { width: auto; min-width: 220px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+<style>
+  .tr-close { display: grid; gap: .4rem; margin: 0 0 1rem; padding: .7rem; border: 1px solid var(--warning); border-radius: 8px; }
+  .tr-close label { font-size: .85rem; }
+  .tr-close label span { color: var(--muted); font-size: .78rem; }
+  .tr-send { display: grid; gap: .55rem; max-width: 560px; }
+  .tr-send label { display: grid; gap: .25rem; color: var(--muted); font-size: .84rem; }
+  .tr-send button { justify-self: start; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
 </style>
 {% endblock %}

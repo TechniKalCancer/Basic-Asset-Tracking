@@ -795,6 +795,17 @@ A real tracking record for devices sent out for repair, separate from just label
   repair page's **Status & Notes** card changes the status and/or adds a note; both show newest
   first as a timeline and are copied to the repair's ticket. Marking it returned adds the outcome
   to the timeline, and notes can still be added after.
+- **Repair and ticket close together:** Mark Returned (on the repair page, the device page, or the
+  ticket's Repair card) resolves the ticket. Resolving or closing the ticket closes the repair,
+  with the repair outcome picked on the ticket's status form (it decides the device's status, so
+  there's no default). Reopening a ticket leaves its repair closed. "Resolve linked tickets"
+  leaves a linked ticket open while its repair is still out.
+- **Linked both ways:** the repair page shows its help desk ticket (and can move the repair to a
+  different ticket by number); the ticket page shows its repair with status and due date and links
+  to the repair page. A ticket without a repair offers to put the device's open repair on it, or to
+  send the device to repair from the ticket. Sending a device that already has an open ticket puts
+  the repair on that ticket instead of opening a second one; automations sending a ticket's device
+  to repair do the same.
 
 ## Overdue at Each School (Repairs → Overdue)
 

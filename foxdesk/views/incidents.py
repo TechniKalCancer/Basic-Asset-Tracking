@@ -134,13 +134,14 @@ def report_problem_page():
 @app.route('/admin/incidents/<int:incident_id>/mark_paid', methods=['POST'])
 @require_permission('devices')
 def admin_incident_mark_paid(incident_id):
+    from foxdesk.services.billing import charge_for, mark_paid
+    from foxdesk.services.auth import _current_actor
     incident = db.get_or_404(Incident, incident_id)
-    incident.paid_at = utcnow()
-    registry_row = AssetRegistry.query.filter_by(asset_tag=incident.asset_tag).first()
-    _log_activity('fee_paid', f'Marked fee paid for {incident.asset_tag} ({incident.person_name or "unknown"}).',
-                   site_id=registry_row.site_id if registry_row else None)
+    _, actor_label, _ = _current_actor()
+    done, receipts = mark_paid([charge_for(incident)], request.form.get('method'), request.form.get('note'), actor_label)
     db.session.commit()
-    flash('Marked paid.', 'success')
+    flash(f'Marked paid. Receipt {receipts[0].number} is ready to print.' if receipts else 'That fee was already settled.',
+          'success' if done else 'info')
     return redirect(request.referrer or url_for('admin_asset_assign', asset_tag=incident.asset_tag))
 
 
@@ -221,7 +222,7 @@ def admin_fees():
         entry['charges'].append({
             'date': inc.created_at, 'label': f'Incident: {inc.description}', 'amount': amount,
             'paid': inc.paid_at is not None, 'waived': inc.waived_at is not None, 'is_ticket_charge': False,
-            'mark_paid_url': url_for('admin_incident_mark_paid', incident_id=inc.id),
+            'mark_paid_url': url_for('admin_incident_mark_paid', incident_id=inc.id), 'receipt_id': inc.receipt_id,
             'fee_url': url_for('admin_incident_fee', incident_id=inc.id),
             'delete_url': url_for('admin_incident_delete', incident_id=inc.id),
             'delete_confirm': f'Delete this incident ({inc.asset_tag}, ${amount:.2f})? This removes the incident '
@@ -253,7 +254,7 @@ def admin_fees():
                 'date': tc.created_at, 'label': f'Ticket #{t.id}: {tc.description}', 'amount': amount,
                 'paid': tc.paid_at is not None, 'waived': tc.waived_at is not None, 'is_ticket_charge': True,
                 'description': tc.description,
-                'mark_paid_url': url_for('admin_ticket_charge_mark_paid', charge_id=tc.id),
+                'mark_paid_url': url_for('admin_ticket_charge_mark_paid', charge_id=tc.id), 'receipt_id': tc.receipt_id,
                 'fee_url': url_for('admin_ticket_charge_edit', charge_id=tc.id),
                 'delete_url': url_for('admin_ticket_charge_delete', charge_id=tc.id),
                 'delete_confirm': f'Delete this ${amount:.2f} charge from ticket #{t.id}? This cannot be undone.',

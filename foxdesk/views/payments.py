@@ -61,7 +61,8 @@ def admin_payments():
 @require_permission('devices')
 def admin_payment_charges():
     rows = _filter(_all_rows(), request.args)
-    return render_template('admin_payment_charges.html', rows=rows, total=sum((c.amount for c in rows), 0), args=request.args,
+    new_receipts = [int(x) for x in request.args.getlist('new_receipts') if str(x).isdigit()]
+    return render_template('admin_payment_charges.html', rows=rows, new_receipts=new_receipts, total=sum((c.amount for c in rows), 0), args=request.args,
                            statuses=STATUSES, kinds=KINDS, methods=PAYMENT_METHODS, ages=AGE_BUCKETS[:-1],
                            sites=_sites_for_actor(_current_site_ids()))
 
@@ -77,9 +78,16 @@ def admin_payment_charges_bulk():
     rows = by_keys(_all_rows(), keys)
     _, actor_label, _ = _current_actor()
     action = request.form.get('action')
+    receipts = []
+    if action == 'invoices':
+        people = sorted({c.person_id for c in rows if c.person_id})
+        if not people:
+            flash('Those charges aren\'t linked to anyone in People, so there\'s no one to invoice.', 'error')
+            return redirect(back)
+        return redirect(url_for('admin_invoices_print', person=people))
     if action == 'paid':
-        done = mark_paid(rows, request.form.get('method'), request.form.get('note'), actor_label)
-        message = f'Recorded {done} payment(s).'
+        done, receipts = mark_paid(rows, request.form.get('method'), request.form.get('note'), actor_label)
+        message = f'Recorded {done} payment(s)' + (f', with {len(receipts)} receipt(s).' if receipts else '.')
     elif action == 'waive':
         reason = (request.form.get('reason') or '').strip()
         if not reason:
@@ -96,6 +104,9 @@ def admin_payment_charges_bulk():
     db.session.commit()
     skipped = len(rows) - done
     flash(message + (f' {skipped} skipped (already settled or not waived).' if skipped else ''), 'success' if done else 'info')
+    if receipts:
+        return redirect(url_for('admin_payment_charges', new_receipts=[r.id for r in receipts],
+                                **{k: v for k, v in request.args.items() if k != 'new_receipts'}))
     return redirect(back)
 
 

@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Receipt ' ~ receipts[0].number if receipts|length == 1 else receipts|length ~ ' receipts' }}{% endblock %}
+{% block content %}
+{% include '_paper_styles.html' %}
+<div class="pp-actions">
+  <button type="button" class="btn btn-primary" onclick="window.print()">{{ icon('print') }}Print{{ ' all ' ~ receipts|length if receipts|length > 1 }}</button>
+  {% if receipts|length == 1 and receipts[0].person_id %}<a href="/admin/people/{{ receipts[0].person_id }}" class="btn btn-ghost">← {{ receipts[0].person_name }}</a>{% endif %}
+  <a href="/admin/receipts" class="btn btn-ghost">All receipts</a>
+  {% if receipts|length > 1 %}<span class="pp-count">One receipt per page.</span>{% endif %}
+</div>
+
+{% for r in receipts %}
+{% set site = r.person.site if r.person and r.person.site else r.site %}
+{% set doc_title = 'RECEIPT' %}
+{% set doc_meta = [r.number, 'Paid ' ~ r.paid_at.strftime('%B %-d, %Y')] %}
+{% set p = r.person %}
+<article class="pp-doc" aria-label="Receipt {{ r.number }}">
+  {% include '_paper.html' %}
+  <div class="pp-parties">
+    <div>
+      <div class="pp-label">Received from</div>
+      <div><strong>{{ ('Parent/guardian of ' ~ r.person_name) if p and p.role == 'student' else r.person_name }}</strong></div>
+      {% if p and p.role == 'student' and p.guardian_name %}<div>{{ p.guardian_name }}</div>{% endif %}
+      {% if p and p.external_id %}<div class="pp-small">Student ID {{ p.external_id }}{% if p.grad_year %} · Class of {{ p.grad_year }}{% endif %}</div>{% endif %}
+    </div>
+    <div style="text-align:right;">
+      <span class="pp-paid">PAID</span>
+      <div style="margin-top:.6rem;font-size:1.3rem;font-weight:800;">${{ '%.2f'|format(r.amount) }}</div>
+      <div class="pp-small">{{ receipt_method(r) }}{% if r.reference %} · {{ r.reference }}{% endif %}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>For</th><th>Reference</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      {% for item in r.items %}
+      <tr><td>{{ item.kind }}: {{ item.description }}</td><td>{{ item.ref }}</td><td class="num">${{ item.amount }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr class="pp-total"><td colspan="2">Total paid</td><td class="num">${{ '%.2f'|format(r.amount) }}</td></tr></tfoot>
+  </table>
+
+  {% set left = receipt_balance(r) %}
+  <p class="pp-small" style="margin-top:.9rem;">
+    {% if r.received_by %}Received by {{ r.received_by }}. {% endif %}
+    {% if left %}Still owed as of {{ today().strftime('%b %-d, %Y') }}: <strong class="pp-due">${{ '%.2f'|format(left) }}</strong>.{% elif p %}Nothing else is owed as of {{ today().strftime('%b %-d, %Y') }}.{% endif %}
+  </p>
+  <p style="margin:.8rem 0 0;">Thank you.</p>
+  {% if settings.footer %}<div class="pp-foot">{{ settings.footer }}</div>{% endif %}
+</article>
+{% endfor %}
+{% endblock %}

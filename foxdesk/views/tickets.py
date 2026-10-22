@@ -636,13 +636,17 @@ def admin_ticket_charge_unwaive(charge_id):
 @app.route('/admin/ticket_charges/<int:charge_id>/mark_paid', methods=['POST'])
 @require_permission('tickets')
 def admin_ticket_charge_mark_paid(charge_id):
+    from foxdesk.services.billing import charge_for, mark_paid
     charge = db.get_or_404(TicketCharge, charge_id)
-    charge.paid_at = utcnow()
-    charge.ticket.updated_at = utcnow()
-    _log_activity('fee_paid', f'Marked ${charge.amount:.2f} charge paid on ticket #{charge.ticket_id}.',
-                   site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
+    _, actor_label, _ = _current_actor()
+    done, receipts = mark_paid([charge_for(charge)], request.form.get('method'), request.form.get('note'), actor_label)
+    if done:
+        charge.ticket.updated_at = utcnow()
+        _log_activity('fee_paid', f'Marked ${charge.amount:.2f} charge paid on ticket #{charge.ticket_id}.',
+                      site_id=charge.ticket.site_id, ticket_id=charge.ticket_id)
     db.session.commit()
-    flash('Marked paid.', 'success')
+    flash(f'Marked paid. Receipt {receipts[0].number} is ready to print.' if receipts else 'That charge was already settled.',
+          'success' if done else 'info')
     return redirect(request.referrer or url_for('admin_ticket_detail', ticket_id=charge.ticket_id))
 
 

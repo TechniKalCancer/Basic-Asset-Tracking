@@ -26,6 +26,8 @@ NAV_SECTION_PREFIXES = [
     ('/admin/audit', 'devices'),
     ('/admin/fees', 'payments'),
     ('/admin/payments', 'payments'),
+    ('/admin/receipts', 'payments'),
+    ('/admin/invoices', 'payments'),
     ('/admin/repair_categories', 'devices'),
     ('/admin/collection', 'devices'),
     ('/asset_history', 'devices'),

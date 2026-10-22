@@ -1,0 +1,15 @@
+{# Shared look for printed invoices and receipts (white paper; nav and buttons hidden when printing).
+   Include inside a loop with `site` set to the school the document is from. #}
+{% set org = site.name if site else (settings.payable_to or (branding_settings.app_name if branding_settings and branding_settings.app_name else 'Fox Creek School')) %}
+{% set logo = site.logo_filename if site and site.logo_filename else (branding_settings.logo_filename if branding_settings else None) %}
+<div class="pp-top">
+  <div>
+    {% if logo %}<img src="{{ url_for('branding_logo', filename=logo) }}" alt="{{ org }} logo" class="pp-logo">{% endif %}
+    <div class="pp-org">{{ org }}</div>
+    {% if settings.contact %}<div class="pp-small pp-pre">{{ settings.contact }}</div>{% endif %}
+  </div>
+  <div class="pp-meta">
+    <div class="pp-title">{{ doc_title }}</div>
+    {% for line in doc_meta %}<div>{{ line }}</div>{% endfor %}
+  </div>
+</div>

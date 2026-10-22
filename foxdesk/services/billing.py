@@ -62,6 +62,10 @@ class Charge:
     def method_label(self):
         return PAYMENT_METHODS.get(self.paid_method, self.paid_method or '')
 
+    @property
+    def receipt_id(self):
+        return getattr(self.obj, 'plan_receipt_id' if self.kind == 'plan' else 'receipt_id', None)
+
 
 def _status(paid_at, waived_at):
     return 'paid' if paid_at else ('waived' if waived_at else 'owed')
@@ -77,17 +81,11 @@ def charges(site_ids=None, include_tickets=True, include_plans=True):
             .filter(AssetRegistry.site_id.in_(site_ids or [-1]))
     sites = dict(db.session.query(AssetRegistry.asset_tag, AssetRegistry.site_id).all())
     for i in incidents:
-        out.append(Charge('incident', i.id, i.person_id, i.person_name or '(no one on file)', i.description,
-                          Decimal(i.fee_amount), i.created_at, _status(i.paid_at, i.waived_at), i.paid_at, i.paid_method,
-                          i.waived_at, i.waived_by, i.waive_reason, sites.get(i.asset_tag),
-                          url_for('admin_asset_assign', asset_tag=i.asset_tag), i.asset_tag, i))
+        out.append(_incident_charge(i, sites.get(i.asset_tag)))
     if include_tickets:
         for c, t in _scope_tickets(db.session.query(TicketCharge, Ticket).join(Ticket, Ticket.id == TicketCharge.ticket_id),
                                    site_ids).all():
-            out.append(Charge('ticket', c.id, t.requester_person_id, t.requester_name or '(no requester)',
-                              f'{c.description} — {t.subject}', Decimal(c.amount), c.created_at,
-                              _status(c.paid_at, c.waived_at), c.paid_at, c.paid_method, c.waived_at, c.waived_by,
-                              c.waive_reason, t.site_id, url_for('admin_ticket_detail', ticket_id=t.id), f'#{t.id}', c))
+            out.append(_ticket_charge(c, t))
     if include_plans:
         plans = (db.session.query(AgreementSignature, Person).join(Person, Person.id == AgreementSignature.person_id)
                  .filter(AgreementSignature.plan_choice == 'enrolled', AgreementSignature.plan_amount > 0))
@@ -96,12 +94,59 @@ def charges(site_ids=None, include_tickets=True, include_plans=True):
         paid_online = {sid for (sid,) in db.session.query(FeePayment.signature_id)
                        .filter(FeePayment.status == 'paid', FeePayment.signature_id.isnot(None))}
         for s, p in plans:
-            out.append(Charge('plan', s.id, p.id, p.full_name, s.agreement.plan_name or 'Protection plan',
-                              Decimal(s.plan_amount), s.signed_at, _status(s.plan_paid_at, s.plan_waived_at),
-                              s.plan_paid_at, 'online' if s.id in paid_online else None,
-                              s.plan_waived_at, None, None, p.site_id,
-                              url_for('admin_agreement_detail', agreement_id=s.agreement_id), s.agreement.title, s))
+            out.append(_plan_charge(s, p, s.id in paid_online))
     return sorted(out, key=lambda c: c.created_at, reverse=True)
+
+
+def _incident_charge(i, site_id):
+    return Charge('incident', i.id, i.person_id, i.person_name or '(no one on file)', i.description,
+                  Decimal(i.fee_amount or 0), i.created_at, _status(i.paid_at, i.waived_at), i.paid_at, i.paid_method,
+                  i.waived_at, i.waived_by, i.waive_reason, site_id,
+                  url_for('admin_asset_assign', asset_tag=i.asset_tag), i.asset_tag, i)
+
+
+def _ticket_charge(c, t):
+    return Charge('ticket', c.id, t.requester_person_id, t.requester_name or '(no requester)',
+                  f'{c.description} — {t.subject}', Decimal(c.amount), c.created_at,
+                  _status(c.paid_at, c.waived_at), c.paid_at, c.paid_method, c.waived_at, c.waived_by,
+                  c.waive_reason, t.site_id, url_for('admin_ticket_detail', ticket_id=t.id), f'#{t.id}', c)
+
+
+def _plan_charge(s, p, paid_online=False):
+    return Charge('plan', s.id, p.id, p.full_name, s.agreement.plan_name or 'Protection plan',
+                  Decimal(s.plan_amount or 0), s.signed_at, _status(s.plan_paid_at, s.plan_waived_at),
+                  s.plan_paid_at, 'online' if paid_online else None,
+                  s.plan_waived_at, None, None, p.site_id,
+                  url_for('admin_agreement_detail', agreement_id=s.agreement_id), s.agreement.title, s)
+
+
+def charge_for(obj):
+    """The Charge row for one Incident, TicketCharge or AgreementSignature."""
+    if isinstance(obj, Incident):
+        row = AssetRegistry.query.filter_by(asset_tag=obj.asset_tag).first()
+        return _incident_charge(obj, row.site_id if row else None)
+    if isinstance(obj, TicketCharge):
+        return _ticket_charge(obj, obj.ticket)
+    online = FeePayment.query.filter_by(signature_id=obj.id, status='paid').first() is not None
+    return _plan_charge(obj, obj.person, online)
+
+
+def person_charges(person_id):
+    """Every charge for one person (all three kinds), oldest first."""
+    out = []
+    sites = {}
+    for i in Incident.query.filter(Incident.person_id == person_id, Incident.fee_charged.is_(True), Incident.fee_amount > 0):
+        if i.asset_tag not in sites:
+            row = AssetRegistry.query.filter_by(asset_tag=i.asset_tag).first()
+            sites[i.asset_tag] = row.site_id if row else None
+        out.append(_incident_charge(i, sites[i.asset_tag]))
+    for c, t in (db.session.query(TicketCharge, Ticket).join(Ticket, Ticket.id == TicketCharge.ticket_id)
+                 .filter(Ticket.requester_person_id == person_id)):
+        out.append(_ticket_charge(c, t))
+    for s in AgreementSignature.query.filter(AgreementSignature.person_id == person_id,
+                                             AgreementSignature.plan_choice == 'enrolled', AgreementSignature.plan_amount > 0):
+        out.append(charge_for(s))
+    return sorted(out, key=lambda c: c.created_at)
 
 
 def by_keys(rows, keys):
@@ -112,10 +157,13 @@ def by_keys(rows, keys):
 # ─── actions ──────────────────────────────────────────────────────────────────
 
 def mark_paid(rows, method, note, actor):
-    """Record payment for every owed charge in rows. Returns how many. Does not commit."""
+    """Record payment for every owed charge in rows, with a receipt per
+    person (services/receipts.py). Returns (how many, the receipts). Does
+    not commit."""
     from foxdesk.services.agreements import mark_plan_paid
+    from foxdesk.services.receipts import issue_receipts
     method = method if method in PAYMENT_METHODS else 'other'
-    now, done, total = utcnow(), 0, Decimal('0')
+    now, total, paid = utcnow(), Decimal('0'), []
     for c in rows:
         if c.status != 'owed':
             continue
@@ -123,12 +171,13 @@ def mark_paid(rows, method, note, actor):
             mark_plan_paid(c.obj, f'{PAYMENT_METHODS[method].lower()} (recorded by {actor})')
         else:
             c.obj.paid_at, c.obj.paid_method, c.obj.paid_note = now, method, (note or '').strip()[:120] or None
-        done += 1
+        c.status, c.paid_at, c.paid_method = 'paid', now, method
+        paid.append(c)
         total += c.amount
-    if done:
-        _log_activity('fee_paid', f'Recorded {done} payment(s), ${total:.2f} total, by {PAYMENT_METHODS[method].lower()}'
+    if paid:
+        _log_activity('fee_paid', f'Recorded {len(paid)} payment(s), ${total:.2f} total, by {PAYMENT_METHODS[method].lower()}'
                                   + (f' ({note.strip()})' if (note or '').strip() else '') + '.')
-    return done
+    return len(paid), issue_receipts(paid, method, note, actor, now)
 
 
 def waive(rows, reason, actor):

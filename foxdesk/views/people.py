@@ -431,11 +431,18 @@ def admin_person(person_id):
                    .order_by(SpotCheck.created_at.desc()).limit(15).all())
     from foxdesk.services.recent_use import recent_devices
     from foxdesk.services.schedules import schedule_rows, where_now
+    from foxdesk.services.billing import person_charges
+    from foxdesk.models import Receipt
     recent = recent_devices([person])[person.id]
+    money = person_charges(person.id)
+    owed = sum((c.amount for c in money if c.status == 'owed'), 0)
+    receipts = Receipt.query.filter_by(person_id=person.id).order_by(Receipt.id.desc()).limit(12).all()
+    unreceipted = sum(1 for c in money if c.status == 'paid' and not c.receipt_id)
     return render_template('admin_person.html', person=person, current=current, chromebooks=chromebooks, recent=recent,
                            schedule=schedule_rows(person), now=where_now(person),
                            other_devices=other_devices, loaners=loaners, incidents=incidents, tickets=tickets,
-                           spot_checks=spot_checks, agreements=agreement_rows(person), owed=_person_unpaid_fee_total(person.id),
+                           spot_checks=spot_checks, agreements=agreement_rows(person), owed=owed, receipts=receipts,
+                           unreceipted=unreceipted,
                            assignment_count=len(assignments))
 
 

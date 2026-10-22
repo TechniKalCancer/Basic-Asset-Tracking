@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Charges{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;flex-wrap:wrap;">
   <h1 style="margin:0;">{{ icon('billing') }}Charges</h1>
@@ -39,6 +40,14 @@
   <button type="submit" class="btn btn-ghost">Search</button>
 </form>
 
+{% if new_receipts %}
+<div class="card ch-receipts" role="status">
+  <strong>{{ new_receipts|length }} receipt{{ 's' if new_receipts|length != 1 }} made.</strong>
+  <a class="btn btn-primary" href="/admin/receipts/print?{% for i in new_receipts %}id={{ i }}{{ '&' if not loop.last }}{% endfor %}">{{ icon('print') }}Print {{ 'them' if new_receipts|length > 1 else 'it' }}</a>
+  <a class="tag-link" href="/admin/receipts">All receipts</a>
+</div>
+{% endif %}
+
 <form method="POST" action="/admin/payments/charges/bulk?{{ request.query_string.decode() }}" id="chForm">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card ch-bar" id="chBar">
@@ -47,6 +56,7 @@
       <option value="paid">Record payment</option>
       <option value="waive">Waive</option>
       <option value="reopen">Reopen a waived charge</option>
+      <option value="invoices">Print invoices for these students</option>
     </select>
     <span class="ch-opt" data-for="paid">
       <select name="method" aria-label="Paid by">{% for key, label in methods.items() if key != 'online' %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
@@ -73,7 +83,7 @@
           <td>{{ c.kind_label }}: {{ c.description|truncate(70) }}
             {% if c.link_url %}<div><a class="tag-link ch-muted" href="{{ c.link_url }}">{{ c.link_label }}</a></div>{% endif %}</td>
           <td class="num">${{ '{:,.2f}'.format(c.amount) }}</td>
-          <td>{% if c.status == 'paid' %}<span class="badge badge-green">Paid</span><div class="ch-muted">{{ c.paid_at|ago }}{% if c.method_label %} · {{ c.method_label }}{% endif %}</div>
+          <td>{% if c.status == 'paid' %}<span class="badge badge-green">Paid</span>{{ macros.receipt_link(c.receipt_id) }}<div class="ch-muted">{{ c.paid_at|ago }}{% if c.method_label %} · {{ c.method_label }}{% endif %}</div>
               {% elif c.status == 'waived' %}<span class="badge badge-neutral">Waived</span><div class="ch-muted" title="{{ c.waive_reason or '' }}">{{ c.waived_at|ago }}{% if c.waived_by %} · {{ c.waived_by }}{% endif %}</div>
               {% else %}<span class="badge badge-yellow">Owed</span>{% endif %}</td>
         </tr>
@@ -123,5 +133,6 @@
   .ch-opt { display: inline-flex; gap: .5rem; flex-wrap: wrap; }
   .ch-opt[hidden] { display: none; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ch-receipts { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; border-color: var(--success); }
 </style>
 {% endblock %}

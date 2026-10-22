@@ -10,7 +10,7 @@ from foxdesk.clock import utcnow
 from foxdesk.core import APP_URL, EMAIL_ENABLED, app, db
 from foxdesk.models import AGREEMENT_SIGNER_ROLES, Agreement, AgreementSignature, Person, Site
 from foxdesk.services.agreements import (
-    REMIND_EVERY_HOURS, AgreementError, mark_plan_paid, needed_roles, plan_role, progress, record_paper, reminder_recipients,
+    REMIND_EVERY_HOURS, AgreementError, needed_roles, plan_role, progress, record_paper, reminder_recipients,
     short_name, sign, status_for, undo_paper,
 )
 from foxdesk.services.auth import _current_actor, _current_site_ids, _log_activity, require_permission
@@ -236,7 +236,8 @@ def admin_agreement_paper(agreement_id, person_id):
                    plan_choice=request.form.get('plan_choice'), recorded_by=actor_label)
         if request.form.get('plan_paid') == 'on' and sig.plan_choice == 'enrolled' and not sig.plan_paid_at:
             db.session.flush()
-            mark_plan_paid(sig, f'at the office (recorded by {actor_label})')
+            from foxdesk.services.billing import charge_for, mark_paid
+            mark_paid([charge_for(sig)], request.form.get('method'), request.form.get('note'), actor_label)
         db.session.commit()
     except AgreementError as e:
         db.session.rollback()
@@ -254,9 +255,11 @@ def admin_agreement_plan_paid(sig_id):
     if site_ids is not None and sig.person.site_id not in site_ids:
         abort(404)
     _, actor_label, _ = _current_actor()
-    mark_plan_paid(sig, f'at the office (recorded by {actor_label})')
+    from foxdesk.services.billing import charge_for, mark_paid
+    done, receipts = mark_paid([charge_for(sig)], request.form.get('method'), request.form.get('note'), actor_label)
     db.session.commit()
-    flash(f'Plan marked paid for {sig.person.full_name}.', 'success')
+    flash(f'Plan marked paid for {sig.person.full_name}.' + (f' Receipt {receipts[0].number} is ready to print.' if receipts else ''),
+          'success')
     return redirect(request.referrer or url_for('admin_agreement_detail', agreement_id=sig.agreement_id))
 
 

@@ -23,6 +23,7 @@ from foxdesk.views import people  # noqa: F401
 from foxdesk.views import portal  # noqa: F401
 from foxdesk.views import portal_settings  # noqa: F401
 from foxdesk.views import public  # noqa: F401
+from foxdesk.views import receipts  # noqa: F401
 from foxdesk.views import pwa  # noqa: F401
 from foxdesk.views import repairs  # noqa: F401
 from foxdesk.views import rules  # noqa: F401

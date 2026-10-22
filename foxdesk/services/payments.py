@@ -155,14 +155,22 @@ def confirm(session_id):
     matches = (data.get('payment_status') == 'paid' and data.get('amount_total') == cents(payment.amount)
                and _for_this_payment(payment, data.get('metadata') or {}))
     if matches:
+        from foxdesk.services.billing import charge_for
+        from foxdesk.services.receipts import issue_receipts
         payment.status, payment.paid_at = 'paid', utcnow()
+        paid = None
         if incident and not incident.paid_at:
             incident.paid_at, incident.paid_method = payment.paid_at, 'online'
             _log_activity('fee_paid', f'Damage fee for {incident.asset_tag} ({incident.person_name or "unknown"}) '
                                       f'paid online: ${payment.amount:.2f} (Stripe {session_id[-8:]}).')
-        if sig is not None:
+            paid = incident
+        if sig is not None and not sig.plan_paid_at:
             from foxdesk.services.agreements import mark_plan_paid
             mark_plan_paid(sig, f'online (Stripe {session_id[-8:]})')
+            paid = sig
+        if paid is not None:
+            issue_receipts([charge_for(paid)], 'online', f'Paid online, ref {session_id[-8:]}',
+                           payment.payer_email or 'Online payment', payment.paid_at)
     elif data.get('status') == 'expired':
         payment.status = 'expired'
     elif data.get('payment_status') == 'paid':

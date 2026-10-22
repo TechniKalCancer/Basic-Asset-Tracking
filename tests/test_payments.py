@@ -53,8 +53,9 @@ def test_dashboard_and_bulk_actions(client, make):
     r = client.post('/admin/payments/charges/bulk', data={'charge': [f'incident:{old.id}', f'ticket:{t.charges[0].id}'],
                                                           'action': 'paid', 'method': 'check', 'note': 'Check 1042'},
                     follow_redirects=True)
-    assert b'Recorded 2 payment(s).' in r.data
+    assert b'Recorded 2 payment(s), with' in r.data and b'Print' in r.data
     paid = A.db.session.get(A.Incident, old.id)
+    assert paid.receipt_id and A.db.session.get(A.Receipt, paid.receipt_id).reference == 'Check 1042'
     assert (paid.paid_method, paid.paid_note) == ('check', 'Check 1042') and paid.paid_at
     r = client.post('/admin/payments/charges/bulk', data={'charge': [f'incident:{new.id}'], 'action': 'waive'}, follow_redirects=True)
     assert b'Say why' in r.data and A.db.session.get(A.Incident, new.id).is_owed

@@ -75,6 +75,9 @@ def test_family_signs_in_the_portal_and_pays_for_the_plan(client, make, sent_ema
     parent.get('/my/paid?session_id=cs_test_plan')
     assert A.db.session.get(A.Person, kid.id).insurance_opted_in, 'paying turns on the protection plan'
     assert A.FeePayment.query.one().status == 'paid' and not A.status_for(agreement, kid)['plan_unpaid']
+    receipt = A.Receipt.query.one()
+    assert (receipt.method, receipt.amount) == ('online', 25) and receipt.reference == 'Paid online, ref est_plan'
+    assert A.db.session.get(A.AgreementSignature, st['plan'].id).plan_receipt_id == receipt.id, 'paying online makes a receipt'
     assert 'Protection plan' in client.get('/admin/portal').get_data(as_text=True)
 
 

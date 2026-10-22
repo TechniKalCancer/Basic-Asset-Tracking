@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}Receipts{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('billing') }}Receipts &amp; Invoices</h1>
+</div>
+<p class="rc-sub">A receipt is made every time a payment is recorded, at the office or online, so there's always one to print or reprint.
+  Invoices show what a student's family owes right now; print one from the student's page, or several at once here.</p>
+
+<section class="card" aria-labelledby="rcInvoices">
+  <h2 id="rcInvoices" style="margin-top:0;">Print invoices</h2>
+  <form method="GET" action="/admin/invoices/print" class="rc-row">
+    <input type="hidden" name="owing" value="1">
+    <label for="rcSite">Everyone who owes at</label>
+    <select id="rcSite" name="site_id">
+      <option value="">every school</option>
+      {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary">{{ icon('print') }}Print invoices</button>
+  </form>
+  <p class="rc-muted">One page per student, addressed to their parent/guardian, with a return slip. To pick students, tick charges on
+    <a class="tag-link" href="/admin/payments/charges">Charges</a> and choose "Print invoices".</p>
+</section>
+
+<section class="card" style="padding:0;" aria-labelledby="rcList">
+  <div style="padding:1.2rem 1.5rem .2rem;">
+    <h2 id="rcList" style="margin:0 0 .6rem;">Receipts</h2>
+    <form method="GET" class="rc-row">
+      <label class="sr-only" for="rcQ">Search receipts</label>
+      <input type="search" id="rcQ" name="q" value="{{ q }}" placeholder="Name or receipt number (R-000123)">
+      <label class="sr-only" for="rcSiteF">School</label>
+      <select id="rcSiteF" name="site_id"><option value="">Every school</option>
+        {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if site_id == s.id }}>{{ s.name }}</option>{% endfor %}</select>
+      <button type="submit" class="btn btn-ghost">Search</button>
+    </form>
+  </div>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Receipt</th><th>Paid</th><th>From</th><th class="num">Amount</th><th>How</th><th>Recorded by</th><th></th></tr></thead>
+    <tbody>
+      {% for r in receipts %}
+      <tr>
+        <td><a class="tag-link" href="/admin/receipts/{{ r.id }}"><code>{{ r.number }}</code></a></td>
+        <td style="white-space:nowrap;">{{ r.paid_at.strftime('%Y-%m-%d') }}</td>
+        <td>{% if r.person_id %}<a class="tag-link" href="/admin/people/{{ r.person_id }}">{{ r.person_name }}</a>{{ person_status(r.person_id) }}{% else %}{{ r.person_name }}{% endif %}
+          <div class="rc-muted">{{ r['items']|length }} item{{ 's' if r['items']|length != 1 }}{% if r.site %} · {{ r.site.name }}{% endif %}</div></td>
+        <td class="num">${{ '%.2f'|format(r.amount) }}</td>
+        <td>{{ receipt_method(r) }}{% if r.reference %}<div class="rc-muted">{{ r.reference }}</div>{% endif %}</td>
+        <td class="rc-muted">{{ r.received_by or '—' }}</td>
+        <td style="text-align:right;"><a class="btn btn-ghost" style="padding:.3rem .7rem;" href="/admin/receipts/{{ r.id }}">{{ icon('print') }}Print</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:2rem;">{{ 'No receipts match.' if q or site_id else 'No receipts yet. One is made the next time a payment is recorded.' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="rcSettings">
+  <h2 id="rcSettings" style="margin-top:0;">{{ icon('settings') }}What invoices and receipts say</h2>
+  {% if can('admin') %}
+  <form method="POST" action="/admin/receipts/settings" class="rc-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Make checks payable to <input name="payable_to" value="{{ settings.payable_to or '' }}" placeholder="e.g. Fox Creek School" maxlength="160"></label>
+    <label>How to pay <span class="rc-muted">(blank: "Pay at the school's front office by cash or check")</span>
+      <textarea name="pay_instructions" rows="3" placeholder="e.g. Pay at the front office, 7:30–3:30. Cash or check only.">{{ settings.pay_instructions or '' }}</textarea></label>
+    <label>Office contact, under the school name <textarea name="contact" rows="3" placeholder="Street address&#10;City, SC ZIP&#10;Phone · email">{{ settings.contact or '' }}</textarea></label>
+    <label>Footer note <textarea name="footer" rows="2" placeholder="e.g. Questions about a charge? Call the front office.">{{ settings.footer or '' }}</textarea></label>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+  {% else %}
+  <p class="rc-muted">An administrator sets the payable-to name, payment instructions and office contact.</p>
+  {% endif %}
+</section>
+
+<style>
+  .rc-sub { color: var(--muted); font-size: .9rem; max-width: 82ch; margin: 0 0 1rem; }
+  .rc-row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-bottom: .6rem; }
+  .rc-row select, .rc-row input[type=search] { width: auto; max-width: 100%; }
+  .rc-row input[type=search] { min-width: 16rem; }
+  .rc-muted { color: var(--muted); font-size: .8rem; }
+  .rc-form { display: grid; gap: .8rem; max-width: 640px; }
+  .rc-form label { display: grid; gap: .3rem; font-size: .88rem; }
+  .rc-form button { justify-self: start; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

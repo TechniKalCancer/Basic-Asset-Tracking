@@ -525,6 +525,7 @@
       {% elif active_section == 'payments' and can('devices') %}
         <a href="/admin/payments">Dashboard</a>
         <a href="/admin/payments/charges">Charges</a>
+        <a href="/admin/receipts">Receipts &amp; Invoices</a>
         {% if feature('incidents') %}<a href="/admin/fees">By person</a>{% endif %}
         {% if is_super_admin() %}<a href="/admin/portal">Online payments</a>{% endif %}
       {% elif active_section == 'tickets' and can('tickets') %}

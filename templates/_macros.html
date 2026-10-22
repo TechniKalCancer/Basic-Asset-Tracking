@@ -203,3 +203,28 @@ asset_tag puts parts that fit that device's model first. Needs the repairs permi
 <span class="wn" style="color:var(--muted);">Add bell times for {{ person.site.name if person.site else 'their school' }} (Admin → Sites) to see where they are now.</span>
 {%- endif -%}
 {%- endmacro %}
+
+
+{# Record an office payment: how it was paid and a check number, then a receipt is made (services/billing.mark_paid). #}
+{% macro mark_paid_form(action, label='Mark Paid') -%}
+<div class="row-menu" style="display:inline-block;">
+  <button type="button" class="btn btn-ghost" style="padding:.2rem .55rem;font-size:.78rem;">{{ label }} ▾</button>
+  <div class="row-menu-items" style="min-width:240px;">
+    <form method="POST" action="{{ action }}" style="padding:.55rem;display:grid;gap:.45rem;text-align:left;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label style="display:grid;gap:.2rem;font-size:.78rem;color:var(--muted);">Paid by
+        <select name="method"><option value="cash">Cash</option><option value="check">Check</option>
+          <option value="card">Card at the office</option><option value="other">Other</option></select></label>
+      <label style="display:grid;gap:.2rem;font-size:.78rem;color:var(--muted);">Check # or note (optional)
+        <input name="note" maxlength="120" placeholder="e.g. Check 1042"></label>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">Record payment</button>
+      <span style="font-size:.74rem;color:var(--muted);">Makes a receipt to print.</span>
+    </form>
+  </div>
+</div>
+{%- endmacro %}
+
+
+{% macro receipt_link(receipt_id) -%}
+{%- if receipt_id -%}<a class="tag-link" href="/admin/receipts/{{ receipt_id }}" style="font-size:.74rem;margin-left:.3rem;" title="Print the receipt">{{ icon('print') }}R-{{ '%06d'|format(receipt_id) }}</a>{%- endif -%}
+{%- endmacro %}

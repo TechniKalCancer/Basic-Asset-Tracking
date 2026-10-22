@@ -1,0 +1,40 @@
+<style>
+  .pp-actions { display: flex; gap: .8rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.2rem; }
+  .pp-actions .pp-count { color: var(--muted); font-size: .88rem; }
+  .pp-doc { background: #fff; color: #111; border-radius: 8px; padding: 2.4rem 2.6rem; max-width: 780px; margin: 0 auto 1.6rem;
+            font-size: .95rem; line-height: 1.45; }
+  .pp-doc table { width: 100%; border-collapse: collapse; }
+  .pp-doc th, .pp-doc td { padding: .5rem .4rem; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; color: #111; background: none; }
+  .pp-doc th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  .pp-doc .num { text-align: right; white-space: nowrap; }
+  .pp-top { display: flex; justify-content: space-between; gap: 1.5rem; align-items: flex-start; margin-bottom: 1.6rem; }
+  .pp-logo { display: block; max-height: 52px; max-width: 210px; margin-bottom: .5rem; }
+  .pp-org { font-size: 1.3rem; font-weight: 700; }
+  .pp-meta { text-align: right; color: #444; font-size: .9rem; }
+  .pp-title { font-size: 1.6rem; font-weight: 800; letter-spacing: .06em; color: #111; margin-bottom: .2rem; }
+  .pp-small { font-size: .85rem; color: #555; }
+  .pp-pre { white-space: pre-line; }
+  .pp-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-bottom: 1.4rem; }
+  .pp-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: #666; margin-bottom: .2rem; }
+  .pp-total td { border-bottom: none; border-top: 2px solid #111; font-weight: 800; font-size: 1.05rem; }
+  .pp-box { border: 1px solid #ccc; border-radius: 6px; padding: .8rem 1rem; margin-top: 1.2rem; }
+  .pp-box h3 { margin: 0 0 .35rem; font-size: .95rem; color: #111; }
+  .pp-paid { display: inline-block; border: 3px solid #15803d; color: #15803d; font-weight: 800; letter-spacing: .12em;
+             padding: .2rem .8rem; border-radius: 6px; transform: rotate(-4deg); font-size: 1.1rem; }
+  .pp-due { color: #b91c1c; }
+  .pp-cut { margin-top: 1.8rem; padding-top: 1rem; border-top: 2px dashed #888; }
+  .pp-cut .pp-slip { display: grid; grid-template-columns: repeat(2, 1fr); gap: .35rem 1.2rem; font-size: .9rem; }
+  .pp-line { border-bottom: 1px solid #111; display: inline-block; min-width: 7rem; }
+  .pp-foot { margin-top: 1.4rem; font-size: .82rem; color: #555; white-space: pre-line; }
+  @media (max-width: 560px) {
+    .pp-doc { padding: 1.4rem 1.1rem; }
+    .pp-top, .pp-parties { display: block; }
+    .pp-meta { text-align: left; margin-top: .8rem; }
+  }
+  @media print {
+    nav, header, .subnav, #session-warning, .pp-actions, .flash-messages, .flash { display: none !important; }
+    body, .container, main { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    .pp-doc { border-radius: 0; max-width: none; margin: 0; padding: 0; box-shadow: none; }
+    .pp-doc + .pp-doc { break-before: page; page-break-before: always; }
+  }
+</style>

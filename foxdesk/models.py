@@ -583,6 +583,7 @@ class Incident(db.Model):
     # PAYMENT_METHODS; a waived fee is no longer owed but stays on record.
     paid_method  = db.Column(db.String(20), nullable=True)
     paid_note    = db.Column(db.String(120), nullable=True)
+    receipt_id   = db.Column(db.Integer, db.ForeignKey('receipt.id'), nullable=True, index=True)
     waived_at    = db.Column(db.DateTime, nullable=True)
     waived_by    = db.Column(db.String(160), nullable=True)
     waive_reason = db.Column(db.String(255), nullable=True)
@@ -795,6 +796,7 @@ class TicketCharge(db.Model):
     created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
     paid_method  = db.Column(db.String(20), nullable=True)
     paid_note    = db.Column(db.String(120), nullable=True)
+    receipt_id   = db.Column(db.Integer, db.ForeignKey('receipt.id'), nullable=True, index=True)
     waived_at    = db.Column(db.DateTime, nullable=True)
     waived_by    = db.Column(db.String(160), nullable=True)
     waive_reason = db.Column(db.String(255), nullable=True)
@@ -1442,6 +1444,43 @@ class SlaSettings(db.Model):
     updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
+class Receipt(db.Model):
+    """A payment received, as handed or sent home to the family: issued every
+    time charges are marked paid (at the office or online), one per person
+    per payment. items is a snapshot of what it paid for, so a reprint years
+    later matches the original even if a charge is edited. Numbered from its
+    id (R-000123). See services/receipts.py."""
+    __tablename__ = 'receipt'
+    id          = db.Column(db.Integer, primary_key=True)
+    person_id   = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True, index=True)
+    person_name = db.Column(db.String(160), nullable=False)
+    site_id     = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
+    amount      = db.Column(db.Numeric(10, 2), nullable=False)
+    method      = db.Column(db.String(20), nullable=False)    # PAYMENT_METHODS key
+    reference   = db.Column(db.String(120), nullable=True)    # check number, Stripe session, a note
+    received_by = db.Column(db.String(160), nullable=True)
+    items       = db.Column(db.JSON, nullable=False)          # [{kind, description, ref, amount}]
+    paid_at     = db.Column(db.DateTime, nullable=False)
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    person = db.relationship('Person')
+    site = db.relationship('Site')
+
+    @property
+    def number(self):
+        return f'R-{self.id:06d}'
+
+
+class InvoiceSettings(db.Model):
+    """One row: what printed invoices and receipts say about paying."""
+    __tablename__ = 'invoice_settings'
+    id               = db.Column(db.Integer, primary_key=True)
+    payable_to       = db.Column(db.String(160), nullable=True)   # "Make checks payable to ..."
+    pay_instructions = db.Column(db.Text, nullable=True)
+    contact          = db.Column(db.Text, nullable=True)          # office address / phone / email lines
+    footer           = db.Column(db.Text, nullable=True)
+
+
 class OverdueSettings(db.Model):
     """One row: the repair time limit and the daily overdue email to each
     school's techs (services/overdue.py). last_alert_on is claimed with a
@@ -1527,6 +1566,7 @@ class AgreementSignature(db.Model):
     plan_amount  = db.Column(db.Numeric(8, 2), nullable=True)
     plan_paid_at = db.Column(db.DateTime, nullable=True)
     plan_waived_at = db.Column(db.DateTime, nullable=True)
+    plan_receipt_id = db.Column(db.Integer, db.ForeignKey('receipt.id'), nullable=True, index=True)
     recorded_by  = db.Column(db.String(160), nullable=True)
 
     person = db.relationship('Person')

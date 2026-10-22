@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Invoice — ' ~ invoices[0].person.full_name if invoices|length == 1 else invoices|length ~ ' invoices' }}{% endblock %}
+{% block content %}
+{% include '_paper_styles.html' %}
+<div class="pp-actions">
+  <button type="button" class="btn btn-primary" onclick="window.print()">{{ icon('print') }}Print{{ ' all ' ~ invoices|length if invoices|length > 1 }}</button>
+  {% if invoices|length == 1 %}<a href="/admin/people/{{ invoices[0].person.id }}" class="btn btn-ghost">← {{ invoices[0].person.full_name }}</a>
+  {% else %}<a href="/admin/payments/charges" class="btn btn-ghost">← Charges</a>
+  <span class="pp-count">One invoice per page, {{ invoices|length }} students.</span>{% endif %}
+</div>
+
+{% for inv in invoices %}
+{% set p = inv.person %}
+{% set site = p.site %}
+{% set doc_title = 'INVOICE' %}
+{% set doc_meta = [inv.number, 'Date ' ~ inv.date.strftime('%B %-d, %Y')] %}
+<article class="pp-doc" aria-label="Invoice for {{ p.full_name }}">
+  {% include '_paper.html' %}
+  <div class="pp-parties">
+    <div>
+      <div class="pp-label">To</div>
+      <div><strong>{{ ('Parent/guardian of ' ~ p.full_name) if p.role == 'student' else p.full_name }}</strong></div>
+      {% if p.role == 'student' and p.guardian_name %}<div>{{ p.guardian_name }}</div>{% endif %}
+      {% if p.role == 'student' and p.guardian_email %}<div class="pp-small">{{ p.guardian_email }}</div>{% endif %}
+    </div>
+    <div>
+      <div class="pp-label">{{ 'Student' if p.role == 'student' else 'Account' }}</div>
+      <div><strong>{{ p.full_name }}</strong></div>
+      <div class="pp-small">{% if p.external_id %}ID {{ p.external_id }}{% endif %}{% if p.grad_year %}{{ ' · ' if p.external_id }}Class of {{ p.grad_year }}{% endif %}</div>
+      {% if site %}<div class="pp-small">{{ site.name }}</div>{% endif %}
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Date</th><th>For</th><th>Reference</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      {% for c in inv.owed %}
+      <tr><td style="white-space:nowrap;">{{ c.created_at.strftime('%b %-d, %Y') }}</td>
+        <td>{{ c.kind_label }}: {{ c.description }}</td><td>{{ c.link_label or '' }}</td><td class="num">${{ '%.2f'|format(c.amount) }}</td></tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:#555;">Nothing is owed. Thank you!</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr class="pp-total"><td colspan="3">Amount due</td><td class="num {{ 'pp-due' if inv.total }}">${{ '%.2f'|format(inv.total) }}</td></tr></tfoot>
+  </table>
+
+  {% if inv.paid %}
+  <p class="pp-small" style="margin:.8rem 0 0;">Already paid this school year: ${{ '%.2f'|format(inv.paid_total) }}
+    ({% for c in inv.paid %}{{ c.paid_at.strftime('%b %-d') }} ${{ '%.2f'|format(c.amount) }}{% if not loop.last %}; {% endif %}{% endfor %}). Thank you.</p>
+  {% endif %}
+
+  {% if inv.total %}
+  <div class="pp-box">
+    <h3>How to pay</h3>
+    {% if settings.pay_instructions %}<div class="pp-pre">{{ settings.pay_instructions }}</div>
+    {% else %}<div>Pay at {{ site.name if site else 'the school' }}'s front office by cash or check, and bring this invoice with you.</div>{% endif %}
+    {% if settings.payable_to %}<div style="margin-top:.35rem;">Make checks payable to <strong>{{ settings.payable_to }}</strong>, and write the student's name on the check.</div>{% endif %}
+    {% if pay_online_url %}<div style="margin-top:.35rem;">Or pay online: <strong>{{ pay_online_url }}</strong></div>{% endif %}
+  </div>
+  <div class="pp-cut" aria-label="Return slip">
+    <div class="pp-small" style="margin-bottom:.5rem;">✂ Return this part with your payment</div>
+    <div class="pp-slip">
+      <div>Student: <strong>{{ p.full_name }}</strong></div>
+      <div>{{ inv.number }}{% if p.external_id %} · ID {{ p.external_id }}{% endif %}</div>
+      <div>Amount due: <strong>${{ '%.2f'|format(inv.total) }}</strong></div>
+      <div>Amount paid: $<span class="pp-line"></span></div>
+      <div>Cash / Check #: <span class="pp-line"></span></div>
+      <div>Received by: <span class="pp-line"></span></div>
+    </div>
+  </div>
+  {% endif %}
+  {% if settings.footer %}<div class="pp-foot">{{ settings.footer }}</div>{% endif %}
+</article>
+{% endfor %}
+{% endblock %}

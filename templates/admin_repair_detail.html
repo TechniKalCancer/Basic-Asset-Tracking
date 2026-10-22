@@ -220,7 +220,7 @@
         <td style="white-space:nowrap;">${{ '%.2f'|format(c.amount) }}</td>
         <td>
           {% if c.paid_at %}
-            <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+            <span class="badge badge-green" style="font-size:.7rem;">Paid</span>{{ macros.receipt_link(c.receipt_id) }}
           {% elif c.waived_at %}
             <span class="badge badge-neutral" style="font-size:.7rem;" title="{{ 'Waived by ' ~ c.waived_by if c.waived_by }}{{ ': ' ~ c.waive_reason if c.waive_reason }}">Waived</span>
           {% else %}
@@ -229,10 +229,7 @@
         </td>
         <td style="text-align:right;white-space:nowrap;">
           {% if c.is_owed %}
-          <form method="POST" action="/admin/ticket_charges/{{ c.id }}/mark_paid" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-ghost" style="padding:.2rem .5rem;font-size:.78rem;">Mark Paid</button>
-          </form>
+          {{ macros.mark_paid_form('/admin/ticket_charges/' ~ c.id ~ '/mark_paid') }}
           {% endif %}
           <div class="row-menu" style="display:inline-block;">
             <button type="button" style="padding:.2rem .5rem;font-size:.78rem;">⋮</button>

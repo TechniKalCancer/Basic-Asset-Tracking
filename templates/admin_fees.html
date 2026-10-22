@@ -44,7 +44,7 @@
           <td>{% if charge.amount %}${{ '%.2f'|format(charge.amount) }}{% else %}—{% endif %}</td>
           <td>
             {% if charge.paid %}
-              <span class="badge badge-green" style="font-size:.7rem;">Paid</span>
+              <span class="badge badge-green" style="font-size:.7rem;">Paid</span>{{ macros.receipt_link(charge.receipt_id) }}
             {% elif charge.waived %}
               <span class="badge badge-neutral" style="font-size:.7rem;">Waived</span>
             {% else %}
@@ -53,10 +53,7 @@
           </td>
           <td style="text-align:right;white-space:nowrap;">
             {% if not charge.paid and not charge.waived %}
-            <form method="POST" action="{{ charge.mark_paid_url }}" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-ghost" style="padding:.3rem .7rem;">Mark Paid</button>
-            </form>
+            {{ macros.mark_paid_form(charge.mark_paid_url) }}
             {% endif %}
             <div class="row-menu" style="display:inline-block;">
               <button type="button">Edit ⋮</button>

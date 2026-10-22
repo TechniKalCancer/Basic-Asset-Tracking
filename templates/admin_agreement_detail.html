@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}{{ agreement.title }}{% endblock %}
+{% import '_macros.html' as macros %}
 {% block content %}
 <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem;flex-wrap:wrap;">
   <h1 style="margin:0;">{{ icon('document') }}{{ agreement.title }}</h1>
@@ -102,15 +103,12 @@
         <td class="ad-sigs">{% for role, s in r.signatures.items() %}<div>{{ s.signer_name }} <span class="ad-muted">({{ roles[role] }}, {{ s.signed_at.strftime('%b %d') }})</span></div>{% else %}<span class="ad-muted">—</span>{% endfor %}</td>
         {% if agreement.plan_offered %}
         <td>{% if r.plan %}{% if r.plan.plan_choice == 'enrolled' %}
-              {% if r.plan_unpaid %}<span class="badge badge-yellow">Enrolled, not paid</span>{% else %}<span class="badge badge-green">Enrolled</span>{% endif %}
+              {% if r.plan_unpaid %}<span class="badge badge-yellow">Enrolled, not paid</span>{% else %}<span class="badge badge-green">Enrolled</span>{{ macros.receipt_link(r.plan.plan_receipt_id) }}{% endif %}
             {% else %}<span class="ad-muted">Declined</span>{% endif %}{% else %}<span class="ad-muted">—</span>{% endif %}</td>
         {% endif %}
         <td style="text-align:right;white-space:nowrap;">
           {% if r.plan_unpaid %}
-          <form method="POST" action="/admin/agreement_signatures/{{ r.plan.id }}/plan_paid" style="display:inline;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-ghost btn-small">Mark paid</button>
-          </form>
+          {{ macros.mark_paid_form('/admin/agreement_signatures/' ~ r.plan.id ~ '/plan_paid') }}
           {% endif %}
           {% if not r.complete and agreement.is_active %}
           <div class="row-menu" style="display:inline-block;">

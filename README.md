@@ -807,6 +807,26 @@ A real tracking record for devices sent out for repair, separate from just label
   the repair on that ticket instead of opening a second one; automations sending a ticket's device
   to repair do the same.
 
+## Invoices and Receipts (Payments → Receipts & Invoices)
+
+**Receipts:** recording a payment, whether on Payments → Charges, a device's damage fee, a ticket charge, a protection
+plan, or online through the portal, makes a numbered receipt (R-000123), one per person per payment.
+Mark Paid asks how it was paid (cash, check, card, other) and takes a check number or note for the
+receipt. Each receipt keeps a copy of what it paid for, so a reprint matches the original, and shows
+what's still owed as of the day it's printed. Paid charges link to their receipt everywhere they're
+listed; the person page lists their receipts, and can make receipts for payments recorded before receipts
+existed (dated when they were paid). Receipts & Invoices searches every receipt by name or number.
+
+**Invoices:** a student's page has **Print invoice** whenever anything is owed: addressed to the
+parent/guardian, every open damage fee, ticket charge and protection plan with the total due, what was
+already paid this school year, how to pay, and a return slip to bring back with the payment. Print
+invoices for everyone who owes (or one school) from Receipts & Invoices, or tick charges on Charges and
+choose "Print invoices for these students". One student per page.
+
+Admins set what both say: who checks are payable to, how to pay, the office contact under the school
+name, and a footer. Online payment instructions appear only when the portal and online payments are on
+and `APP_URL` is set. Amounts are the charged amounts only.
+
 ## Overdue at Each School (Repairs → Overdue)
 
 `/admin/overdue` lists, per school, repairs past due, loaners past their due date, and assigned

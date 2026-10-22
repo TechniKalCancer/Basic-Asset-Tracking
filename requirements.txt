@@ -28,7 +28,7 @@ cryptography==50.0.2
 # ─── Pulled in by the above (pinned so every build is identical) ───────────────
 alembic==1.16.5
 blinker==1.9.0
-certifi==2026.7.22
+certifi==2026.10.19
 cffi==2.0.0
 charset-normalizer==3.5.2
 click==8.1.8

@@ -4,8 +4,10 @@ from flask import flash, redirect, render_template, request, url_for
 from foxdesk.core import EMAIL_ENABLED, app, db
 from foxdesk.models import Site, StudentSchedule
 from foxdesk.services.auth import _current_site_ids, _current_user, _has_permission, _log_activity, require_permission
+from collections import OrderedDict
+
 from foxdesk.services.overdue import (
-    DEFAULT_REPAIR_MAX_DAYS, digest_text, overdue_by_site, overdue_settings, send_tech_alerts,
+    DEFAULT_REPAIR_MAX_DAYS, _count, daily_sections, digest_text, overdue_settings, send_tech_alerts,
 )
 from foxdesk.services.schedules import import_schedules
 
@@ -17,12 +19,14 @@ MAX_SCHEDULE_UPLOAD = 15 * 1024 * 1024
 def admin_overdue():
     """Every school's overdue repairs, loaners and due-back devices — the same
     list each school's techs get by email on school-day mornings."""
-    by_site = overdue_by_site(_current_site_ids())
+    site_ids = _current_site_ids()
+    by_site = OrderedDict((sid, sec) for sid, sec in daily_sections().items()
+                          if (site_ids is None or sid in site_ids) and (_count(sec) or sec['new_students']))
     sites = Site.query.order_by(Site.name).all()
     me = _current_user()
     preview = None
     if me and request.args.get('preview'):
-        mine = [s for sid, s in overdue_by_site().items() if s['site'] and me in s['site'].techs]
+        mine = [s for sid, s in daily_sections().items() if s['site'] and me in s['site'].techs]
         preview = digest_text(mine)[1] if mine else ''
     return render_template('admin_overdue.html', by_site=by_site, settings=overdue_settings(), sites=sites,
                            email_enabled=EMAIL_ENABLED, me=me, preview=preview, default_max=DEFAULT_REPAIR_MAX_DAYS,
@@ -44,6 +48,10 @@ def admin_overdue_settings():
         return redirect(url_for('admin_overdue'))
     row.repair_max_days, row.alert_hour = max_days, hour
     row.alerts_enabled = bool(request.form.get('alerts_enabled'))
+    row.new_student_alerts = bool(request.form.get('new_student_alerts'))
+    if row.new_student_alerts and not row.new_student_since:
+        from foxdesk.clock import utcnow
+        row.new_student_since = utcnow()
     _log_activity('settings_edit', f'Overdue settings: repairs {max_days} days max, tech email '
                   f'{"on at " + str(hour) + ":00" if row.alerts_enabled else "off"}.')
     db.session.commit()

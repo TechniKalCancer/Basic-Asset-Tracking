@@ -72,6 +72,8 @@
     {% endif %}
     <label for="rpNote" class="rp-label">Note {% if not repair.returned_at %}(optional){% endif %}</label>
     <textarea id="rpNote" name="note" rows="2" maxlength="5000" placeholder="e.g. Ordered a new screen from Dell, RMA 4471-22. Student has loaner LN-12."></textarea>
+    <label class="rp-label rp-time">Time spent <input name="minutes" inputmode="numeric" placeholder="0" style="width:5rem;"> minutes
+      <span>{% if repair.labor_minutes %}({{ (repair.labor_minutes / 60)|round(1) }} h logged so far){% else %}(optional, for repair costs){% endif %}</span></label>
     <button type="submit" class="btn btn-primary">{{ 'Save' if not repair.returned_at else 'Add Note' }}</button>
   </form>
   {% if repair.note_rows %}
@@ -289,6 +291,9 @@
   .rp-chip-close { border-style: dashed; }
   .rp-chip-close:has(input:checked) { border-color: var(--success); border-style: solid; color: var(--success); }
   .rp-hint { margin: 0; font-size: .78rem; color: var(--muted); }
+  .rp-time { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+  .rp-time input { width: 5rem; }
+  .rp-time span { font-size: .78rem; }
   .rp-timeline { list-style: none; margin: 1.1rem 0 0; padding: 0 0 0 1rem; border-left: 2px solid var(--border); display: grid; gap: .9rem; }
   .rp-timeline li { position: relative; }
   .rp-timeline li::before { content: ''; position: absolute; left: -1.38rem; top: .3rem; width: .6rem; height: .6rem;

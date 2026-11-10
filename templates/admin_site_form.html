@@ -69,6 +69,13 @@
       </div>
     </fieldset>
 
+    <fieldset class="sf-set" id="password">
+      <legend>Student password lookup</legend>
+      <p class="sf-help">This school's lookup app (Deploy → Manage deployments, the /a/macros/&lt;domain&gt;/ link). Student pages get a
+        "Look up password" button that opens it searching for that student; the password only shows inside the app, with its own logging.</p>
+      <input name="password_lookup_url" value="{{ form.get('password_lookup_url', '') if form else (site.password_lookup_url or '' if site else '') }}" placeholder="https://script.google.com/a/macros/yourdomain/s/.../exec">
+    </fieldset>
+
     <fieldset class="sf-set" id="bells">
       <legend>Bell times</legend>
       <p class="sf-help">One period per line: name, start, end. Used with imported schedules to show where a student is right now.

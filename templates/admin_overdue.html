@@ -12,7 +12,8 @@
 {% for sid, s in by_site.items() %}
 <section class="card od-site" aria-labelledby="od{{ sid or 0 }}">
   <h2 id="od{{ sid or 0 }}" style="margin-top:0;">{{ s.site.name if s.site else 'Devices with no school set' }}
-    <span class="badge badge-red">{{ s.repairs|length + s.loaners|length + s.assignments|length }}</span></h2>
+    {% set n = s.repairs|length + s.loaners|length + s.assignments|length %}{% if n %}<span class="badge badge-red">{{ n }}</span>{% endif %}
+    {% if s.new_students %}<span class="badge badge-yellow">{{ s.new_students|length }} new without a device</span>{% endif %}</h2>
   {% if s.site %}<p class="od-techs">Techs:
     {% for u in s.site.techs %}{{ u.username }}{% if not u.email %} <span class="badge badge-yellow" title="No email on their user account">no email</span>{% endif %}{% if not loop.last %}, {% endif %}
     {% else %}<span style="color:var(--warning);">nobody yet</span>{% if can_admin %}, <a class="tag-link" href="/admin/sites/{{ s.site.id }}/edit">pick techs</a>{% endif %}{% endfor %}</p>
@@ -39,6 +40,15 @@
         <td class="od-muted">{% if l.for_repair %}Repair loaner, student not emailed{% endif %}</td></tr>
     {% endfor %}</tbody></table></div>
   {% endif %}
+  {% if s.new_students %}
+  <h3>New students without a device</h3>
+  <div style="overflow-x:auto;"><table>
+    <thead><tr><th>Student</th><th>Added</th><th>Waiting</th></tr></thead>
+    <tbody>{% for p in s.new_students %}
+      <tr><td><a class="tag-link" href="/admin/people/{{ p.id }}">{{ p.name }}</a>{% if p.grad_year %}<div class="od-muted">Class of {{ p.grad_year }}</div>{% endif %}</td>
+        <td>{{ p.added.strftime('%b %d') }}</td><td class="od-late">{{ p.days }} day{{ 's' if p.days != 1 }}</td></tr>
+    {% endfor %}</tbody></table></div>
+  {% endif %}
   {% if s.assignments %}
   <h3>Assigned devices past their due date</h3>
   <div style="overflow-x:auto;"><table>
@@ -62,6 +72,8 @@
     <label>Repairs can be out at most <input type="number" name="repair_max_days" min="1" max="120" value="{{ settings.repair_max_days }}" style="width:5rem;"> days
       <span class="od-muted">(default {{ default_max }}). A repair is due back by then; a later date can't be set.</span></label>
     <label class="od-check"><input type="checkbox" name="alerts_enabled" {{ 'checked' if settings.alerts_enabled }}> Email each school's techs their overdue list on school days</label>
+    <label class="od-check"><input type="checkbox" name="new_student_alerts" {{ 'checked' if settings.new_student_alerts }}> Include new students who've gone a day without a device
+      <span class="od-muted">(only students added since {{ settings.new_student_since.strftime('%b %d, %Y') if settings.new_student_since else 'this is turned on' }}; "Doesn't need one" on a student's page stops it for them)</span></label>
     <label>at <input type="number" name="alert_hour" min="0" max="23" value="{{ settings.alert_hour }}" style="width:4.5rem;">:00
       <span class="od-muted">local time. School days and closed dates come from the SLA calendar (Admin → SLA).</span></label>
     <button type="submit" class="btn btn-primary">Save</button>

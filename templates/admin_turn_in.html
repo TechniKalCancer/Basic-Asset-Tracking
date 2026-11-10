@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Turn-in{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 .5rem;">{{ icon('collection') }}Turn-in</h1>
+<p class="ti-sub">For end of year: scan each device as it comes in and it's given a box and slot, so it can go back to the same student in the fall.
+  The list of who hasn't turned in yet updates as you go. Devices stay assigned over the summer unless the turn-in is for students who are leaving.</p>
+
+<section class="card" aria-labelledby="tiNew">
+  <h2 id="tiNew" style="margin-top:0;">Start a turn-in</h2>
+  <form method="POST" class="ti-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Name <input name="name" required maxlength="120" placeholder="e.g. End of year 2027"></label>
+    <label>School <select name="site_id">{% if is_super_admin() %}<option value="">Every school</option>{% endif %}
+      {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></label>
+    <label>Devices per box <input name="box_size" value="10" inputmode="numeric" style="width:5rem;"></label>
+    <label class="ti-check"><input type="checkbox" name="returns_device"> Students are leaving: unassign each device as it's turned in</label>
+    <button type="submit" class="btn btn-primary">Start</button>
+  </form>
+</section>
+
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Turn-in</th><th>School</th><th class="num">Turned in</th><th>Started</th><th></th></tr></thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr><td><a class="tag-link" href="/admin/turn-in/{{ s.id }}">{{ s.name }}</a>{% if s.returns_device %}<div class="ti-muted">unassigns at turn-in</div>{% endif %}</td>
+        <td class="ti-muted">{{ s.site.name if s.site else 'Every school' }}</td><td class="num">{{ counts.get(s.id, 0) }}</td>
+        <td class="ti-muted">{{ s.started_at.strftime('%b %d, %Y') }}{% if s.closed_at %} · closed{% endif %}</td>
+        <td style="text-align:right;"><a class="btn btn-ghost" style="padding:.3rem .7rem;" href="/admin/turn-in/{{ s.id }}">Open</a></td></tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1.6rem;">No turn-ins yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .ti-sub { color: var(--muted); font-size: .9rem; max-width: 84ch; margin: 0 0 1rem; }
+  .ti-form { display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; }
+  .ti-form label { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  .ti-form input, .ti-form select { width: auto; }
+  .ti-check { display: flex !important; align-items: center; gap: .45rem; }
+  .ti-check input { width: auto; }
+  .ti-muted { color: var(--muted); font-size: .8rem; }
+  td.num, th.num { text-align: right; }
+</style>
+{% endblock %}

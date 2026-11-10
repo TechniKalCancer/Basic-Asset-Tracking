@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit ' ~ contract.name if contract else 'Add a contract' }}{% endblock %}
+{% block content %}
+{% macro val(field, default='') -%}{{ form.get(field, '') if form else (contract[field] if contract and contract[field] is not none else default) }}{%- endmacro %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ 'Edit ' ~ contract.name if contract else 'Add a contract or license' }}</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a href="/admin/contracts" class="btn btn-ghost">← Contracts</a>
+</div>
+<div class="card" style="max-width:760px;">
+  <form method="POST" class="cf-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="cf-wide">Name <input name="name" value="{{ val('name') }}" maxlength="160" required placeholder="e.g. Lightspeed Filter"></label>
+    <label>Vendor <input name="vendor" value="{{ val('vendor') }}" maxlength="160" placeholder="e.g. Lightspeed Systems"></label>
+    <label>Kind <select name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}" {{ 'selected' if val('kind', 'software') == key }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>For <select name="site_id"><option value="">The whole district</option>
+      {% for s in sites %}<option value="{{ s.id }}" {{ 'selected' if val('site_id')|string == s.id|string }}>{{ s.name }}</option>{% endfor %}</select></label>
+    <label>Contract / account / license # <input name="reference" value="{{ val('reference') }}" maxlength="120"></label>
+    <label>Starts <input type="date" name="starts_on" value="{{ val('starts_on') }}"></label>
+    <label>Ends <input type="date" name="ends_on" value="{{ val('ends_on') }}"></label>
+    <label>Cost <input name="cost" value="{{ val('cost') }}" inputmode="decimal" placeholder="e.g. 4800.00"></label>
+    <label>Billed <select name="billing"><option value="">—</option>{% for key, label in billing.items() %}<option value="{{ key }}" {{ 'selected' if val('billing') == key }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Seats / licenses <input name="seats" value="{{ val('seats') }}" inputmode="numeric"></label>
+    <label>First reminder <span><input name="notice_days" value="{{ val('notice_days', 60) }}" inputmode="numeric" style="width:5rem;"> days before it ends</span></label>
+    <label>Who handles the renewal <input name="owner" value="{{ val('owner') }}" maxlength="160" placeholder="e.g. gmcghee, the business office"></label>
+    <label class="cf-check"><input type="checkbox" name="auto_renews" {{ 'checked' if (form.get('auto_renews') if form else (contract and contract.auto_renews)) }}> Renews on its own unless cancelled</label>
+    <label class="cf-wide">Notes <textarea name="notes" rows="3" maxlength="4000">{{ val('notes') }}</textarea></label>
+    <div class="cf-wide" style="display:flex;gap:.6rem;flex-wrap:wrap;">
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+  {% if contract %}
+  <form method="POST" style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" name="action" value="toggle" class="btn btn-ghost">{{ 'Archive (stop reminders)' if contract.is_active else 'Put back on the list' }}</button>
+  </form>
+  {% endif %}
+</div>
+<style>
+  .cf-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .8rem 1rem; }
+  .cf-form label { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  .cf-wide { grid-column: 1 / -1; }
+  .cf-check { display: flex !important; align-items: center; gap: .45rem; }
+  .cf-check input { width: auto; }
+</style>
+{% endblock %}

@@ -7,7 +7,7 @@
   <a href="/admin/ticket_categories" class="btn btn-ghost">← Back</a>
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card" style="max-width:620px;">
   <form method="POST">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div style="margin-bottom:1rem;">
@@ -19,6 +19,14 @@
       <input name="default_price" value="{{ (form.default_price if form else (category.default_price if category and category.default_price is not none else '')) }}" placeholder="e.g. 15.00" />
       <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
         Applied automatically as the fee on any new ticket opened under this category — editable per-ticket afterward.
+      </span>
+    </div>
+    <div style="margin-bottom:1.5rem;">
+      <label for="catQuestions" style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Questions the request form asks (optional)</label>
+      <textarea id="catQuestions" name="questions" rows="5" placeholder="Which room? | text&#10;Is it charging? | yes/no&#10;What's wrong with the screen?* | choice: Cracked, Lines, Black">{{ form.questions if form else format_questions(category.questions if category else []) }}</textarea>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        One per line: the question, a "|", then <code>text</code>, <code>yes/no</code> or <code>choice: A, B, C</code>. End the question with * to require it.
+        They show on Submit a Ticket when someone picks this category, and the answers show on the ticket.
       </span>
     </div>
     {% if category %}

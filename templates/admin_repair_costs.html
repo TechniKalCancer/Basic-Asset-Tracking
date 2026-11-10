@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Repair Cost by Model{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('repair') }}Repair Cost by Model</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a class="btn btn-ghost" href="?period={{ period }}&export=1">{{ icon('download') }}Export CSV</a>
+</div>
+<p class="rc2-sub">Which models break most and what they cost to keep running: parts used on their repairs (at the part's unit cost), time techs
+  logged on them{% if settings.labor_rate %} at ${{ '%.2f'|format(settings.labor_rate) }} an hour{% else %} (set a labor rate on Devices → Value to price it){% endif %},
+  and what families were billed on the repair tickets.</p>
+<div class="rc2-tabs" role="navigation" aria-label="Period">
+  <a href="?period=year" class="{{ 'on' if period == 'year' }}">This school year{% if since %} (since {{ since.strftime('%b %-d') }}){% endif %}</a>
+  <a href="?period=all" class="{{ 'on' if period == 'all' }}">All time</a>
+</div>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Model</th><th class="num">Devices</th><th class="num">Repairs</th><th class="num">Per 100</th><th class="num">Parts</th>
+      <th class="num">Labor</th><th class="num">Total cost</th><th class="num">Billed</th><th class="num">Avg days out</th><th>Outcomes</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr><td>{{ r.model }}</td><td class="num">{{ '{:,}'.format(r.devices) }}</td><td class="num">{{ r.repairs }}</td>
+        <td class="num">{{ r.per100 if r.per100 is not none else '—' }}</td><td class="num">${{ '{:,.2f}'.format(r.parts) }}</td>
+        <td class="num">{{ r.hours }} h{% if r.labor %}<div class="rc2-muted">${{ '{:,.2f}'.format(r.labor) }}</div>{% endif %}</td>
+        <td class="num">${{ '{:,.2f}'.format(r.cost) }}</td><td class="num">${{ '{:,.2f}'.format(r.billed) }}</td>
+        <td class="num">{{ r.avg_days if r.avg_days is not none else '—' }}</td>
+        <td class="rc2-muted">{% for k, v in r.outcomes.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% else %}still open{% endfor %}</td></tr>
+      {% else %}
+      <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:1.6rem;">No repairs in this period.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="rc2-muted" style="margin-top:.6rem;">Log time on a repair from its Status &amp; Notes card. Parts count when they're used from Parts inventory on the repair page.</p>
+<style>
+  .rc2-sub { color: var(--muted); font-size: .9rem; max-width: 86ch; margin: 0 0 .8rem; }
+  .rc2-tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .8rem; }
+  .rc2-tabs a { padding: .3rem .75rem; border: 1px solid var(--border); border-radius: 99px; font-size: .82rem; color: var(--muted); text-decoration: none; }
+  .rc2-tabs a.on, .rc2-tabs a:hover, .rc2-tabs a:focus-visible { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .rc2-muted { color: var(--muted); font-size: .8rem; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+</style>
+{% endblock %}

@@ -12,6 +12,7 @@ class Site(db.Model):
     loaner_org_unit_path = db.Column(db.String(255), nullable=True)  # where this site's loaner Chromebooks should live in Google Workspace — see _push_loaners_to_ou
     logo_filename = db.Column(db.String(255), nullable=True)  # overrides BrandingSettings.logo_filename in the nav for this site's users; falls back when unset
     bell_schedule = db.Column(db.Text, nullable=True)  # one period per line: "1, 7:55, 8:48" — see services/schedules.py
+    password_lookup_url = db.Column(db.String(500), nullable=True)  # the student password lookup app for this school (person page link)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     techs = db.relationship('User', secondary='site_tech', lazy='select')
@@ -399,6 +400,9 @@ class Person(db.Model):
     # edit page never has to make a live API call just to render.
     google_org_unit     = db.Column(db.String(255), nullable=True)
     google_last_sync_at = db.Column(db.DateTime, nullable=True)
+    # Set when a student shouldn't get a device (pre-provisioned account, not
+    # enrolled, brings their own): stops the "new student, no device" alert.
+    device_exempt_reason = db.Column(db.String(120), nullable=True)
 
     site = db.relationship('Site')
 
@@ -631,6 +635,7 @@ class Repair(db.Model):
     ticket_id            = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=True)
     status               = db.Column(db.String(20), nullable=False, default='received', server_default='received')  # REPAIR_STATUSES, while open
     status_changed_at    = db.Column(db.DateTime, nullable=True)
+    labor_minutes        = db.Column(db.Integer, nullable=False, default=0, server_default='0')  # time techs logged on it
 
     repair_category = db.relationship('RepairCategory')
     ticket = db.relationship('Ticket', backref=db.backref('repair', uselist=False))
@@ -682,6 +687,9 @@ class TicketCategory(db.Model):
     name          = db.Column(db.String(80), unique=True, nullable=False)
     default_price = db.Column(db.Numeric(8, 2), nullable=True)
     is_active     = db.Column(db.Boolean, nullable=False, default=True)
+    # Extra questions the request form asks for this kind of issue:
+    # [{label, kind: text|choice|yesno, options: [...], required}] — services/ticket_forms.py
+    questions     = db.Column(db.JSON, nullable=True)
 
 
 HELP_ARTICLE_TYPES = {'faq': 'FAQ', 'howto': 'How-To Guide'}
@@ -705,6 +713,7 @@ class HelpArticle(db.Model):
     body         = db.Column(db.Text, nullable=False)  # the answer (FAQ) or step-by-step content (How-To)
     sort_order   = db.Column(db.Integer, nullable=False, default=0)
     is_active    = db.Column(db.Boolean, nullable=False, default=True)
+    ticket_category_id = db.Column(db.Integer, db.ForeignKey('ticket_category.id'), nullable=True)  # suggested first for that kind of request
     created_at   = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at   = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
@@ -737,6 +746,7 @@ class Ticket(db.Model):
     created_at    = db.Column(db.DateTime, nullable=False, default=utcnow, index=True)
     updated_at    = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
     resolved_at   = db.Column(db.DateTime, nullable=True)
+    answers       = db.Column(db.JSON, nullable=True)  # the category's questions as answered: [{label, answer}]
     # SLA clocks (services/sla.py): due times are set from the ticket's
     # priority when it's opened or re-prioritized; first_response_at is the
     # first reply the requester actually received (or the resolution).
@@ -1492,6 +1502,119 @@ class OverdueSettings(db.Model):
     alerts_enabled  = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
     alert_hour      = db.Column(db.Integer, nullable=False, default=7, server_default='7')  # local time, school days only
     last_alert_on   = db.Column(db.Date, nullable=True)
+    new_student_alerts = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    new_student_since  = db.Column(db.DateTime, nullable=True)  # only students added after this are watched
+
+
+class AccessoryType(db.Model):
+    """Something that goes out with a device (Charger, Case, Stylus) and what
+    it costs if it doesn't come back. device_type limits it to that kind of
+    device; blank means every kind. See services/accessories.py."""
+    __tablename__ = 'accessory_type'
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(80), nullable=False)
+    device_type = db.Column(db.String(40), nullable=True)
+    fee         = db.Column(db.Numeric(8, 2), nullable=True)
+    default_on  = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())  # ticked when assigning
+    is_active   = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    sort_order  = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+
+
+class AssignmentAccessory(db.Model):
+    """An accessory that went out with one assignment, and whether it came back.
+    name and fee are copied at hand-out so renaming a type doesn't rewrite history."""
+    __tablename__ = 'assignment_accessory'
+    id                = db.Column(db.Integer, primary_key=True)
+    assignment_id     = db.Column(db.Integer, db.ForeignKey('assignment_history.id'), nullable=False, index=True)
+    accessory_type_id = db.Column(db.Integer, db.ForeignKey('accessory_type.id'), nullable=True)
+    name              = db.Column(db.String(80), nullable=False)
+    fee               = db.Column(db.Numeric(8, 2), nullable=True)
+    returned_at       = db.Column(db.DateTime, nullable=True)
+    missing_at        = db.Column(db.DateTime, nullable=True)
+    incident_id       = db.Column(db.Integer, db.ForeignKey('incident.id'), nullable=True)
+
+    assignment = db.relationship('AssignmentHistory', backref=db.backref('accessories', lazy='select'))
+
+
+class CollectionSession(db.Model):
+    """A turn-in (usually end of year): devices scanned in go into numbered
+    boxes, box_size to a box, so each can go back to the same student in the
+    fall. returns_device=True unassigns at turn-in (graduating class) instead
+    of keeping the assignment over the summer. See services/collection.py."""
+    __tablename__ = 'collection_session'
+    id             = db.Column(db.Integer, primary_key=True)
+    name           = db.Column(db.String(120), nullable=False)
+    site_id        = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True, index=True)
+    box_size       = db.Column(db.Integer, nullable=False, default=10)
+    returns_device = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    started_at     = db.Column(db.DateTime, nullable=False, default=utcnow)
+    closed_at      = db.Column(db.DateTime, nullable=True)
+    created_by     = db.Column(db.String(160), nullable=True)
+
+    site = db.relationship('Site')
+
+
+class CollectionScan(db.Model):
+    """One device turned in during a CollectionSession, with where it was put
+    and (in the fall) when it went back out."""
+    __tablename__ = 'collection_scan'
+    id             = db.Column(db.Integer, primary_key=True)
+    session_id     = db.Column(db.Integer, db.ForeignKey('collection_session.id'), nullable=False, index=True)
+    asset_tag      = db.Column(db.String(120), nullable=False)
+    person_id      = db.Column(db.Integer, db.ForeignKey('person.id'), nullable=True, index=True)
+    person_name    = db.Column(db.String(160), nullable=True)
+    box            = db.Column(db.Integer, nullable=False)
+    slot           = db.Column(db.Integer, nullable=False)
+    note           = db.Column(db.String(255), nullable=True)
+    scanned_at     = db.Column(db.DateTime, nullable=False, default=utcnow)
+    scanned_by     = db.Column(db.String(160), nullable=True)
+    handed_back_at = db.Column(db.DateTime, nullable=True)
+    handed_back_by = db.Column(db.String(160), nullable=True)
+    __table_args__ = (db.UniqueConstraint('session_id', 'asset_tag', name='uq_collection_scan_tag'),)
+
+    session = db.relationship('CollectionSession', backref=db.backref('scans', lazy='select'))
+
+
+class AssetValueSettings(db.Model):
+    """One row: how devices lose value (straight line over life_years by
+    device type, down to salvage_percent of cost) and the labor rate for
+    repair costs. See services/asset_value.py."""
+    __tablename__ = 'asset_value_settings'
+    id              = db.Column(db.Integer, primary_key=True)
+    life_years      = db.Column(db.JSON, nullable=True)       # {device_type: years}
+    salvage_percent = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    labor_rate      = db.Column(db.Numeric(8, 2), nullable=True)  # per hour, for repair cost reports
+
+
+CONTRACT_KINDS = {'software': 'Software license', 'subscription': 'Subscription / service', 'support': 'Support / warranty',
+                  'telecom': 'Internet / phone', 'lease': 'Lease', 'other': 'Other'}
+
+
+class Contract(db.Model):
+    """A license, subscription or contract with an end date. Renewal reminders
+    go into the daily tech email (services/contracts.py) at notice_days, 30,
+    14, 7 and 1 day before ends_on."""
+    __tablename__ = 'contract'
+    id          = db.Column(db.Integer, primary_key=True)
+    name        = db.Column(db.String(160), nullable=False)
+    vendor      = db.Column(db.String(160), nullable=True)
+    kind        = db.Column(db.String(20), nullable=False, default='software')
+    site_id     = db.Column(db.Integer, db.ForeignKey('site.id'), nullable=True)
+    seats       = db.Column(db.Integer, nullable=True)
+    cost        = db.Column(db.Numeric(10, 2), nullable=True)
+    billing     = db.Column(db.String(20), nullable=True)      # yearly | monthly | one-time
+    reference   = db.Column(db.String(120), nullable=True)     # contract / account / license number
+    starts_on   = db.Column(db.Date, nullable=True)
+    ends_on     = db.Column(db.Date, nullable=True)
+    auto_renews = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    notice_days = db.Column(db.Integer, nullable=False, default=60, server_default='60')
+    owner       = db.Column(db.String(160), nullable=True)     # who handles the renewal
+    notes       = db.Column(db.Text, nullable=True)
+    is_active   = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    created_at  = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at  = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+    site = db.relationship('Site')
 
 
 class StudentSchedule(db.Model):

@@ -43,6 +43,17 @@
         Lower numbers show first within this article's type. Ties break alphabetically by title.
       </span>
     </div>
+    <div style="margin-bottom:1rem;">
+      <label for="helpCategory" style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Suggest it for tickets about (optional)</label>
+      {% set picked = (form.ticket_category_id if form else (article.ticket_category_id if article else None)) %}
+      <select id="helpCategory" name="ticket_category_id" style="max-width:320px;">
+        <option value="">Only when the words match</option>
+        {% for c in categories %}<option value="{{ c.id }}" {{ 'selected' if picked == c.id }}>{{ c.name }}</option>{% endfor %}
+      </select>
+      <span style="display:block;margin-top:.3rem;font-size:.78rem;color:var(--muted);">
+        On Submit a Ticket, articles whose title or text match what's typed are suggested; one tied to a category is suggested first whenever that category is picked.
+      </span>
+    </div>
     <label style="display:flex;align-items:center;gap:.5rem;margin-bottom:1.5rem;font-size:.85rem;color:var(--muted);cursor:pointer;">
       <input type="checkbox" name="is_active" style="width:auto;" {{ 'checked' if (article.is_active if article else true) }} />
       Active (shows up on the Help page)

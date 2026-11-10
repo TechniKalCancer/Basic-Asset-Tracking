@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Accessories{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 .5rem;">{{ icon('devices') }}Accessories</h1>
+<p class="acc-sub">What goes out with a device. When assigning, the ones marked "ticked by default" are pre-checked; when the device
+  comes back, anything missing can be charged as a damage fee to the person who had it. Retiring one keeps it on past assignments.</p>
+
+<section class="card" aria-labelledby="accAdd">
+  <h2 id="accAdd" style="margin-top:0;">Add an accessory</h2>
+  <form method="POST" class="acc-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Name <input name="name" required maxlength="80" placeholder="e.g. Charger"></label>
+    <label>For <select name="device_type"><option value="">Every kind of device</option>
+      {% for key, label in device_types.items() %}<option value="{{ key }}" {{ 'selected' if key == 'chromebook' }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Fee if lost <input name="fee" inputmode="decimal" placeholder="e.g. 25.00"></label>
+    <label class="acc-check"><input type="checkbox" name="default_on" checked> Ticked by default</label>
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+</section>
+
+<section class="card" style="padding:0;" aria-labelledby="accList">
+  <h2 id="accList" style="margin:0;padding:1.2rem 1.5rem .4rem;">Accessories</h2>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Name</th><th>For</th><th>Fee if lost</th><th>Ticked by default</th><th>Order</th><th></th></tr></thead>
+    <tbody>
+      {% for t in types %}
+      <tr{% if not t.is_active %} style="opacity:.55;"{% endif %}>
+        <td colspan="5">
+          <form method="POST" action="/admin/accessories/{{ t.id }}" class="acc-row">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label class="sr-only" for="accName{{ t.id }}">Name</label>
+            <input id="accName{{ t.id }}" name="name" value="{{ t.name }}" maxlength="80" required>
+            <label class="sr-only" for="accType{{ t.id }}">For</label>
+            <select id="accType{{ t.id }}" name="device_type"><option value="">Every kind</option>
+              {% for key, label in device_types.items() %}<option value="{{ key }}" {{ 'selected' if t.device_type == key }}>{{ label }}</option>{% endfor %}</select>
+            <label class="sr-only" for="accFee{{ t.id }}">Fee if lost</label>
+            <input id="accFee{{ t.id }}" name="fee" value="{{ '%.2f'|format(t.fee) if t.fee else '' }}" inputmode="decimal" placeholder="none" style="width:6rem;">
+            <label class="acc-check"><input type="checkbox" name="default_on" {{ 'checked' if t.default_on }}><span class="sr-only">Ticked by default</span></label>
+            <label class="sr-only" for="accSort{{ t.id }}">Order</label>
+            <input id="accSort{{ t.id }}" name="sort_order" value="{{ t.sort_order }}" inputmode="numeric" style="width:4rem;">
+            <button type="submit" class="btn btn-ghost">Save</button>
+          </form>
+        </td>
+        <td style="text-align:right;">
+          <form method="POST" action="/admin/accessories/{{ t.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" name="action" value="toggle" class="btn btn-ghost">{{ 'Retire' if t.is_active else 'Use again' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:1.6rem;">None yet. Add Charger and Case for Chromebooks to start.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+<style>
+  .acc-sub { color: var(--muted); font-size: .9rem; max-width: 82ch; margin: 0 0 1rem; }
+  .acc-form { display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; }
+  .acc-form label { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  .acc-form input, .acc-form select { width: auto; }
+  .acc-check { display: inline-flex !important; align-items: center; gap: .4rem; }
+  .acc-check input { width: auto; }
+  .acc-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .acc-row input, .acc-row select { width: auto; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

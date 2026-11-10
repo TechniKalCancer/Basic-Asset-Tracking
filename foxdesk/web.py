@@ -29,6 +29,10 @@ NAV_SECTION_PREFIXES = [
     ('/admin/receipts', 'payments'),
     ('/admin/invoices', 'payments'),
     ('/admin/repair_categories', 'devices'),
+    ('/admin/accessories', 'devices'),
+    ('/admin/value', 'devices'),
+    ('/admin/contracts', 'devices'),
+    ('/admin/turn-in', 'devices'),
     ('/admin/collection', 'devices'),
     ('/asset_history', 'devices'),
     ('/api/assets', 'devices'),
@@ -290,6 +294,14 @@ def person_status(who, size='sm'):
 
 
 app.jinja_env.globals.update(person_status=person_status)
+
+
+def _format_questions(questions):
+    from foxdesk.services.ticket_forms import format_questions
+    return format_questions(questions)
+
+
+app.jinja_env.globals.update(format_questions=_format_questions)
 
 
 @app.template_filter('clock')

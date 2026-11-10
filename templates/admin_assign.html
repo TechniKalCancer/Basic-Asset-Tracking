@@ -93,6 +93,7 @@
     <tr><td style="color:var(--muted);">Firmware</td><td>{{ registry_row.firmware or '—' }}</td></tr>
     {% if registry_row.support_ends %}<tr><td style="color:var(--muted);">Support contract</td><td>until {{ registry_row.support_ends }}</td></tr>{% endif %}
     {% if registry_row.end_of_support %}<tr><td style="color:var(--muted);">End of support</td><td>{{ registry_row.end_of_support }}</td></tr>{% endif %}
+    {% if device_value %}<tr><td style="color:var(--muted);">Value</td><td>${{ '%.2f'|format(device_value.value) }} now <span style="color:var(--muted);">of ${{ '%.2f'|format(device_value.cost) }}{% if registry_row.purchase_date %}, bought {{ registry_row.purchase_date.strftime('%b %Y') }}{% endif %} · {{ device_value.life }}-year life{% if device_value.fully %}, fully used up{% endif %}</span></td></tr>{% endif %}
     {% if registry_row.funding_source or registry_row.erate_frn %}<tr><td style="color:var(--muted);">Funding</td><td>{{ registry_row.funding_source or '' }}{% if registry_row.erate_frn %} · FRN {{ registry_row.erate_frn }}{% endif %}{% if registry_row.funding_year %} · {{ registry_row.funding_year }}{% endif %}</td></tr>{% endif %}
     {% if mon %}<tr><td style="color:var(--muted);">LibreNMS</td><td>{% if mon.seen %}polled {{ mon.seen|ago }} · {% endif %}{% for r in registry_row.records if r.source == 'librenms' %}<a class="tag-link" href="{{ (r.raw or {}).get('url', '#') }}" target="_blank" rel="noopener">open in LibreNMS</a>{% endfor %}</td></tr>{% endif %}
   </table>
@@ -101,6 +102,7 @@
 <div class="card">
   <p style="color:var(--muted);font-size:.88rem;margin-bottom:1rem;">
     {{ registry_row.description or 'No description on file.' }}
+    {% if device_value %}<br>Worth ${{ '%.2f'|format(device_value.value) }} now of ${{ '%.2f'|format(device_value.cost) }}{% if registry_row.purchase_date %}, bought {{ registry_row.purchase_date.strftime('%b %Y') }}{% endif %} ({{ device_value.life }}-year life{% if device_value.fully %}, fully used up{% endif %}).{% endif %}
     {% if asset and asset.assigned_to %}
       <br>Currently assigned to <a href="/admin/people/{{ asset.assigned_to.id }}" class="tag-link"><strong>{{ asset.assigned_to.full_name }}</strong></a>{{ person_status(asset.assigned_to) }}.
       {% for a in unsigned_agreements(asset.assigned_to) %}
@@ -152,6 +154,12 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Acknowledged By (optional)</label>
       <input name="acknowledged_by" placeholder="Student/staff types their name to acknowledge responsibility" />
     </div>
+    {% if accessory_types %}
+    <fieldset class="ac-set">
+      <legend>Going out with it</legend>
+      {% for t in accessory_types %}<label class="ac-item"><input type="checkbox" name="accessory_id" value="{{ t.id }}" {{ 'checked' if t.default_on }}> {{ t.name }}{% if t.fee %} <span class="ac-fee">${{ '%.2f'|format(t.fee) }} if lost</span>{% endif %}</label>{% endfor %}
+    </fieldset>
+    {% endif %}
     <button type="submit" class="btn btn-primary">Assign</button>
   </form>
   <script src="/static/js/person_search.js"></script>
@@ -169,6 +177,17 @@
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Condition on Return (optional)</label>
       <input name="condition_in" placeholder="e.g. Returned in good condition" />
     </div>
+    {% if accessories_out %}
+    <fieldset class="ac-set">
+      <legend>Came back with it?</legend>
+      {% for a in accessories_out %}
+      <div class="ac-row">
+        <label class="ac-item"><input type="checkbox" name="accessory_back" value="{{ a.id }}" checked> {{ a.name }}</label>
+        {% if a.fee %}<label class="ac-item ac-charge"><input type="checkbox" name="accessory_charge" value="{{ a.id }}" checked> if not, charge {{ asset.assigned_to.first_name }} ${{ '%.2f'|format(a.fee) }}</label>{% endif %}
+      </div>
+      {% endfor %}
+    </fieldset>
+    {% endif %}
     <button type="submit" class="btn btn-ghost" style="color:var(--danger);border-color:var(--danger);">Unassign</button>
   </form>
   {% endif %}
@@ -645,4 +664,13 @@
 <script src="/static/js/dymo_label_core.js"></script>
 <script src="/static/js/print_label.js"></script>
 {% endif %}
+<style>
+  .ac-set { border: 1px solid var(--border); border-radius: 8px; padding: .5rem .8rem .7rem; margin: 0 0 1rem; }
+  .ac-set legend { font-size: .82rem; color: var(--muted); padding: 0 .3rem; }
+  .ac-item { display: inline-flex; align-items: center; gap: .35rem; margin: .2rem 1rem .2rem 0; font-size: .88rem; cursor: pointer; }
+  .ac-item input { width: auto; }
+  .ac-fee { color: var(--muted); font-size: .76rem; }
+  .ac-row { display: flex; flex-wrap: wrap; align-items: center; }
+  .ac-charge { color: var(--muted); font-size: .8rem; }
+</style>
 {% endblock %}

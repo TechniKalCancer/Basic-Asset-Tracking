@@ -13,6 +13,30 @@
   <a href="/admin/people" class="btn btn-ghost">← People</a>
 </div>
 {% if now %}<p class="pp-now">{{ macros.where_now(now, person) }}</p>{% endif %}
+{% if password_lookup %}<p class="pp-now"><a class="btn btn-ghost" href="{{ password_lookup }}" target="_blank" rel="noopener" style="padding:.3rem .75rem;font-size:.84rem;">{{ icon('lock') }}Look up password</a>
+  <span class="pp-muted" style="font-size:.78rem;">opens the password lookup for {{ person.first_name }}; the password shows there, logged</span></p>{% endif %}
+{% if person.role == 'student' and person.is_active and not current %}
+<div class="pp-nodevice">
+  {% if person.device_exempt_reason %}
+  <span>Doesn't need a device: {{ person.device_exempt_reason }}.</span>
+  <form method="POST" action="/admin/people/{{ person.id }}/device_exempt" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" name="action" value="clear" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.78rem;">Undo</button>
+  </form>
+  {% else %}
+  <span><strong>No device yet.</strong> Added {{ person.created_at.strftime('%b %d, %Y') }}.</span>
+  <details class="pp-exempt"><summary>Doesn't need one</summary>
+    <form method="POST" action="/admin/people/{{ person.id }}/device_exempt">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="sr-only" for="ppExempt">Why</label>
+      <select id="ppExempt" name="reason"><option>Not enrolled (account made ahead)</option><option>Brings their own</option>
+        <option>Uses a classroom cart</option><option>Left the school</option></select>
+      <button type="submit" class="btn btn-ghost" style="padding:.2rem .6rem;font-size:.78rem;">Save</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
 {% if not person.is_active %}<p class="pp-inactive">Marked inactive (graduated or left). Their history is kept; use <strong>Reactivate</strong> on People to bring them back.</p>{% endif %}
 <p class="pp-muted pp-facts">
   {{ person.site.name if person.site else 'No school' }}
@@ -27,7 +51,8 @@
     {% for d in current %}
     <div class="pp-row">
       <div class="grow"><a class="tag-link" href="/admin/assets/{{ d.tag|urlencode }}/assign"><code>{{ d.tag }}</code></a>
-        <span class="pp-muted">{{ type_label(d.type) }}{% if d.model %} · {{ d.model }}{% endif %}</span></div>
+        <span class="pp-muted">{{ type_label(d.type) }}{% if d.model %} · {{ d.model }}{% endif %}</span>
+        {% if held_accessories.get(d.tag) %}<div class="pp-muted" style="font-size:.78rem;">With: {{ held_accessories[d.tag]|join(', ') }}</div>{% endif %}</div>
       <div class="pp-muted" style="text-align:right;">
         {% if d.kind == 'loaner' %}<span class="badge badge-yellow">Loaner</span>{% endif %}
         {% if d.since %}since {{ d.since.strftime('%b %d, %Y') }}{% endif %}
@@ -211,6 +236,12 @@
 <style>
   .pp-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .3rem; }
   .pp-now { margin: .3rem 0; font-size: .92rem; }
+  .pp-nodevice { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: .4rem 0; padding: .5rem .8rem;
+                 border-left: 4px solid var(--warning); background: #78350f33; border-radius: 6px; font-size: .88rem; }
+  .pp-exempt summary { cursor: pointer; color: var(--muted); font-size: .82rem; }
+  .pp-exempt form { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .35rem; }
+  .pp-exempt select { width: auto; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
   .pp-now-row td { background: #14532d33; }
   .pp-inactive { margin: .4rem 0 .3rem; padding: .55rem .8rem; border-left: 4px solid var(--danger); background: #7f1d1d33;
                  border-radius: 6px; font-size: .88rem; }

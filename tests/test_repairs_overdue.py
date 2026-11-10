@@ -53,7 +53,7 @@ def test_status_and_notes_timeline(client, make):
     comments = A.TicketComment.query.filter_by(ticket_id=repair.ticket_id).all()
     assert any('Received → Waiting on parts' in c.body and 'RMA 4471' in c.body for c in comments), 'mirrored to the ticket'
 
-    assert b'Pick a new status or write a note' in client.post(url, data={'status': 'waiting_parts'}, follow_redirects=True).data
+    assert b'Pick a new status, write a note, or log time' in client.post(url, data={'status': 'waiting_parts'}, follow_redirects=True).data
     assert b'Choose a valid status' in client.post(url, data={'status': 'bogus'}, follow_redirects=True).data
     client.post(url, data={'note': 'Part arrived.'})
     page = client.get(f'/admin/repairs/{repair.id}').get_data(as_text=True)

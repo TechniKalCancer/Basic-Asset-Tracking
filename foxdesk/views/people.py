@@ -432,6 +432,7 @@ def admin_person(person_id):
     from foxdesk.services.recent_use import recent_devices
     from foxdesk.services.schedules import schedule_rows, where_now
     from foxdesk.services.billing import person_charges
+    from foxdesk.services.accessories import held_by as accessories_held
     from foxdesk.models import Receipt
     recent = recent_devices([person])[person.id]
     money = person_charges(person.id)
@@ -442,8 +443,37 @@ def admin_person(person_id):
                            schedule=schedule_rows(person), now=where_now(person),
                            other_devices=other_devices, loaners=loaners, incidents=incidents, tickets=tickets,
                            spot_checks=spot_checks, agreements=agreement_rows(person), owed=owed, receipts=receipts,
-                           unreceipted=unreceipted,
+                           unreceipted=unreceipted, held_accessories=accessories_held(person.id),
+                           password_lookup=_password_lookup_url(person),
                            assignment_count=len(assignments))
+
+
+def _password_lookup_url(person):
+    """The school's student password lookup app, opened searching for this
+    student (their username). The password itself only shows inside that app."""
+    from urllib.parse import quote
+    if person.role != 'student' or not person.site or not person.site.password_lookup_url or not person.email:
+        return None
+    return f'{person.site.password_lookup_url}?q={quote(person.email.split("@")[0])}'
+
+
+@app.route('/admin/people/<int:person_id>/device_exempt', methods=['POST'])
+@require_permission('people')
+def admin_person_device_exempt(person_id):
+    """Marks a student as not needing a device (or undoes it), which stops
+    the "new student without a device" line in the daily tech email."""
+    person = _scope_people(Person.query, _current_site_ids()).filter_by(id=person_id).first_or_404()
+    reason = request.form.get('reason', '').strip()[:120]
+    if request.form.get('action') == 'clear':
+        person.device_exempt_reason = None
+        message = f'{person.full_name} is expected to get a device again.'
+    else:
+        person.device_exempt_reason = reason or 'Doesn\'t need one'
+        message = f'Noted: {person.full_name} doesn\'t need a device ({person.device_exempt_reason}).'
+    _log_activity('person_edit', message, site_id=person.site_id)
+    db.session.commit()
+    flash(message, 'success')
+    return redirect(url_for('admin_person', person_id=person.id))
 
 
 @app.route('/admin/people/<int:person_id>/history')

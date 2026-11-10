@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}{{ turnin.name }}{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.4rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('collection') }}{{ turnin.name }}</h1>
+  {% if turnin.closed_at %}<span class="badge badge-neutral">Closed</span>{% endif %}
+  <span class="spacer" style="flex:1;"></span>
+  <a class="btn btn-ghost" href="/admin/turn-in/{{ turnin.id }}/boxes">{{ icon('print') }}Box lists</a>
+  <a class="btn btn-ghost" href="/admin/turn-in">← Turn-ins</a>
+</div>
+<p class="ti-muted" style="margin:0 0 1rem;">{{ turnin.site.name if turnin.site else 'Every school' }} · {{ turnin.box_size }} per box
+  {% if turnin.returns_device %}· devices are unassigned as they come in{% else %}· devices stay assigned over the summer{% endif %}</p>
+
+<div class="ti-tiles">
+  <div class="card ti-tile"><div class="ti-num">{{ total }}</div><div class="ti-muted">turned in</div></div>
+  <div class="card ti-tile"><div class="ti-num">{{ outstanding|length }}</div><div class="ti-muted">still out</div></div>
+  <div class="card ti-tile"><div class="ti-num">{{ handed }}</div><div class="ti-muted">handed back</div></div>
+</div>
+
+<section class="card" aria-labelledby="tiScan">
+  <div class="ti-tabs" role="navigation" aria-label="Mode">
+    <a href="?mode=in" class="{{ 'on' if mode != 'back' }}">Turn in</a>
+    <a href="?mode=back" class="{{ 'on' if mode == 'back' }}">Hand back (fall)</a>
+  </div>
+  <h2 id="tiScan" class="sr-only">{{ 'Hand back' if mode == 'back' else 'Turn in' }}</h2>
+  {% if mode != 'back' and turnin.closed_at %}
+  <p>This turn-in is closed.</p>
+  {% else %}
+  <form method="POST" id="tiForm" class="ti-scan" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <label for="tiCode">{{ 'Scan the device going back' if mode == 'back' else 'Scan the device coming in' }}
+      {% if mode != 'back' %}<span class="ti-muted">(next: box {{ next_slot[0] }}, slot {{ next_slot[1] }})</span>{% endif %}</label>
+    <div class="ti-row">
+      <input id="tiCode" name="scan_value" data-scan="off" autofocus required placeholder="Asset tag or serial">
+      {% if mode != 'back' %}<input name="note" maxlength="255" placeholder="Note (optional), e.g. no charger" class="ti-note">{% endif %}
+      <button type="submit" class="btn btn-primary">{{ 'Hand back' if mode == 'back' else 'Turn in' }}</button>
+      <button type="button" class="btn btn-ghost" id="tiCam">{{ icon('camera') }}Camera</button>
+    </div>
+    <div id="tiFrame" hidden><video id="tiVideo" playsinline muted style="width:100%;max-width:420px;border-radius:8px;"></video></div>
+    <p id="tiCamStatus" class="ti-muted" role="status" aria-live="polite"></p>
+  </form>
+  {% endif %}
+  {% if recent %}
+  <h3 class="ti-h3">Just scanned</h3>
+  <ul class="ti-list">{% for s in recent %}<li><code>{{ s.asset_tag }}</code> → box {{ s.box }}, slot {{ s.slot }} · {{ s.person_name or 'not assigned' }}
+    {% if s.handed_back_at %}<span class="badge badge-green">back {{ s.handed_back_at.strftime('%b %d') }}</span>{% endif %}{% if s.note %}<span class="ti-muted"> · {{ s.note }}</span>{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="card" aria-labelledby="tiFind">
+  <h2 id="tiFind" style="margin-top:0;">Where's a student's device?</h2>
+  <form method="GET" class="ti-row">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <label class="sr-only" for="tiQ">Student name or tag</label>
+    <input id="tiQ" name="q" value="{{ q }}" placeholder="Student name or tag" style="max-width:280px;">
+    <button type="submit" class="btn btn-ghost">Find</button>
+  </form>
+  {% if q %}<ul class="ti-list">{% for s in found %}<li>{{ s.person_name or '(not assigned)' }}: <code>{{ s.asset_tag }}</code> in <strong>box {{ s.box }}, slot {{ s.slot }}</strong>{% if s.handed_back_at %} (already handed back){% endif %}</li>{% else %}<li class="ti-muted">Nothing turned in matches "{{ q }}".</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="card" style="padding:0;" aria-labelledby="tiOut">
+  <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1.1rem 1.5rem .4rem;">
+    <h2 id="tiOut" style="margin:0;">Still out ({{ outstanding|length }})</h2>
+    <span class="spacer" style="flex:1;"></span>
+    <a class="btn btn-ghost" href="?export=outstanding">{{ icon('download') }}CSV</a>
+  </div>
+  <div style="overflow-x:auto;max-height:520px;">
+  <table>
+    <thead><tr><th>Student</th><th>Device</th><th></th></tr></thead>
+    <tbody>
+      {% for r, p in outstanding[:400] %}
+      <tr><td><a class="tag-link" href="/admin/people/{{ p.id }}">{{ p.full_name }}</a>{{ person_status(p) }}{% if p.grad_year %}<div class="ti-muted">Class of {{ p.grad_year }}</div>{% endif %}</td>
+        <td><a class="tag-link" href="/admin/assets/{{ r.asset_tag|urlencode }}/assign"><code>{{ r.asset_tag }}</code></a></td>
+        <td style="text-align:right;">{% if can('devices') %}<a class="btn btn-ghost" style="padding:.25rem .6rem;font-size:.78rem;" href="/admin/people/{{ p.id }}/invoice">Invoice</a>{% endif %}</td></tr>
+      {% else %}
+      <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:1.4rem;">Everything's in.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<form method="POST" action="/admin/turn-in/{{ turnin.id }}/close" style="margin-top:1rem;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-ghost">{{ 'Reopen this turn-in' if turnin.closed_at else 'Close this turn-in' }}</button>
+</form>
+
+<script src="/static/js/scanner.js"></script>
+<script>
+(function () {
+  const btn = document.getElementById('tiCam');
+  if (!btn) return;
+  const form = document.getElementById('tiForm'), code = document.getElementById('tiCode');
+  const frame = document.getElementById('tiFrame'), video = document.getElementById('tiVideo');
+  const status = document.getElementById('tiCamStatus');
+  let cam = null;
+  btn.addEventListener('click', async function () {
+    if (cam) { cam.stop(); cam = null; frame.hidden = true; status.textContent = ''; return; }
+    try {
+      frame.hidden = false;
+      cam = await window.FoxScanner.start(video, {
+        onStatus: function (t) { status.textContent = t; },
+        onCode: function (c) { code.value = c; cam.stop(); form.submit(); },
+      });
+    } catch (e) { frame.hidden = true; cam = null; status.textContent = e.message; }
+  });
+})();
+</script>
+<style>
+  .ti-muted { color: var(--muted); font-size: .82rem; }
+  .ti-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .ti-tile { margin: 0; }
+  .ti-num { font-size: 1.8rem; font-weight: 800; }
+  .ti-tabs { display: flex; gap: .4rem; margin-bottom: .9rem; }
+  .ti-tabs a { padding: .35rem .85rem; border: 1px solid var(--border); border-radius: 99px; font-size: .85rem; color: var(--muted); text-decoration: none; }
+  .ti-tabs a.on, .ti-tabs a:hover, .ti-tabs a:focus-visible { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .ti-scan { display: grid; gap: .5rem; }
+  .ti-scan > label { font-size: .9rem; }
+  .ti-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .ti-row input { width: auto; flex: 1 1 200px; font-size: 1.05rem; }
+  .ti-row .ti-note { flex: 1 1 220px; font-size: .9rem; }
+  .ti-h3 { font-size: .95rem; margin: 1.1rem 0 .4rem; }
+  .ti-list { margin: 0; padding-left: 1.1rem; font-size: .9rem; display: grid; gap: .2rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
+</style>
+{% endblock %}

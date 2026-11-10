@@ -51,6 +51,7 @@ from foxdesk.services.helpdesk import (
     link_repair_to_ticket,
 )
 from foxdesk.services.attachments import _attachments_for, _save_attachments
+from foxdesk.services.ticket_forms import parse_questions, read_answers
 from foxdesk.services.sla import apply_sla, mark_responded, overdue_filter, sla_on
 
 
@@ -73,8 +74,13 @@ def submit_ticket_page():
         if not person or not person.is_active:
             flash('Search for your name and select yourself from the list first.', 'error')
             return redirect(url_for('submit_ticket_page'))
-        if not category_id or not TicketCategory.query.filter_by(id=category_id, is_active=True).first():
+        category = TicketCategory.query.filter_by(id=category_id, is_active=True).first() if category_id else None
+        if not category:
             flash('Choose a category.', 'error')
+            return redirect(url_for('submit_ticket_page'))
+        answers, problem = read_answers(category, request.form)
+        if problem:
+            flash(problem, 'error')
             return redirect(url_for('submit_ticket_page'))
         if not subject:
             flash('Give the ticket a short subject.', 'error')
@@ -92,6 +98,7 @@ def submit_ticket_page():
         try:
             ticket = _create_ticket(category_id, subject, description, person=person,
                                      asset_tag=asset_tag, site_id=person.site_id)
+            ticket.answers = answers or None
             photo_count = _save_attachments('ticket', ticket.id, request.files.getlist('photos'),
                                             uploaded_by=person.full_name)
             db.session.commit()
@@ -105,7 +112,8 @@ def submit_ticket_page():
             flash(f'Could not submit ticket: {e}', 'error')
         return redirect(url_for('submit_ticket_page'))
 
-    return render_template('submit_ticket.html', categories=categories)
+    return render_template('submit_ticket.html', categories=categories,
+                           category_questions={c.id: c.questions or [] for c in categories})
 
 
 TICKET_SORT_COLUMNS = {
@@ -677,7 +685,11 @@ def admin_ticket_category_new():
             flash(f'A category named "{name}" already exists.', 'error')
             return render_template('admin_ticket_category_form.html', category=None, form=request.form)
 
-        db.session.add(TicketCategory(name=name, default_price=default_price))
+        questions, problems = parse_questions(request.form.get('questions'))
+        if problems:
+            flash('These question lines don\'t make sense: ' + '; '.join(problems[:3]), 'error')
+            return render_template('admin_ticket_category_form.html', category=None, form=request.form)
+        db.session.add(TicketCategory(name=name, default_price=default_price, questions=questions or None))
         _log_activity('ticket_category_add', f'Added ticket category "{name}".')
         db.session.commit()
         flash(f'Added category "{name}".', 'success')
@@ -702,9 +714,14 @@ def admin_ticket_category_edit(category_id):
             flash(f'A category named "{name}" already exists.', 'error')
             return render_template('admin_ticket_category_form.html', category=category, form=None)
 
+        questions, problems = parse_questions(request.form.get('questions'))
+        if problems:
+            flash('These question lines don\'t make sense: ' + '; '.join(problems[:3]), 'error')
+            return render_template('admin_ticket_category_form.html', category=category, form=request.form)
         category.name = name
         category.default_price = default_price
         category.is_active = is_active
+        category.questions = questions or None
         _log_activity('ticket_category_edit', f'Edited ticket category "{name}".')
         db.session.commit()
         flash(f'Updated category "{name}".', 'success')

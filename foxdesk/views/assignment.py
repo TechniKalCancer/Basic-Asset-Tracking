@@ -26,8 +26,10 @@ from foxdesk.models import (
     Repair,
     RepairCategory,
 )
-from foxdesk.services.auth import _current_site_ids, _log_activity, require_permission
+from foxdesk.services.auth import _current_actor, _current_site_ids, _log_activity, require_permission
 from foxdesk.services.scoping import _scope_people, _scope_registry
+from foxdesk.services import accessories
+from foxdesk.services.asset_value import device_value
 from foxdesk.services.assignments import _assign_asset_to_person, _close_open_assignment
 from foxdesk.services.labels import AVERY_TEMPLATES, code128_svg, qr_svg
 from foxdesk.services.attachments import _attachments_for
@@ -68,6 +70,10 @@ def admin_asset_assign(asset_tag):
         status, message = _assign_asset_to_person(asset_tag, person, condition_out, due_date,
                                                     acknowledged_by=acknowledged_by)
         if status == 'assigned':
+            went_out = accessories.issue(accessories.open_assignment(asset_tag), request.form.getlist('accessory_id'))
+            db.session.commit()
+            if went_out:
+                message += ' With: ' + ', '.join(a.name for a in went_out) + '.'
             emit('device.assigned', registry_row, person=person)
         if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
             message += ' Note: this device and person are at different sites.'
@@ -116,7 +122,11 @@ def admin_asset_assign(asset_tag):
     custom_field_labels = {f.field_key: f.label for f in CustomField.query.filter_by(entity_type='device').all()}
     pending_action = PendingDeviceAction.query.filter_by(asset_tag=asset_tag, status='pending').first()
 
+    open_row = accessories.open_assignment(asset_tag) if asset and asset.assigned_to_id else None
     return render_template('admin_assign.html', registry_row=registry_row, asset=asset, has_people=has_people,
+                           accessory_types=accessories.types_for(registry_row.device_type),
+                           device_value=device_value(registry_row),
+                           accessories_out=accessories.outstanding(open_row),
                            history=history, combined_history=combined_history, events=events, incidents=incidents,
                            incident_attachments=_attachments_for('incident', [i.id for i in incidents]),
                            signin_flag=next(iter(_signin_mismatches(_current_site_ids(), window_days=90, only_tags=[asset_tag])), None)
@@ -208,6 +218,9 @@ def admin_bulk_assign():
 
                 status, message = _assign_asset_to_person(asset_tag, person, due_date=due_date)
                 if status == 'assigned':
+                    defaults = [t.id for t in accessories.types_for(registry_row.device_type) if t.default_on]
+                    accessories.issue(accessories.open_assignment(asset_tag), defaults)
+                    db.session.commit()
                     emit('device.assigned', registry_row, person=person)
                 if status == 'assigned' and registry_row.site_id and person.site_id and registry_row.site_id != person.site_id:
                     message += ' (different sites)'
@@ -370,13 +383,23 @@ def admin_asset_unassign(asset_tag):
     condition_in = request.form.get('condition_in', '').strip() or None
     try:
         previous_holder = asset.assigned_to
+        returned, missing, charged = accessories.settle(
+            accessories.open_assignment(asset_tag), request.form.getlist('accessory_back'),
+            request.form.getlist('accessory_charge'), previous_holder, asset_tag)
         _close_open_assignment(asset_tag, condition_in=condition_in)
         asset.assigned_to_id = None
         asset.status = 'available'
-        _log_activity('device_unassign', f'Unassigned {asset_tag}.', site_id=registry_row.site_id)
+        _log_activity('device_unassign', f'Unassigned {asset_tag}.'
+                      + (f' Missing: {", ".join(missing)}.' if missing else ''), site_id=registry_row.site_id)
         db.session.commit()
         emit('device.unassigned', registry_row, person=previous_holder)
-        flash(f'Unassigned {asset_tag}.', 'success')
+        for incident in charged:
+            emit('incident.created', incident)
+        note = ''
+        if missing:
+            note = f' Not returned: {", ".join(missing)}' + (
+                f'; charged ${sum(i.fee_amount for i in charged):.2f} to {previous_holder.full_name}.' if charged else '.')
+        flash(f'Unassigned {asset_tag}.{note}', 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not unassign asset: {e}', 'error')
@@ -410,6 +433,14 @@ def admin_asset_status(asset_tag):
         if open_repair:
             open_repair.returned_at = utcnow()
             open_repair.notes = ((open_repair.notes + ' ') if open_repair.notes else '') + '[auto-closed: status changed manually]'
+            ticket = open_repair.ticket
+            if ticket is not None and ticket.status in ('open', 'in_progress'):
+                # The repair's ticket closes with it, as it does from the repair page.
+                from foxdesk.models import TicketComment
+                _, actor_label, _ = _current_actor()
+                db.session.add(TicketComment(ticket_id=ticket.id, author_label=actor_label,
+                                             body=f'Repair closed: {asset_tag} was set to {new_status} on its device page.'))
+                ticket.status, ticket.resolved_at, ticket.updated_at = 'resolved', ticket.resolved_at or utcnow(), utcnow()
         _log_activity('device_status', f'Set {asset_tag} status to {new_status}.', site_id=registry_row.site_id)
         db.session.commit()
         emit('device.status_changed', registry_row)

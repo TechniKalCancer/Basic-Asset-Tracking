@@ -628,6 +628,10 @@ def _apply_site_extras(site, form):
         return ('These bell-time lines aren\'t "period, start, end" (like "1, 7:55, 8:48"): '
                 + '; '.join(problems[:3]) + ('…' if len(problems) > 3 else ''))
     site.bell_schedule = bells or None
+    lookup = (form.get('password_lookup_url') or '').strip()
+    if lookup and not lookup.startswith('https://script.google.com/'):
+        return 'The password lookup link should be the app\'s https://script.google.com/... address.'
+    site.password_lookup_url = lookup.split('?')[0][:500] or None
     ids = {int(x) for x in form.getlist('tech_user_id') if str(x).isdigit()}
     site.techs = User.query.filter(User.id.in_(ids)).all() if ids else []
     return None

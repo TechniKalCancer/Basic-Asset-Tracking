@@ -44,11 +44,11 @@
 
 {{ macros.search_box('Search asset tag, category, ticket #, issue, person…') }}
 
-<nav class="rp-filter" aria-label="Filter open repairs by status">
+<div class="rp-filter" role="navigation" aria-label="Filter open repairs by status">
   <a href="?" class="{{ 'on' if not status_filter }}">All open</a>
   <a href="?status=overdue" class="{{ 'on' if status_filter == 'overdue' }}">Overdue (over {{ max_days }} days)</a>
   {% for key, label in repair_statuses.items() %}<a href="?status={{ key }}" class="{{ 'on' if status_filter == key }}">{{ label }}</a>{% endfor %}
-</nav>
+</div>
 
 <div class="card" style="padding:0;overflow-x:auto;">
   <table>

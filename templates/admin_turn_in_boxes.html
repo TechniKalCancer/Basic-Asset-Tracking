@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Box lists — {{ turnin.name }}{% endblock %}
+{% block content %}
+<div class="bx-actions">
+  <button type="button" class="btn btn-primary" onclick="window.print()">{{ icon('print') }}Print</button>
+  <a class="btn btn-ghost" href="/admin/turn-in/{{ turnin.id }}">← {{ turnin.name }}</a>
+  <span class="bx-muted">One box per page, to tape on the box.</span>
+</div>
+{% for box, scans in boxes.items() %}
+<article class="bx-box">
+  <div class="bx-head"><div class="bx-num">Box {{ box }}</div><div class="bx-muted">{{ turnin.name }}{% if turnin.site %} · {{ turnin.site.name }}{% endif %} · {{ scans|length }} device{{ 's' if scans|length != 1 }}</div></div>
+  <table>
+    <thead><tr><th>Slot</th><th>Device</th><th>Student</th><th>Back</th></tr></thead>
+    <tbody>{% for s in scans %}<tr><td>{{ s.slot }}</td><td><code>{{ s.asset_tag }}</code></td><td>{{ s.person_name or '—' }}</td><td>{{ '✓' if s.handed_back_at else '' }}</td></tr>{% endfor %}</tbody>
+  </table>
+</article>
+{% else %}
+<div class="card" style="text-align:center;color:var(--muted);padding:2rem;">Nothing turned in yet.</div>
+{% endfor %}
+<style>
+  .bx-actions { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  .bx-muted { color: #666; font-size: .85rem; }
+  .bx-box { background: #fff; color: #111; border-radius: 8px; padding: 1.4rem 1.6rem; margin: 0 auto 1.2rem; max-width: 760px; }
+  .bx-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .bx-num { font-size: 2.2rem; font-weight: 900; }
+  .bx-box table { width: 100%; border-collapse: collapse; }
+  .bx-box th, .bx-box td { color: #111; background: none; padding: .4rem; border-bottom: 1px solid #ddd; text-align: left; }
+  @media print {
+    nav, .bx-actions, .flash-messages, #session-warning { display: none !important; }
+    body, .container { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    .bx-box { max-width: none; margin: 0; padding: 0; }
+    .bx-box + .bx-box { break-before: page; page-break-before: always; }
+  }
+</style>
+{% endblock %}

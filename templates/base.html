@@ -494,6 +494,10 @@
             <a href="/admin/asset_number_ranges">Asset Number Ranges</a>
             {% endif %}
             <a href="/admin/repair_categories">Repair Categories</a>
+            <a href="/admin/accessories">Accessories</a>
+            <a href="/admin/turn-in">Turn-in (end of year)</a>
+            <a href="/admin/value">Device Value</a>
+            <a href="/admin/contracts">Contracts &amp; Licenses</a>
             {% if is_super_admin() %}
             <div class="nav-dropdown-divider"></div>
             <a href="/admin/orphans">Orphans {% if nav_orphan_count %}<span class="nav-tab-badge">{{ nav_orphan_count }}</span>{% endif %}</a>
@@ -520,6 +524,7 @@
       {% elif active_section == 'repairs' and can('repairs') %}
         <a href="/admin/repairs">Repairs</a>
         <a href="/admin/overdue">Overdue</a>
+        <a href="/admin/repairs/costs">Cost by Model</a>
         {% if feature('parts') %}<a href="/admin/parts">Parts {% if nav_parts_low_count %}<span class="nav-tab-badge">{{ nav_parts_low_count }}</span>{% endif %}</a>{% endif %}
         <a href="/admin/repair_categories">Repair Categories</a>
       {% elif active_section == 'payments' and can('devices') %}

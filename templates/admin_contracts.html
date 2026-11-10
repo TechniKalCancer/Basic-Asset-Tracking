@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Contracts & Licenses{% endblock %}
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap;">
+  <h1 style="margin:0;">{{ icon('document') }}Contracts &amp; Licenses</h1>
+  <span class="spacer" style="flex:1;"></span>
+  <a class="btn btn-ghost" href="?show={{ show }}&export=1">{{ icon('download') }}Export CSV</a>
+  {% if can_edit %}<a class="btn btn-primary" href="/admin/contracts/new">{{ icon('add') }}Add</a>{% endif %}
+</div>
+<p class="ct-sub">Software licenses, subscriptions, support and service contracts. Renewal reminders go into the daily email: to the school's techs
+  for a school's contract, to super admins for district-wide ones, at each contract's notice point and 30, 14, 7 and 1 day before it ends.
+  {% if yearly %}Active ones add up to about <strong>${{ '{:,.0f}'.format(yearly) }}</strong> a year.{% endif %}</p>
+<div class="ct-tabs" role="navigation" aria-label="Show">
+  <a href="?show=active" class="{{ 'on' if show != 'all' }}">Current</a>
+  <a href="?show=all" class="{{ 'on' if show == 'all' }}">Including archived</a>
+</div>
+<div class="card" style="padding:0;overflow-x:auto;">
+  <table>
+    <thead><tr><th>Name</th><th>Kind</th><th>For</th><th>Ends</th><th class="num">Cost</th><th>Seats</th><th></th></tr></thead>
+    <tbody>
+      {% for c, key, label in rows %}
+      <tr{% if not c.is_active %} style="opacity:.55;"{% endif %}>
+        <td><strong>{{ c.name }}</strong>{% if c.vendor %}<div class="ct-muted">{{ c.vendor }}{% if c.reference %} · {{ c.reference }}{% endif %}</div>{% endif %}</td>
+        <td class="ct-muted">{{ kinds.get(c.kind, c.kind) }}</td>
+        <td class="ct-muted">{{ c.site.name if c.site else 'District' }}</td>
+        <td><span class="badge {{ {'ended': 'badge-red', 'renewing': 'badge-yellow', 'active': 'badge-green', 'open': 'badge-neutral'}[key] }}">{{ label }}</span>
+          {% if c.auto_renews %}<div class="ct-muted">renews on its own</div>{% endif %}{% if c.owner %}<div class="ct-muted">{{ c.owner }}</div>{% endif %}</td>
+        <td class="num">{% if c.cost is not none %}${{ '{:,.2f}'.format(c.cost) }}{% if c.billing %}<div class="ct-muted">{{ billing.get(c.billing, '') }}</div>{% endif %}{% else %}—{% endif %}</td>
+        <td class="ct-muted">{{ c.seats or '—' }}</td>
+        <td style="text-align:right;">{% if can_edit %}<a class="btn btn-ghost" style="padding:.3rem .7rem;" href="/admin/contracts/{{ c.id }}/edit">Edit</a>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:1.8rem;">Nothing yet. Add your Lightspeed, Google, phone service and support contracts to get renewal reminders.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<style>
+  .ct-sub { color: var(--muted); font-size: .9rem; max-width: 88ch; margin: 0 0 .8rem; }
+  .ct-tabs { display: flex; gap: .4rem; margin-bottom: .8rem; }
+  .ct-tabs a { padding: .3rem .75rem; border: 1px solid var(--border); border-radius: 99px; font-size: .82rem; color: var(--muted); text-decoration: none; }
+  .ct-tabs a.on, .ct-tabs a:hover, .ct-tabs a:focus-visible { border-color: var(--accent); color: var(--text); background: var(--surface2); }
+  .ct-muted { color: var(--muted); font-size: .8rem; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+</style>
+{% endblock %}

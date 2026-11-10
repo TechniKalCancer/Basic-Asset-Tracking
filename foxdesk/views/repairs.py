@@ -146,6 +146,9 @@ def admin_repair_update(repair_id):
     fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
     status = request.form.get('status', '').strip() or repair.status
     body = request.form.get('note', '').strip()[:5000] or None
+    minutes = min(max(request.form.get('minutes', type=int) or 0, 0), 24 * 60)
+    if minutes:
+        repair.labor_minutes = (repair.labor_minutes or 0) + minutes
     if status.startswith('close:'):
         return _close_from_status(repair, status.split(':', 1)[1], body, fallback_url)
     if status not in REPAIR_STATUSES:
@@ -155,8 +158,8 @@ def admin_repair_update(repair_id):
         flash('This repair is closed; you can still add a note.', 'error')
         return redirect(request.referrer or fallback_url)
     changed = status != repair.status
-    if not changed and not body:
-        flash('Pick a new status or write a note.', 'error')
+    if not changed and not body and not minutes:
+        flash('Pick a new status, write a note, or log time.', 'error')
         return redirect(request.referrer or fallback_url)
     _, actor_label, _ = _current_actor()
     try:
@@ -169,6 +172,8 @@ def admin_repair_update(repair_id):
             repair.status, repair.status_changed_at = status, now
         if body:
             summary.append(body)
+        if minutes:
+            summary.append(f'(+{minutes} min)')
         ticket_started = None
         if repair.ticket_id:
             db.session.add(TicketComment(ticket_id=repair.ticket_id, body=' '.join(summary), author_label=actor_label))
@@ -182,7 +187,8 @@ def admin_repair_update(repair_id):
         db.session.commit()
         if ticket_started:
             emit('ticket.status_changed', repair.ticket, old_status=ticket_started)
-        flash(f'Status is now {REPAIR_STATUSES[status]}.' if changed else 'Note added.', 'success')
+        flash(f'Status is now {REPAIR_STATUSES[status]}.' if changed else ('Note added.' if body else f'Logged {minutes} minutes.'),
+              'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not update repair: {e}', 'error')

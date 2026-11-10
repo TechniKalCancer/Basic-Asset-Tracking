@@ -807,6 +807,68 @@ A real tracking record for devices sent out for repair, separate from just label
   the repair on that ticket instead of opening a second one; automations sending a ticket's device
   to repair do the same.
 
+## Accessories (Devices → Accessories)
+
+Define what goes out with a device (Charger, Case, Stylus), which kind of device it goes with, and its fee if
+lost. Assigning a device from its page lists that kind's accessories (the "ticked by default" ones pre-checked);
+bulk assign adds the defaults. When the device is unassigned, each accessory is ticked "came back" or not, and
+a missing one can be charged right there as a damage fee to the person who had it (a normal Incident, so it
+shows on Payments and runs "damage report" automations; the parent notice stays opt-in). The person page shows
+the accessories with each device they have.
+
+## Request Forms and Help Suggestions
+
+Each ticket category can ask its own questions (Tickets → Categories → edit), one per line:
+`Which room? | text`, `Is it charging? | yes/no`, `What's wrong?* | choice: Cracked, Lines, Black` (`*` =
+required). Submit a Ticket shows the chosen category's questions and keeps the answers on the ticket.
+
+While someone types the subject, help articles whose title or text match are suggested ("These might fix it"),
+linking to that article on /help. An article can be tied to a category (Admin → Help Content) to be suggested
+first whenever that category is picked.
+
+## Turn-in (Devices → Turn-in, end of year)
+
+Start a turn-in for a school with a box size. Each device scanned in (USB scanner, typing, or the phone camera
+once FoxDesk is on https) goes into the next box and slot, so it can go back to the same student in the fall.
+The page shows what's been turned in, **who still has a device out** (CSV, and an invoice link per student),
+and finds where a student's device is. **Box lists** print one box per page to tape on the box. **Hand back**
+mode, in the fall, records each device going back out. Devices stay assigned over the summer unless the
+turn-in is marked for students who are leaving, which unassigns each device as it's scanned.
+
+## Device Value and Repair Cost (Devices → Device Value, Repairs → Cost by Model)
+
+Each device loses its purchase cost evenly over its useful life (years per device type, plus an optional
+end value as a percentage, on Device Value), from its purchase date. Device Value totals cost and value now by
+funding source, school, device type or purchase year (CSV), and the device page shows its value. **Fill in
+purchase info** sets purchase date, cost, funding source and year on every device matching a model (from
+Google), type and/or school, filling blanks only unless told to replace.
+
+Cost by Model shows, per device model, repairs this school year (or all time), repairs per 100 devices, parts
+used (at each part's unit cost), labor (time logged on the repair's Status & Notes card, at the labor rate set
+on Device Value), what families were billed on the repair tickets, average days out, and outcomes.
+
+## Contracts and Licenses (Devices → Contracts & Licenses)
+
+Software licenses, subscriptions, support, phone and internet contracts: vendor, school or district-wide, seats,
+cost, billing, dates, who handles the renewal, whether it renews on its own. The daily tech email reminds at
+each contract's notice point and 30, 14, 7 and 1 day before it ends (and the day it ends), to the school's
+techs or, for district-wide ones, super admins. A point that falls on a weekend is caught the next school day.
+Archiving stops the reminders.
+
+## New Students Without a Device
+
+The daily tech email (Repairs → Overdue) lists students added since this was turned on who have gone a day
+without a device or loaner, under their school; Repairs → Overdue shows them too. **Doesn't need one** on the
+student's page (not enrolled, brings their own, uses a cart, left) stops it for that student. Students who were
+already here when it was turned on aren't listed.
+
+## Student Password Lookup Link
+
+Each school's password lookup app link goes on its page (Admin → Sites). A student's page then has **Look up
+password**, which opens that app already searching for the student (their username, as `?q=`). The password
+only ever shows inside the lookup app, behind its own staff check, rate limit and audit log; FoxDesk never
+sees or stores it. The app needs its `?q=` support (in ~/Documents/student-password-lookup) deployed.
+
 ## Invoices and Receipts (Payments → Receipts & Invoices)
 
 **Receipts:** recording a payment, whether on Payments → Charges, a device's damage fee, a ticket charge, a protection

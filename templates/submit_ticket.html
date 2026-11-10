@@ -22,7 +22,7 @@
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Category</label>
-      <select name="category_id" required>
+      <select name="category_id" id="stCategory" required>
         <option value="">Choose a category…</option>
         {% for c in categories %}
         <option value="{{ c.id }}">{{ c.name }}</option>
@@ -31,8 +31,13 @@
     </div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Subject</label>
-      <input type="text" name="subject" placeholder="e.g. Wifi down in room 204" required />
+      <input type="text" name="subject" id="stSubject" placeholder="e.g. Wifi down in room 204" required />
     </div>
+    <div id="stHelp" class="st-help" hidden aria-live="polite">
+      <div class="st-help-title">These might fix it</div>
+      <ul id="stHelpList"></ul>
+    </div>
+    <div id="stQuestions"></div>
     <div style="margin-bottom:1rem;">
       <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Device Asset Tag / Serial (optional)</label>
       <input type="text" name="scan_value" id="scanInput" autocomplete="off" placeholder="Scan or type…" />
@@ -48,5 +53,79 @@
   <script>
     initPersonSearch({ inputId: 'personSearchInput', hiddenId: 'personIdInput', resultsId: 'personResults' });
   </script>
+  <script id="stQuestionData" type="application/json">{{ category_questions|tojson }}</script>
+  <script>
+  (function () {
+    const questions = JSON.parse(document.getElementById('stQuestionData').textContent);
+    const category = document.getElementById('stCategory');
+    const box = document.getElementById('stQuestions');
+    const subject = document.getElementById('stSubject');
+    const help = document.getElementById('stHelp');
+    const helpList = document.getElementById('stHelpList');
+
+    function field(q, i) {
+      const wrap = document.createElement('div');
+      wrap.className = 'st-q';
+      const label = document.createElement('label');
+      label.htmlFor = 'q' + i;
+      label.textContent = q.label + (q.required ? ' *' : '');
+      wrap.appendChild(label);
+      let input;
+      if (q.kind === 'text') {
+        input = document.createElement('input');
+        input.maxLength = 500;
+      } else {
+        input = document.createElement('select');
+        const options = q.kind === 'yesno' ? ['Yes', 'No'] : q.options;
+        input.appendChild(new Option('Choose…', ''));
+        options.forEach(o => input.appendChild(new Option(o, o)));
+      }
+      input.id = 'q' + i;
+      input.name = 'q' + i;
+      if (q.required) input.required = true;
+      wrap.appendChild(input);
+      return wrap;
+    }
+
+    function showQuestions() {
+      box.replaceChildren(...(questions[category.value] || []).map(field));
+      suggest();
+    }
+
+    let timer;
+    function suggest() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const q = subject.value.trim();
+        if (q.length < 3 && !category.value) { help.hidden = true; return; }
+        fetch('/help/suggest?q=' + encodeURIComponent(q) + '&category_id=' + encodeURIComponent(category.value))
+          .then(r => r.ok ? r.json() : [])
+          .then(items => {
+            helpList.replaceChildren(...items.map(a => {
+              const li = document.createElement('li');
+              const link = document.createElement('a');
+              link.href = a.url; link.target = '_blank'; link.rel = 'noopener'; link.className = 'tag-link';
+              link.textContent = a.title;
+              li.appendChild(link);
+              return li;
+            }));
+            help.hidden = !items.length;
+          })
+          .catch(() => { help.hidden = true; });
+      }, 350);
+    }
+
+    category.addEventListener('change', showQuestions);
+    subject.addEventListener('input', suggest);
+    showQuestions();
+  })();
+  </script>
+  <style>
+    .st-q { margin-bottom: 1rem; }
+    .st-q label { display: block; margin-bottom: .3rem; color: var(--muted); font-size: .85rem; }
+    .st-help { border: 1px solid var(--accent); border-radius: 8px; padding: .6rem .9rem; margin: -.3rem 0 1rem; background: var(--surface2); }
+    .st-help-title { font-size: .82rem; font-weight: 600; margin-bottom: .2rem; }
+    .st-help ul { margin: 0; padding-left: 1.1rem; font-size: .88rem; }
+  </style>
 </div>
 {% endblock %}

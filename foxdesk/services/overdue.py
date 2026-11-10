@@ -114,6 +114,52 @@ def overdue_by_site(site_ids=None, today=None):
     return OrderedDict(sorted(out.items(), key=lambda kv: (kv[1]['site'] is None, kv[1]['site'].name if kv[1]['site'] else '')))
 
 
+def new_students_without_device(today=None):
+    """{site_id: [dict]} — students added since new_student_since, a day or
+    more ago, who still have no device (assigned or loaner) and aren't
+    marked as not needing one."""
+    from foxdesk.models import Asset, LoanerCheckout, Person
+    row = overdue_settings()
+    if not row.new_student_alerts or not row.new_student_since:
+        return {}
+    now = utcnow()
+    students = Person.query.filter(Person.role == 'student', Person.is_active.is_(True),
+                                   Person.created_at >= row.new_student_since,
+                                   Person.created_at <= now - timedelta(days=1),
+                                   Person.device_exempt_reason.is_(None)).order_by(Person.created_at).all()
+    if not students:
+        return {}
+    ids = [p.id for p in students]
+    has = {a for (a,) in Asset.query.filter(Asset.assigned_to_id.in_(ids)).with_entities(Asset.assigned_to_id)}
+    has |= {l for (l,) in LoanerCheckout.query.filter(LoanerCheckout.person_id.in_(ids), LoanerCheckout.checked_in_at.is_(None))
+            .with_entities(LoanerCheckout.person_id)}
+    out = OrderedDict()
+    for p in students:
+        if p.id not in has:
+            out.setdefault(p.site_id, []).append(dict(id=p.id, name=p.full_name, grad_year=p.grad_year, email=p.email,
+                                                      added=p.created_at, days=(now - p.created_at).days))
+    return out
+
+
+def daily_sections(today=None, previous=None):
+    """Everything for the daily email, by school: overdue items, new students
+    without a device, and contract renewals. Key None = no school set (and
+    district-wide contracts), which goes to super admins."""
+    from foxdesk.services.contracts import due_reminders
+    sites = {s.id: s for s in Site.query}
+    sections = OrderedDict((sid, dict(sec, new_students=[], contracts=[])) for sid, sec in overdue_by_site(today=today).items())
+
+    def section(sid):
+        if sid not in sections:
+            sections[sid] = dict(site=sites.get(sid), loaners=[], repairs=[], assignments=[], new_students=[], contracts=[])
+        return sections[sid]
+    for sid, students in new_students_without_device(today).items():
+        section(sid)['new_students'] = students
+    for d in due_reminders(today, previous):
+        section(d['contract'].site_id)['contracts'].append(d)
+    return OrderedDict(sorted(sections.items(), key=lambda kv: (kv[1]['site'] is None, kv[1]['site'].name if kv[1]['site'] else '')))
+
+
 def _count(section):
     return len(section['loaners']) + len(section['repairs']) + len(section['assignments'])
 
@@ -125,12 +171,18 @@ def _plural(n, word):
 def digest_text(sections, today=None):
     """(subject, body) for one tech's schools."""
     today = today or utcnow().date()
-    total = sum(_count(s) for s in sections)
-    subject = f'FoxDesk: {_plural(total, "overdue item")} ({today:%a %b} {today.day})'
+    overdue = sum(_count(s) for s in sections)
+    students = sum(len(s.get('new_students', [])) for s in sections)
+    renewals = sum(len(s.get('contracts', [])) for s in sections)
+    parts = ([_plural(overdue, 'overdue item')] if overdue else []) \
+        + ([_plural(students, 'new student') + ' without a device'] if students else []) \
+        + ([_plural(renewals, 'renewal')] if renewals else [])
+    subject = f'FoxDesk: {", ".join(parts) or "nothing new"} ({today:%a %b} {today.day})'
     lines = []
     for s in sections:
-        name = s['site'].name if s['site'] else 'Devices with no school set'
-        lines += ['', f'{name} — {_count(s)} overdue', '=' * (len(name) + 14)]
+        name = s['site'].name if s['site'] else 'No school set / district-wide'
+        heading = name + (f' — {_count(s)} overdue' if _count(s) else '')
+        lines += ['', heading, '=' * len(heading)]
         if s['repairs']:
             lines.append(f'Repairs past due ({len(s["repairs"])}):')
             for r in s['repairs']:
@@ -146,17 +198,31 @@ def digest_text(sections, today=None):
             lines.append(f'Assigned devices past their due date ({len(s["assignments"])}):')
             for a in s['assignments']:
                 lines.append(f'  - {a["tag"]}  {a["person"]}, due {a["due"]:%b} {a["due"].day} ({_plural(a["days"], "day")} late)')
+        if s.get('new_students'):
+            lines.append(f'New students without a device ({len(s["new_students"])}):')
+            for p in s['new_students']:
+                link = f'  {APP_URL}/admin/people/{p["id"]}' if APP_URL else ''
+                lines.append(f'  - {p["name"]}{" (class of " + str(p["grad_year"]) + ")" if p["grad_year"] else ""}, '
+                             f'added {p["added"]:%b} {p["added"].day}, {_plural(p["days"], "day")} without one{link}')
+        if s.get('contracts'):
+            lines.append(f'Renewals coming up ({len(s["contracts"])}):')
+            for d in s['contracts']:
+                c = d['contract']
+                when = 'ends today' if d['days_left'] == 0 else (f'ended {-d["days_left"]} days ago' if d['days_left'] < 0
+                                                                else f'ends {c.ends_on:%b} {c.ends_on.day} ({_plural(d["days_left"], "day")})')
+                lines.append(f'  - {c.name}{" (" + c.vendor + ")" if c.vendor else ""} {when}'
+                             f'{"; renews on its own" if c.auto_renews else ""}{"; " + c.owner + " handles it" if c.owner else ""}')
     if APP_URL:
         lines += ['', f'Full list: {APP_URL}/admin/overdue']
     lines += ['', 'You get this because you\'re a tech for these schools (Admin → Sites). It only comes on school days '
-                  'when something is overdue.']
+                  'when there\'s something to do.']
     return subject, '\n'.join(lines).lstrip('\n')
 
 
-def _recipients(by_site):
-    """{user: [sections]} — each school's techs, and super admins for devices with no school."""
+def _recipients(sections):
+    """{user: [sections]} — each school's techs, and super admins for the no-school/district section."""
     plan = OrderedDict()
-    for sid, section in by_site.items():
+    for sid, section in sections.items():
         if sid is None:
             users = User.query.filter_by(is_super_admin=True, is_active=True).all()
         else:
@@ -167,12 +233,11 @@ def _recipients(by_site):
     return plan
 
 
-def send_tech_alerts(only_user=None, today=None):
-    """Emails each tech their schools' overdue list now. only_user sends just
-    that person's (the Reminders page's "Send me mine now"). Returns
-    (emails sent, failed, techs with nothing overdue or no email)."""
-    by_site = overdue_by_site(today=today)
-    plan = _recipients(by_site)
+def send_tech_alerts(only_user=None, today=None, previous=None):
+    """Emails each tech their schools' list now. only_user sends just that
+    person's ("Email me my list now"). previous is the last school day an
+    email went out, for contract reminder points. Returns (sent, failed)."""
+    plan = _recipients(daily_sections(today, previous))
     if only_user is not None:
         plan = {u: s for u, s in plan.items() if u.id == only_user.id}
     sent = failed = 0
@@ -210,6 +275,7 @@ def maybe_send_daily(now=None):
     if db.session.get(OverdueSettings, 1) is None:
         db.session.add(overdue_settings())
         db.session.commit()
+    previous = overdue_settings().last_alert_on
     claimed = (OverdueSettings.query
                .filter(OverdueSettings.id == 1,
                        db.or_(OverdueSettings.last_alert_on.is_(None), OverdueSettings.last_alert_on < today))
@@ -217,7 +283,7 @@ def maybe_send_daily(now=None):
     db.session.commit()
     if not claimed:
         return False
-    sent, failed = send_tech_alerts(today=today)
+    sent, failed = send_tech_alerts(today=today, previous=previous)
     if sent or failed:
         logger.info('Daily overdue email: %s sent, %s failed.', sent, failed)
     return True

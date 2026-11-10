@@ -120,7 +120,7 @@ def test_daily_email_once_on_school_days(make, sent_emails, monkeypatch):
     site = make.site('Middle')
     site.techs = [make_user('t', 't@district.org')]
     old = make.device(site=site)
-    A.db.session.add(A.Repair(asset_tag=old.asset_tag, issue_description='x', sent_at=utcnow() - timedelta(days=30)))
+    A.db.session.add(A.Repair(asset_tag=old.asset_tag, issue_description='x', sent_at=datetime(2026, 9, 1, 12, 0)))  # overdue on the fixed dates below
     A.db.session.commit()
     wed_8am = datetime(2026, 10, 14, 12, 0)   # 8:00 New York
     wed_6am = datetime(2026, 10, 14, 10, 0)

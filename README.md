@@ -791,7 +791,7 @@ A real tracking record for devices sent out for repair, separate from just label
 - **Two-week limit:** a repair is due back within 14 days of being sent (Repairs → Overdue to
   change it). Leaving Expected Return blank sets it to the limit; a later date is refused.
 - **Status and notes:** an open repair is Received, Diagnosing, Waiting on parts, Sent to vendor,
-  Being repaired, or Ready to return (one with a vendor RMA number starts as Sent to vendor). The
+  Being repaired, or Ready for pickup (one with a vendor RMA number starts as Sent to vendor). The
   repair page's **Status & Notes** card changes the status and/or adds a note; both show newest
   first as a timeline and are copied to the repair's ticket. Marking it returned adds the outcome
   to the timeline, and notes can still be added after.

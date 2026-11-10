@@ -134,3 +134,26 @@ def test_automation_repair_from_a_ticket_stays_on_it(make):
     status, message = _send_device_to_repair(row.asset_tag, None, None, 'From automation', None, ticket=t)
     A.db.session.commit()
     assert status == 'ok' and A.Repair.query.filter_by(asset_tag=row.asset_tag).one().ticket_id == t.id
+
+
+def test_closing_from_the_status_card_closes_the_ticket(client, make):
+    holder = make.person('Ana', 'Ruiz')
+    row = make.device(holder=holder)
+    repair = send(client, row)
+    page = client.get(f'/admin/repairs/{repair.id}').get_data(as_text=True)
+    assert 'Returned: Fixed' in page and 'Mark Returned' not in page, 'one place to close it'
+
+    client.post(f'/admin/repairs/{repair.id}/update', data={'status': 'diagnosing'})
+    assert A.db.session.get(A.Ticket, repair.ticket_id).status == 'in_progress', 'work started: ticket in progress'
+
+    r = client.post(f'/admin/repairs/{repair.id}/update', data={'status': 'close:fixed', 'note': 'Returned repaired'},
+                    follow_redirects=True)
+    assert b'the repair is closed' in r.data and b'is resolved too' in r.data
+    repair = A.db.session.get(A.Repair, repair.id)
+    assert repair.returned_at and repair.outcome == 'fixed' and repair.notes == 'Returned repaired'
+    assert A.db.session.get(A.Ticket, repair.ticket_id).status == 'resolved'
+    assert A.Asset.query.filter_by(asset_tag=row.asset_tag).one().status == 'assigned'
+    again = client.post(f'/admin/repairs/{repair.id}/update', data={'status': 'close:fixed'}, follow_redirects=True)
+    assert b'already closed' in again.data
+    assert b'Choose how the repair ended' in client.post(
+        f'/admin/repairs/{send(client, make.device()).id}/update', data={'status': 'close:bogus'}, follow_redirects=True).data

@@ -645,7 +645,7 @@ REPAIR_STATUSES = {
     'waiting_parts': 'Waiting on parts',
     'at_vendor': 'Sent to vendor',
     'in_repair': 'Being repaired',
-    'ready': 'Ready to return',
+    'ready': 'Ready for pickup',
 }
 
 

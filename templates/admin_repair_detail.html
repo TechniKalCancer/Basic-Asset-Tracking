@@ -62,9 +62,15 @@
       {% for key, label in repair_statuses.items() %}
       <label class="rp-chip {{ 'on' if repair.status == key }}"><input type="radio" name="status" value="{{ key }}" {{ 'checked' if repair.status == key }}> {{ label }}</label>
       {% endfor %}
+      <span class="rp-close-label">Back to the student, close it:</span>
+      {% for key, label in repair_outcomes.items() %}
+      <label class="rp-chip rp-chip-close"><input type="radio" name="status" value="close:{{ key }}"> Returned: {{ label }}</label>
+      {% endfor %}
     </div>
+    <p class="rp-hint">A "Returned" choice closes this repair{% if repair.ticket and repair.ticket.is_open %} and resolves ticket #{{ repair.ticket_id }}{% endif %}.
+      Fixed puts the device back in service; the other two retire it.</p>
     {% endif %}
-    <label for="rpNote" class="rp-label">Note {% if not repair.returned_at %}(optional with a status change){% endif %}</label>
+    <label for="rpNote" class="rp-label">Note {% if not repair.returned_at %}(optional){% endif %}</label>
     <textarea id="rpNote" name="note" rows="2" maxlength="5000" placeholder="e.g. Ordered a new screen from Dell, RMA 4471-22. Student has loaner LN-12."></textarea>
     <button type="submit" class="btn btn-primary">{{ 'Save' if not repair.returned_at else 'Add Note' }}</button>
   </form>
@@ -161,27 +167,6 @@
   </div>
 </div>
 
-<div class="card" style="margin-bottom:1.5rem;">
-  <h2 style="margin-top:0;">{{ icon('success') }}Mark Returned</h2>
-  <form method="POST" action="/admin/repairs/{{ repair.id }}/return" style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div style="min-width:160px;">
-      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Outcome</label>
-      <select name="outcome" required>
-        <option value="">Choose…</option>
-        {% for key, label in repair_outcomes.items() %}
-        <option value="{{ key }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div style="min-width:220px;flex:1;">
-      <label style="display:block;margin-bottom:.3rem;color:var(--muted);font-size:.85rem;">Notes (optional)</label>
-      <input name="notes" placeholder="e.g. Replaced under warranty" />
-    </div>
-    <button type="submit" class="btn btn-primary">Mark Returned</button>
-  </form>
-  {% if repair.ticket and repair.ticket.is_open %}<p style="font-size:.8rem;color:var(--muted);margin:.5rem 0 0;">Ticket #{{ repair.ticket_id }} is resolved along with it.</p>{% endif %}
-</div>
 {% endif %}
 
 {{ macros.parts_panel(repair=repair, asset_tag=repair.asset_tag) }}
@@ -300,6 +285,10 @@
   .rp-chip input { width: auto; margin: 0; }
   .rp-chip.on, .rp-chip:has(input:checked) { border-color: var(--accent); color: var(--text); background: var(--surface2); }
   .rp-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .rp-close-label { flex-basis: 100%; font-size: .78rem; color: var(--muted); margin-top: .35rem; }
+  .rp-chip-close { border-style: dashed; }
+  .rp-chip-close:has(input:checked) { border-color: var(--success); border-style: solid; color: var(--success); }
+  .rp-hint { margin: 0; font-size: .78rem; color: var(--muted); }
   .rp-timeline { list-style: none; margin: 1.1rem 0 0; padding: 0 0 0 1rem; border-left: 2px solid var(--border); display: grid; gap: .9rem; }
   .rp-timeline li { position: relative; }
   .rp-timeline li::before { content: ''; position: absolute; left: -1.38rem; top: .3rem; width: .6rem; height: .6rem;

@@ -137,12 +137,17 @@ def admin_repair_link_ticket(repair_id):
 @require_permission('repairs')
 def admin_repair_update(repair_id):
     """Moves an open repair to a new status and/or adds a note. Both land on
-    the repair's timeline, and on its ticket so the help-desk history matches."""
+    the repair's timeline, and on its ticket so the help-desk history matches.
+    A status of close:<outcome> closes the repair right here (and its ticket),
+    the same as Mark Returned; work starting on it moves its ticket to In
+    progress."""
     site_ids = _current_site_ids()
     repair = _scope_repairs(Repair.query, site_ids).filter(Repair.id == repair_id).first_or_404()
     fallback_url = url_for('admin_repair_detail', repair_id=repair.id)
     status = request.form.get('status', '').strip() or repair.status
     body = request.form.get('note', '').strip()[:5000] or None
+    if status.startswith('close:'):
+        return _close_from_status(repair, status.split(':', 1)[1], body, fallback_url)
     if status not in REPAIR_STATUSES:
         flash('Choose a valid status.', 'error')
         return redirect(request.referrer or fallback_url)
@@ -164,17 +169,54 @@ def admin_repair_update(repair_id):
             repair.status, repair.status_changed_at = status, now
         if body:
             summary.append(body)
+        ticket_started = None
         if repair.ticket_id:
             db.session.add(TicketComment(ticket_id=repair.ticket_id, body=' '.join(summary), author_label=actor_label))
             repair.ticket.updated_at = now
+            if changed and status != 'received' and repair.ticket.status == 'open':
+                ticket_started = repair.ticket.status
+                repair.ticket.status = 'in_progress'
         registry_row = AssetRegistry.query.filter_by(asset_tag=repair.asset_tag).first()
         _log_activity('repair_edit', f'{repair.asset_tag}: ' + ' '.join(summary)[:200],
                       site_id=registry_row.site_id if registry_row else None, ticket_id=repair.ticket_id)
         db.session.commit()
+        if ticket_started:
+            emit('ticket.status_changed', repair.ticket, old_status=ticket_started)
         flash(f'Status is now {REPAIR_STATUSES[status]}.' if changed else 'Note added.', 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Could not update repair: {e}', 'error')
+    return redirect(request.referrer or fallback_url)
+
+
+def _close_from_status(repair, outcome, note, fallback_url):
+    """The Status & Notes card's "Returned: ..." choices: close the repair
+    and resolve its ticket in one step."""
+    if repair.returned_at:
+        flash('This repair is already closed.', 'info')
+        return redirect(request.referrer or fallback_url)
+    if outcome not in REPAIR_OUTCOMES:
+        flash('Choose how the repair ended.', 'error')
+        return redirect(request.referrer or fallback_url)
+    _, actor_label, _ = _current_actor()
+    try:
+        resolved_from, open_loaner = close_repair(repair, outcome, note, actor_label)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not close the repair: {e}', 'error')
+        return redirect(request.referrer or fallback_url)
+    emit('repair.returned', repair)
+    msg = f'{repair.asset_tag} is back ({REPAIR_OUTCOMES[outcome]}); the repair is closed.'
+    if resolved_from:
+        _notify_ticket_requester(repair.ticket, 'ticket_resolved')
+        emit('ticket.status_changed', repair.ticket, old_status=resolved_from)
+        msg += f' Ticket #{repair.ticket_id} is resolved too.'
+    elif repair.ticket_id:
+        msg += f' Ticket #{repair.ticket_id} was already {repair.ticket.status.replace("_", " ")}.'
+    if open_loaner:
+        msg += f' Loaner {open_loaner.asset_tag} is still out with {open_loaner.person_name}; check it in once it\'s back.'
+    flash(msg, 'success')
     return redirect(request.referrer or fallback_url)
 
 
